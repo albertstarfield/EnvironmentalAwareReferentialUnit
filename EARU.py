@@ -693,6 +693,7 @@ class LocationTracker:
         self.fan_rpms = [0.0, 0.0]
         self.heatflux_j = 0.0
         self.massflow_kg_s = 0.0
+        self.thrust_n = 0.0
 
         # IMU state for dead reckoning
         self.vel = [0.0, 0.0, 0.0]  # m/s
@@ -801,6 +802,16 @@ class LocationTracker:
 
         # Mass Flow Rate (kg/s)
         self.massflow_kg_s = density * v_dot
+
+        # Thrust (N) = m_dot * V_exhaust
+        # v_exhaust = V_dot / Area_exhaust
+        # Approx exhaust area for MBP14: 0.001 m^2
+        a_exhaust = 0.001
+        if v_dot > 0:
+            v_exhaust = v_dot / a_exhaust
+            self.thrust_n = self.massflow_kg_s * v_exhaust
+        else:
+            self.thrust_n = 0.0
 
         # --- Dynamic Gas Constant Calculation (T & Humidity) ---
         # T_c = Kelvin - 273.15
@@ -1225,12 +1236,6 @@ def render(det, t_start, restarts,
     gx_v, gy_v, gz_v = det.gyro_latest
     a(_line(f' {DIM}ω: {gx_v:>+6.2f}  {gy_v:>+6.2f}  {gz_v:>+6.2f} °/s{RST}'))
 
-    a(_sep(' Lid Angle '))
-    if lid_angle is not None:
-        a(_line(_lid_text(lid_angle)))
-    else:
-        a(_line(f'  {DIM}no lid data{RST}'))
-
     a(_sep(' Ambient Light '))
     for al in _als_bar(als_raw, W - 13):
         a(_line(al))
@@ -1292,10 +1297,12 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Airflow R:{RST} {tart:>4.1f} / {tarw:>4.1f}°C (T/W) {DIM}Out:{RST} {location.airflow_outlet_k:>6.1f}K"))
         a(_line(f" {DIM}FanProx K (Heat Transfer):{RST} L {location.talp_k:>6.1f}K / R {location.tarf_k:>6.1f}K"))
         a(_line(f" {DIM}Fans (RPM):{RST} F0 {location.fan_rpms[0]:>6.1f} / F1 {location.fan_rpms[1]:>6.1f}"))
+        a(_line(f" {DIM}Lid Angle:{RST} {_lid_text(lid_angle) if lid_angle is not None else 'N/A'}"))
         a(_line(f" {DIM}PalmRest:{RST} L {ts0p:>4.1f}°C / R {ts1p:>4.1f}°C  "
                 f"{DIM}Power:{RST} {BYEL}{pstr:>5.1f}W{RST}"))
-        a(_line(f" {DIM}Mass Flow Rate:{RST} {BCYN}{location.massflow_kg_s * 1000.0:>6.3f} g/s{RST}  "
+        a(_line(f" {DIM}Mass Flow (approx):{RST} {BCYN}{location.massflow_kg_s * 1000.0:>6.3f} g/s{RST}  "
                 f"{DIM}Heatflux:{RST} {BCYN}{location.heatflux_j:>6.2f} J/s{RST}"))
+        a(_line(f" {DIM}Thrust (Fan-Force):{RST} {BRED}{location.thrust_n:>8.6f} N{RST}"))
     else:
         a(_line(f"  {DIM}system metrics and location disabled{RST}"))
 
@@ -1680,6 +1687,7 @@ def main():
                         'fan_rpms': location.fan_rpms,
                         'heatflux_j': location.heatflux_j,
                         'massflow_kg_s': location.massflow_kg_s,
+                        'thrust_n': location.thrust_n,
                         'humidity_pct': location.humidity_pct,
                         'gas_constants': {
                             'Cp': location.gas_Cp,
