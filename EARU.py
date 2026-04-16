@@ -157,10 +157,10 @@ class VibrationDetector:
         self.motion_certainty = 0.0
         self.spectral_balance = 0.0 # <0 low freq, >0 high freq
 
-        # Electronic Physical Shock Detection metrics
-        self.prob_solder_joint_fail = 0.0
-        self.prob_electromech_transience = 0.0
-        self.prob_combined_electronic_shock = 0.0
+        # Electronic Damage Fatigue metrics
+        self.prob_solder_fatigue = 0.0
+        self.prob_electromech_fatigue = 0.0
+        self.prob_total_damage_fatigue = 0.0
 
         self._last_evt_t = 0.0
 
@@ -183,20 +183,46 @@ class VibrationDetector:
         m_type = "Stationary"
         cert = 0.0
 
-        # --- Electronic Physical Shock Detection Logic ---
-        # Solder joint failure: High G-shock (>3.5g) + High-frequency energy
-        # Electromechanical Transience: High crest factor (>20) + kurtosis (>15)
+        # --- Electronic Damage Fatigue Logic ---
+        # 1. Physical Shock Component
+        solder_p = min(0.7, (peak / 6.0) + (high_freq_pwr * 5.0))
+        electromech_p = min(0.7, (self.crest / 40.0) + (self.kurtosis / 50.0))
         
-        solder_p = min(1.0, (peak / 6.0) + (high_freq_pwr * 5.0))
-        electromech_p = min(1.0, (self.crest / 40.0) + (self.kurtosis / 50.0))
+        # 2. Environmental Multipliers (The "Mix")
+        thermal_stress = 1.0
+        humidity_stress = 1.0
+        pressure_stress = 1.0
         
+        if location:
+            # Thermal: Solder joint fatigue increases at high temperatures (TCMz > 80C)
+            tcmz = location.smc_temps.get("TCMz", 50.0)
+            if tcmz > 80.0:
+                thermal_stress = 1.0 + (tcmz - 80.0) / 40.0 # Scales up to 1.5x at 100C
+            
+            # Humidity: Risk of electromech transience (shorts/corrosion) at high RH
+            rh = location.humidity_pct
+            if rh > 70.0:
+                humidity_stress = 1.0 + (rh - 70.0) / 60.0 # Scales up to 1.5x at 100% RH
+            
+            # Pressure Tendency: Rapid atmospheric shift contributes to fatigue
+            if len(location.pressure_history) > 60:
+                tendency = abs(location.pressure_history[-1] - location.pressure_history[0])
+                if tendency > 1.0:
+                    pressure_stress = 1.0 + min(0.3, tendency / 10.0)
+
+            # Combined Environmental Fatigue (Atmospheric Aging)
+            env_fatigue = (thermal_stress * humidity_stress * pressure_stress) - 1.0
+            
+            solder_p = min(1.0, solder_p * thermal_stress + env_fatigue * 0.1)
+            electromech_p = min(1.0, electromech_p * humidity_stress + env_fatigue * 0.1)
+
         if peak < 0.2: 
             solder_p *= 0.1
             electromech_p *= 0.1
 
-        self.prob_solder_joint_fail = solder_p
-        self.prob_electromech_transience = electromech_p
-        self.prob_combined_electronic_shock = max(solder_p, electromech_p)
+        self.prob_solder_fatigue = solder_p
+        self.prob_electromech_fatigue = electromech_p
+        self.prob_total_damage_fatigue = max(solder_p, electromech_p)
         
         # 0. Intentional Hardware Torture: Extreme RMS + Kurtosis (erratic/violent shaking)
         if rms > 0.15 and self.kurtosis > 12:
@@ -1554,24 +1580,24 @@ def render(det, t_start, restarts,
     for _ in range(max(0, 3 - len(recent))):
         a(_line(''))
 
-    a(_sep(' Electronic Physical Shock Detection '))
-    prob_solder = det.prob_solder_joint_fail
-    prob_electro = det.prob_electromech_transience
-    prob_total = det.prob_combined_electronic_shock
+    a(_sep(' Electronic Damage Fatigue '))
+    prob_solder = det.prob_solder_fatigue
+    prob_electro = det.prob_electromech_fatigue
+    prob_total = det.prob_total_damage_fatigue
     
     col_solder = BRED if prob_solder > 0.5 else (BYEL if prob_solder > 0.2 else BGRN)
     col_electro = BRED if prob_electro > 0.5 else (BYEL if prob_electro > 0.2 else BGRN)
-    col_total = BRED if prob_total > 0.5 else (BYEL if prob_total > 0.2 else BGRN)
+    col_total = BRED if prob_total > 0.5 else (BYEL if prob_total > 0.3 else BGRN)
 
-    a(_line(f" {DIM}Solder Joint Prob:{RST} {col_solder}{int(prob_solder*100):>3}%{RST}  "
-            f"{DIM}Electromech Transience:{RST} {col_electro}{int(prob_electro*100):>3}%{RST}"))
+    a(_line(f" {DIM}Solder Fatigue Prob:{RST} {col_solder}{int(prob_solder*100):>3}%{RST}  "
+            f"{DIM}Electromech Fatigue:{RST} {col_electro}{int(prob_electro*100):>3}%{RST}"))
     
     status = "CRITICAL" if prob_total > 0.7 else ("WARNING" if prob_total > 0.3 else "STABLE")
-    a(_line(f" {DIM}Status:{RST} {col_total}{status:<10}{RST}  "
-            f"{DIM}Combined Probability:{RST} {col_total}{int(prob_total*100):>3}%{RST}"))
+    a(_line(f" {DIM}Fatigue Status:{RST} {col_total}{status:<10}{RST}  "
+            f"{DIM}Aggregated Risk:{RST} {col_total}{int(prob_total*100):>3}%{RST}"))
     
     gw = W - 18
-    a(_line(f" {DIM}Shock{RST} {col_total}{_gauge(prob_total, 0, 1, gw)}{RST}"))
+    a(_line(f" {DIM}Risk {RST} {col_total}{_gauge(prob_total, 0, 1, gw)}{RST}"))
 
     a(_sep(' Seismic Activity / Motion Group '))
     m_type = det.motion_type
@@ -1959,10 +1985,10 @@ def main():
                         'certainty': det.motion_certainty,
                         'spectral_balance': det.spectral_balance,
                         'peak_g': det.peak,
-                        'electronic_shock': {
-                            'solder_joint_fail_prob': det.prob_solder_joint_fail,
-                            'electromech_transience_prob': det.prob_electromech_transience,
-                            'combined_prob': det.prob_combined_electronic_shock
+                        'damage_fatigue': {
+                            'solder_fatigue_prob': det.prob_solder_fatigue,
+                            'electromech_fatigue_prob': det.prob_electromech_fatigue,
+                            'aggregated_risk': det.prob_total_damage_fatigue
                         }
                     },
                     'system': {
