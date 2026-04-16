@@ -692,6 +692,7 @@ class LocationTracker:
         self.tarf_k = 293.15
         self.fan_rpms = [0.0, 0.0]
         self.heatflux_j = 0.0
+        self.massflow_kg_s = 0.0
 
         # IMU state for dead reckoning
         self.vel = [0.0, 0.0, 0.0]  # m/s
@@ -797,6 +798,9 @@ class LocationTracker:
         # Heatflux (Watts = Joules/second) using dynamic Cp
         self.heatflux_j = density * v_dot * self.gas_Cp * delta_t
         if self.heatflux_j < 0: self.heatflux_j = 0.0
+
+        # Mass Flow Rate (kg/s)
+        self.massflow_kg_s = density * v_dot
 
         # --- Dynamic Gas Constant Calculation (T & Humidity) ---
         # T_c = Kelvin - 273.15
@@ -1290,7 +1294,8 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Fans (RPM):{RST} F0 {location.fan_rpms[0]:>6.1f} / F1 {location.fan_rpms[1]:>6.1f}"))
         a(_line(f" {DIM}PalmRest:{RST} L {ts0p:>4.1f}°C / R {ts1p:>4.1f}°C  "
                 f"{DIM}Power:{RST} {BYEL}{pstr:>5.1f}W{RST}"))
-        a(_line(f" {DIM}Heatflux Joule Displacement:{RST} {BCYN}{location.heatflux_j:>6.2f} J/s (Watts){RST}"))
+        a(_line(f" {DIM}Mass Flow Rate:{RST} {BCYN}{location.massflow_kg_s * 1000.0:>6.3f} g/s{RST}  "
+                f"{DIM}Heatflux:{RST} {BCYN}{location.heatflux_j:>6.2f} J/s{RST}"))
     else:
         a(_line(f"  {DIM}system metrics and location disabled{RST}"))
 
@@ -1674,6 +1679,7 @@ def main():
                         'tarf_k': location.tarf_k,
                         'fan_rpms': location.fan_rpms,
                         'heatflux_j': location.heatflux_j,
+                        'massflow_kg_s': location.massflow_kg_s,
                         'humidity_pct': location.humidity_pct,
                         'gas_constants': {
                             'Cp': location.gas_Cp,

@@ -18,7 +18,8 @@ This document outlines the mathematical models and physical constants assumed wi
 *   **Ambient Temperature Proxy:** Derived as $\min(TS0P, TS1P)$ (Palm Rest sensors).
 *   **Inlet Temperature Proxy:** Derived as $\min(TaLW, TaRW)$ (Wrist Airflow sensors).
 *   **Outlet Temperature Proxy:** Derived as $\max(TaLT, TaRT)$ (Top Airflow sensors).
-*   **Heatflux Calculation:** $\dot{Q} = \rho \cdot \dot{V} \cdot C_p \cdot (T_{outlet} - T_{inlet})$.
+*   **Mass Flow Rate ($\dot{m}$):** $\dot{m} = \rho \cdot \dot{V}$ (calculated in kg/s, displayed in g/s).
+*   **Heatflux Calculation:** $\dot{Q} = \dot{m} \cdot C_p \cdot (T_{outlet} - T_{inlet})$.
 
 ## 3. Inertial Navigation & Motion
 *   **Sampling Frequency ($f_s$):** $100 \text{ Hz}$.
