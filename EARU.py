@@ -505,6 +505,14 @@ def _lid_text(angle):
     return f'  {BWHT}{angle:.0f}°{RST}'
 
 
+def _degrees_to_compass(d):
+    """Convert degrees (0-360) to cardinal/intercardinal string."""
+    dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    ix = int((d + 11.25) / 22.5)
+    return dirs[ix % 16]
+
+
 _ALS_SPEC_OFFSETS = [20, 24, 28, 32]
 _ALS_LUX_OFF = 40
 _ALS_BLOCKS = ' ▁▂▃▄▅▆▇█'
@@ -1297,7 +1305,9 @@ def render(det, t_start, restarts,
                 f"{DIM}Temp (C):{RST} {BWHT}{location.ambient_temp_k - 273.15:>6.2f}°C{RST}"))
         a(_line(f" {DIM}Humidity:{RST} {BWHT}{location.humidity_pct:>5.1f}%{RST}  "
                 f"{DIM}Cp:{RST} {location.gas_Cp:>7.2f} {DIM}R:{RST} {location.gas_R:>7.2f} {DIM}γ:{RST} {location.gas_gamma:>6.4f}"))
-        a(_line(f" {DIM}Heading:{RST} {BYEL}{location.heading:>6.1f}°{RST}        "
+        
+        cmp_dir = _degrees_to_compass(location.heading)
+        a(_line(f" {DIM}Heading:{RST} {BYEL}{location.heading:>6.1f}°{RST} {BWHT}{cmp_dir:<4}{RST}  "
                 f"{DIM}Velocity:{RST} {BWHT}{location.v_mag:>6.2f}m/s{RST}  "
                 f"{DIM}Mach:{RST} {BWHT}{location.mach:.3f}{RST}"))
         a(_line(f" {DIM}ΔX:{location.pos[0]:>7.2f}m ΔY:{location.pos[1]:>7.2f}m ΔZ:{location.pos[2]:>7.2f}m{RST}"))
@@ -1730,6 +1740,7 @@ def main():
                         'alt_rate': location.altitude_rate_per_second,
                         'pressure_hpa': avg_pressure,
                         'heading': location.heading,
+                        'compass_dir': _degrees_to_compass(location.heading),
                         'v_mag': location.v_mag,
                         'mach': location.mach,
                         'calibrated_g': location.calibrated_g,
