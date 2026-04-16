@@ -1209,11 +1209,12 @@ def render(det, t_start, restarts,
                 f"{DIM}ISA Pres: {RST} {BCYN}{p_str}{RST}"))
         a(_line(f" {DIM}SMC Fan Pres:{RST} {GRN}{smc_p_str}{RST}    "
                 f"{DIM}API Pres: {RST} {BYEL}{api_p_str}{RST}"))
+        a(_line(f" {DIM}Ambient Ecosystem Temp (K):{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}  "
+                f"{DIM}Temp (C):{RST} {BWHT}{location.ambient_temp_k - 273.15:>6.2f}°C{RST}"))
         a(_line(f" {DIM}Heading:{RST} {BYEL}{location.heading:>6.1f}°{RST}        "
                 f"{DIM}Velocity:{RST} {BWHT}{location.v_mag:>6.2f}m/s{RST}  "
                 f"{DIM}Mach:{RST} {BWHT}{location.mach:.3f}{RST}"))
-        a(_line(f" {DIM}Ambient Ecosystem:{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}  "
-                f"{DIM}ΔX:{location.pos[0]:>7.2f}m ΔY:{location.pos[1]:>7.2f}m ΔZ:{location.pos[2]:>7.2f}m{RST}"))
+        a(_line(f" {DIM}ΔX:{location.pos[0]:>7.2f}m ΔY:{location.pos[1]:>7.2f}m ΔZ:{location.pos[2]:>7.2f}m{RST}"))
         cl_stat = f"{GRN}Available{RST}" if location.cl_available else f"{RED}Missing{RST}"
         a(_line(f" {DIM}CoreLocationCLI: {cl_stat}  Last Check: {now - location.last_cl_check:.1f}s ago{RST}"))
         g_status = f"{location.calibrated_g:.6f}g"
