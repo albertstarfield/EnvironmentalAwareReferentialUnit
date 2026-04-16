@@ -671,9 +671,9 @@ class LoopConsistencyTracker:
         under_target = sum(1 for t in self.loop_times if t <= self.target_ms)
         pct_90 = (under_target / n) * 100.0
         
-        # 0.1% lows (Worst Case) - 99.9th percentile
-        idx_01 = max(0, int(n * 0.999) - 1)
-        low_01 = sorted_times[idx_01]
+        # 0.1% lows (Worst Case) - Average of the slowest 0.1%
+        idx_01_count = max(1, int(n * 0.001))
+        low_01 = sum(sorted_times[-idx_01_count:]) / idx_01_count
         
         avg = sum(self.loop_times) / n
         
