@@ -673,6 +673,7 @@ class LocationTracker:
         # SMC data from .dat files
         self.smc_temps = {}
         self.smc_turbo = 0
+        self.ambient_temp_k = 293.15 # Default 20C in Kelvin
 
         # IMU state for dead reckoning
         self.vel = [0.0, 0.0, 0.0]  # m/s
@@ -710,6 +711,16 @@ class LocationTracker:
                 except Exception:
                     pass
         
+        # Calculate Ambient temperature Kelvin = min(Ts0p, Ts1p) + 273.15
+        ts0p = self.smc_temps.get("Ts0p")
+        ts1p = self.smc_temps.get("Ts1p")
+        if ts0p is not None and ts1p is not None:
+            self.ambient_temp_k = min(ts0p, ts1p) + 273.15
+        elif ts0p is not None:
+            self.ambient_temp_k = ts0p + 273.15
+        elif ts1p is not None:
+            self.ambient_temp_k = ts1p + 273.15
+
         turbo_p = os.path.join(base_path, "sensor_TURBO_MODE.dat")
         if os.path.exists(turbo_p):
             try:
@@ -1173,7 +1184,8 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Airflow L:{RST} {talt:>4.1f} / {talw:>4.1f}°C (T/W) {DIM}Prox:{RST} {talp:>4.1f}°C"))
         a(_line(f" {DIM}Airflow R:{RST} {tart:>4.1f} / {tarw:>4.1f}°C (T/W) {DIM}Prox:{RST} {tarf:>4.1f}°C"))
         a(_line(f" {DIM}PalmRest:{RST} L {ts0p:>4.1f}°C / R {ts1p:>4.1f}°C  "
-                f"{DIM}Power:{RST} {BYEL}{pstr:>5.1f}W{RST}"))
+                f"{DIM}Amb:{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}"))
+        a(_line(f" {DIM}Power Consumption (Heatflux):{RST} {BYEL}{pstr:>5.1f}W (J/s){RST}"))
     else:
         a(_line(f"  {DIM}system metrics and location disabled{RST}"))
 
@@ -1550,6 +1562,7 @@ def main():
                     'smc': {
                         'temps': location.smc_temps,
                         'turbo': location.smc_turbo,
+                        'ambient_temp_k': location.ambient_temp_k,
                         'power': location.smc_temps.get("PSTR", 0.0)
                     },
                     'lid_angle': lid_angle,
