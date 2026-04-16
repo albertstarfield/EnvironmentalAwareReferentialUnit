@@ -1198,7 +1198,7 @@ def render(det, t_start, restarts,
     for al in _als_bar(als_raw, W - 13):
         a(_line(al))
 
-    a(_sep(' EarthRelativeLocationCoord (ISO 80000-2) '))
+    a(_sep(' EcosystemEnvironmentReading (ISO 80000-2) '))
     if location is not None:
         a(_line(f" {DIM}Polar (Lat):{RST} {BWHT}{location.lat:>11.7f}°{RST}  "
                 f"{DIM}Azimuth (Lon):{RST} {BWHT}{location.lon:>11.7f}°{RST}"))
