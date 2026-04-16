@@ -645,6 +645,41 @@ def _downsample(data, width):
     return out
 
 
+class LoopConsistencyTracker:
+    def __init__(self, target_ms=10.0, window_size=1000):
+        self.target_ms = target_ms
+        self.window_size = window_size
+        self.loop_times = deque(maxlen=window_size)
+        self.stutter_count = 0
+        self.total_loops = 0
+        self.last_t = None
+        
+    def record_loop(self, duration_ms):
+        self.total_loops += 1
+        self.loop_times.append(duration_ms)
+        if duration_ms > self.target_ms * 2.0:
+            self.stutter_count += 1
+            
+    def get_stats(self):
+        if not self.loop_times:
+            return 0.0, 0.0, 0.0, 0
+        
+        sorted_times = sorted(self.loop_times)
+        n = len(sorted_times)
+        
+        # 90% requirement: percentage of loops under target
+        under_target = sum(1 for t in self.loop_times if t <= self.target_ms)
+        pct_90 = (under_target / n) * 100.0
+        
+        # 0.1% lows (Worst Case) - 99.9th percentile
+        idx_01 = max(0, int(n * 0.999) - 1)
+        low_01 = sorted_times[idx_01]
+        
+        avg = sum(self.loop_times) / n
+        
+        return pct_90, low_01, avg, self.stutter_count
+
+
 class LocationTracker:
     """
     Handles Dead Reckoning, CoreLocation integration, and Ecosystem Environment physics.
@@ -1093,7 +1128,7 @@ class LocationTracker:
 
 
 def render(det, t_start, restarts,
-           lid_angle=None, als_raw=None, location=None):
+           lid_angle=None, als_raw=None, location=None, loop_stats=None):
     el = time.time() - t_start
     rate = det.sample_count / el if el > 1 else 0
     now = time.time()
@@ -1109,6 +1144,17 @@ def render(det, t_start, restarts,
            f"{BWHT}{rate:>.0f}{RST} Hz  "
            f"R:{restarts}  Ev:{len(det.events)}")
     a(_line(hdr))
+
+    if loop_stats:
+        pct_90, low_01, avg, stutters = loop_stats
+        col_90 = BGRN if pct_90 >= 90 else (BYEL if pct_90 >= 80 else BRED)
+        col_01 = BGRN if low_01 <= 15 else (BYEL if low_01 <= 20 else BRED)
+        st_col = BRED if stutters > 0 else DIM
+        a(_sep(' Loop Consistency | Budget: 10ms '))
+        a(_line(f" {DIM}90% Req:{RST} {col_90}{pct_90:>5.1f}%{RST}  "
+                f"{DIM}0.1% Low (Worst):{RST} {col_01}{low_01:>5.1f}ms{RST}  "
+                f"{DIM}Avg:{RST} {avg:>4.1f}ms  "
+                f"{DIM}Stutters:{RST} {st_col}{stutters}{RST}"))
 
     GW = W - 4
 
@@ -1548,6 +1594,7 @@ def main():
 
     location = LocationTracker(start_lat=initial_lat, start_lon=initial_lon, start_alt=initial_alt)
     location.heading = initial_heading
+    loop_tracker = LoopConsistencyTracker(target_ms=10.0)
     t_start = time.time()
     last_total = 0
     last_gyro_total = 0
@@ -1563,6 +1610,7 @@ def main():
 
     try:
         while running[0]:
+            loop_start = time.time()
             if os.path.exists("kys"):
                 os.remove("kys")
                 running[0] = False
@@ -1635,6 +1683,10 @@ def main():
                 location.check_system_metrics()
                 last_period = now
 
+            # Loop tracking record
+            loop_duration = (time.time() - loop_start) * 1000.0
+            loop_tracker.record_loop(loop_duration)
+
             if now - last_draw >= 0.1:
                 # Prepare complete data for potential task
                 qw, qx, qy, qz = det._q
@@ -1651,6 +1703,8 @@ def main():
                 # Calculate averaged pressure excluding None values
                 pressures = [p for p in [location.pressure_hpa, location.smc_pressure_hpa, location.api_pressure_hpa] if p is not None]
                 avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
+
+                l_pct_90, l_low_01, l_avg, l_stutters = loop_tracker.get_stats()
 
                 data = {
                     'time': now,
@@ -1675,6 +1729,12 @@ def main():
                         'load_avg': location.load_avg,
                         'uptime_system': location.uptime_system,
                         'uptime_earu': location.uptime_earu
+                    },
+                    'loop_consistency': {
+                        'pct_90_ms': l_pct_90,
+                        'low_01_ms': l_low_01,
+                        'avg_ms': l_avg,
+                        'stutters': l_stutters
                     },
                     'smc': {
                         'temps': location.smc_temps,
@@ -1721,7 +1781,8 @@ def main():
                 if use_tui:
                     frame = render(det, t_start, restart_count[0],
                                   lid_angle=lid_angle,
-                                  als_raw=als_raw, location=location)
+                                  als_raw=als_raw, location=location,
+                                  loop_stats=(l_pct_90, l_low_01, l_avg, l_stutters))
                     sys.stdout.write(CLEAR + frame)
                 else:
                     # Simple text output
@@ -1734,7 +1795,8 @@ def main():
                            f"Lat:{location.lat:10.6f} Lon:{location.lon:10.6f} Alt:{location.alt:6.1f}m ({location.altitude_rate_per_second:+5.2f}m/s) {p_str} {api_p_str} "
                            f"M:{location.mach:.3f} "
                            f"Mag:{det.latest_mag:7.5f}g "
-                           f"Ev:{len(det.events)}  ")
+                           f"Ev:{len(det.events)} "
+                           f"Loop90%:{l_pct_90:.1f}% 0.1%Low:{l_low_01:.1f}ms ")
                     sys.stdout.write(msg)
                 sys.stdout.flush()
                 last_draw = now
