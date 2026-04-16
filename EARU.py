@@ -662,7 +662,7 @@ class LoopConsistencyTracker:
             
     def get_stats(self):
         if not self.loop_times:
-            return 0.0, 0.0, 0.0, 0
+            return 0.0, 0.0, 0.0, 0.0, 0
         
         sorted_times = sorted(self.loop_times)
         n = len(sorted_times)
@@ -671,13 +671,17 @@ class LoopConsistencyTracker:
         under_target = sum(1 for t in self.loop_times if t <= self.target_ms)
         pct_90 = (under_target / n) * 100.0
         
+        # 1% lows - Average of the slowest 1%
+        idx_01_count = max(1, int(n * 0.01))
+        low_1 = sum(sorted_times[-idx_01_count:]) / idx_01_count
+
         # 0.1% lows (Worst Case) - Average of the slowest 0.1%
-        idx_01_count = max(1, int(n * 0.001))
-        low_01 = sum(sorted_times[-idx_01_count:]) / idx_01_count
+        idx_001_count = max(1, int(n * 0.001))
+        low_01 = sum(sorted_times[-idx_001_count:]) / idx_001_count
         
         avg = sum(self.loop_times) / n
         
-        return pct_90, low_01, avg, self.stutter_count
+        return pct_90, low_1, low_01, avg, self.stutter_count
 
 
 class LocationTracker:
@@ -1145,17 +1149,6 @@ def render(det, t_start, restarts,
            f"R:{restarts}  Ev:{len(det.events)}")
     a(_line(hdr))
 
-    if loop_stats:
-        pct_90, low_01, avg, stutters = loop_stats
-        col_90 = BGRN if pct_90 >= 90 else (BYEL if pct_90 >= 80 else BRED)
-        col_01 = BGRN if low_01 <= 15 else (BYEL if low_01 <= 20 else BRED)
-        st_col = BRED if stutters > 0 else DIM
-        a(_sep(' Loop Consistency | Budget: 10ms '))
-        a(_line(f" {DIM}90% Req:{RST} {col_90}{pct_90:>5.1f}%{RST}  "
-                f"{DIM}0.1% Low (Worst):{RST} {col_01}{low_01:>5.1f}ms{RST}  "
-                f"{DIM}Avg:{RST} {avg:>4.1f}ms  "
-                f"{DIM}Stutters:{RST} {st_col}{stutters}{RST}"))
-
     GW = W - 4
 
     a(_sep(' Waveform |a_dyn| 5s '))
@@ -1295,10 +1288,10 @@ def render(det, t_start, restarts,
         avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
         
         a(_line(f" {DIM}Radial (Alt):{RST} {BWHT}{location.alt:>8.2f}m{RST} ({location.altitude_rate_per_second:>+5.2f}m/s)  "
-                f"{DIM}EnvironmentPres:{RST} {BCYN}{avg_pressure:>8.2f} hPa{RST}"))
+                f"{DIM}Local Pressure:{RST} {BCYN}{avg_pressure:>8.2f} hPa{RST}"))
         
         api_p_val = f"{location.api_pressure_hpa:>8.2f} hPa" if location.api_pressure_hpa is not None else "N/A (alt)"
-        a(_line(f" {DIM}Calibrated API Pressure:{RST} {BYEL}{api_p_val}{RST}"))
+        a(_line(f" {DIM}Public General Avg Pressure:{RST} {BYEL}{api_p_val}{RST}"))
         
         a(_line(f" {DIM}Ambient Ecosystem Temp (K):{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}  "
                 f"{DIM}Temp (C):{RST} {BWHT}{location.ambient_temp_k - 273.15:>6.2f}°C{RST}"))
@@ -1326,6 +1319,20 @@ def render(det, t_start, restarts,
         up_e = int(location.uptime_earu)
         a(_line(f" {DIM}System Uptime:{RST} {up_s//3600}h {(up_s%3600)//60}m {up_s%60}s  "
                 f"{DIM}EARU Uptime:{RST} {up_e//3600}h {(up_e%3600)//60}m {up_e%60}s"))
+
+        if loop_stats:
+            l_pct_90, l_low_1, l_low_01, l_avg, l_stutters = loop_stats
+            col_90 = BGRN if l_pct_90 >= 90 else (BYEL if l_pct_90 >= 80 else BRED)
+            col_1 = BGRN if l_low_1 <= 15 else (BYEL if l_low_1 <= 20 else BRED)
+            col_01 = BGRN if l_low_01 <= 20 else (BYEL if l_low_01 <= 30 else BRED)
+            st_col = BRED if l_stutters > 0 else DIM
+            st_warn = f"{BRED}YES{RST}" if l_stutters > 0 else f"{DIM}No{RST}"
+            a(_line(f" {DIM}EARU Loop 90%:{RST} {col_90}{l_pct_90:>5.1f}%{RST}  "
+                    f"{DIM}1% Low:{RST} {col_1}{l_low_1:>5.1f}ms{RST}  "
+                    f"{DIM}0.1% Low:{RST} {col_01}{l_low_01:>5.1f}ms{RST}"))
+            a(_line(f" {DIM}Stutter Warning:{RST} {st_warn}  "
+                    f"{DIM}Total Stutters:{RST} {st_col}{l_stutters}{RST}  "
+                    f"{DIM}Avg Loop:{RST} {l_avg:>4.1f}ms"))
         
         turbo_stat = f"{BRED}ACTIVE{RST}" if location.smc_turbo else f"{DIM}inactive{RST}"
         tcmz = location.smc_temps.get("TCMz", 0.0)
@@ -1709,7 +1716,7 @@ def main():
                 pressures = [p for p in [location.pressure_hpa, location.smc_pressure_hpa, location.api_pressure_hpa] if p is not None]
                 avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
 
-                l_pct_90, l_low_01, l_avg, l_stutters = loop_tracker.get_stats()
+                l_pct_90, l_low_1, l_low_01, l_avg, l_stutters = loop_tracker.get_stats()
 
                 data = {
                     'time': now,
@@ -1737,9 +1744,11 @@ def main():
                     },
                     'loop_consistency': {
                         'pct_90_ms': l_pct_90,
+                        'low_1_ms': l_low_1,
                         'low_01_ms': l_low_01,
                         'avg_ms': l_avg,
-                        'stutters': l_stutters
+                        'stutters': l_stutters,
+                        'stutter_warning': l_stutters > 0
                     },
                     'smc': {
                         'temps': location.smc_temps,
@@ -1787,7 +1796,7 @@ def main():
                     frame = render(det, t_start, restart_count[0],
                                   lid_angle=lid_angle,
                                   als_raw=als_raw, location=location,
-                                  loop_stats=(l_pct_90, l_low_01, l_avg, l_stutters))
+                                  loop_stats=(l_pct_90, l_low_1, l_low_01, l_avg, l_stutters))
                     sys.stdout.write(CLEAR + frame)
                 else:
                     # Simple text output
@@ -1796,12 +1805,13 @@ def main():
                     rate = det.sample_count / el if el > 1 else 0
                     p_str = f"{location.pressure_hpa:.1f}hPa" if location.pressure_hpa is not None else "N/A"
                     api_p_str = f"API:{location.api_pressure_hpa:.1f}hPa" if location.api_pressure_hpa is not None else ""
+                    st_warn = "STUTTER!" if l_stutters > 0 else "smooth"
                     msg = (f"\r[{now - t_start:7.1f}s] {rate:4.0f}Hz "
                            f"Lat:{location.lat:10.6f} Lon:{location.lon:10.6f} Alt:{location.alt:6.1f}m ({location.altitude_rate_per_second:+5.2f}m/s) {p_str} {api_p_str} "
                            f"M:{location.mach:.3f} "
                            f"Mag:{det.latest_mag:7.5f}g "
                            f"Ev:{len(det.events)} "
-                           f"Loop90%:{l_pct_90:.1f}% 0.1%Low:{l_low_01:.1f}ms ")
+                           f"Loop90%:{l_pct_90:.1f}% 1%Low:{l_low_1:.1f}ms 0.1%Low:{l_low_01:.1f}ms ({st_warn}) ")
                     sys.stdout.write(msg)
                 sys.stdout.flush()
                 last_draw = now
