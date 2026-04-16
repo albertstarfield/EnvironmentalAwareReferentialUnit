@@ -54,6 +54,10 @@ you can verify the device exists on your machine with:
 
     ioreg -l -w0 | grep -A5 AppleSPUHIDDevice
 
+## physics and assumptions
+
+This project employs various physical models for environmental and inertial tracking. For a detailed breakdown of the constants, hardware proxies, and mathematical assumptions (ISA, Bolton Equation, Heatflux, etc.), see [PHYSICS_AND_ASSUMPTIONS.md](PHYSICS_AND_ASSUMPTIONS.md).
+
 ## install (beta API)
 
     pip install earu

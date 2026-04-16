@@ -646,6 +646,18 @@ def _downsample(data, width):
 
 
 class LocationTracker:
+    """
+    Handles Dead Reckoning, CoreLocation integration, and Ecosystem Environment physics.
+    
+    CORE ASSUMPTIONS & CONSTANTS:
+    - Inertial: Standard Gravity G=9.80665 m/s^2; 100Hz sampling.
+    - Geography: Spherical Earth; M_PER_DEG_LAT = 111111.0.
+    - Atmosphere: Dynamic Cp, R, and Gamma adjusted for Moisture (Bolton Equation).
+    - Mach: Speed of sound derived as sqrt(gamma * R * T_ambient).
+    - Heatflux: Joule Displacement = density * VolumeFlow * Cp * (T_out - T_in).
+    - Volumetric Flow: Approx (RPM / 6000) * 0.007 m^3/s per fan (Amaryllis profile).
+    - Ambient: Proxied from palm rest sensors (Ts0P, Ts1P).
+    """
     def __init__(self, start_lat=-6.333012, start_lon=106.971199, start_alt=0.0):
         self.lat = start_lat
         self.lon = start_lon
