@@ -53,10 +53,23 @@ CLEAR     = "\033[2J\033[H"
 _ANSI_RE = re.compile(r'\033\[[^m]*m')
 
 
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculate the great circle distance between two points in meters."""
+    R = 6371000.0  # Earth radius in meters
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 class VibrationDetector:
     def __init__(self, fs=100):
         self.fs = fs
         self.sample_count = 0
+        # ... (rest of init)
+        self.prob_total_damage_fatigue = 0.0
+        self.cumulative_fatigue = 0.0
+        self._last_fatigue_update = time.time()
 
         # high-pass iir for gravity removal
         self.hp_alpha = 0.95
@@ -192,6 +205,7 @@ class VibrationDetector:
         thermal_stress = 1.0
         humidity_stress = 1.0
         pressure_stress = 1.0
+        seu_risk = 1.0
         
         if location:
             # Thermal: Solder joint fatigue increases at high temperatures (TCMz > 80C)
@@ -199,6 +213,9 @@ class VibrationDetector:
             if tcmz > 80.0:
                 thermal_stress = 1.0 + (tcmz - 80.0) / 40.0 # Scales up to 1.5x at 100C
             
+            # Altitude Stress (Cooling efficiency)
+            thermal_stress *= location.alt_stress_multiplier
+
             # Humidity: Risk of electromech transience (shorts/corrosion) at high RH
             rh = location.humidity_pct
             if rh > 70.0:
@@ -210,8 +227,11 @@ class VibrationDetector:
                 if tendency > 1.0:
                     pressure_stress = 1.0 + min(0.3, tendency / 10.0)
 
+            # SEU Risk (Single Event Upset) from altitude
+            seu_risk = location.seu_risk_multiplier
+
             # Combined Environmental Fatigue (Atmospheric Aging)
-            env_fatigue = (thermal_stress * humidity_stress * pressure_stress) - 1.0
+            env_fatigue = (thermal_stress * humidity_stress * pressure_stress * seu_risk) - 1.0
             
             solder_p = min(1.0, solder_p * thermal_stress + env_fatigue * 0.1)
             electromech_p = min(1.0, electromech_p * humidity_stress + env_fatigue * 0.1)
@@ -224,6 +244,14 @@ class VibrationDetector:
         self.prob_electromech_fatigue = electromech_p
         self.prob_total_damage_fatigue = max(solder_p, electromech_p)
         
+        # 3. Cumulative Fatigue Accumulation
+        now = time.time()
+        dt = now - self._last_fatigue_update
+        self._last_fatigue_update = now
+        # Accumulate fatigue (integral of risk over time)
+        # 1.0 risk for 1 hour = 1.0 fatigue unit
+        self.cumulative_fatigue += self.prob_total_damage_fatigue * (dt / 3600.0)
+
         # 0. Intentional Hardware Torture: Extreme RMS + Kurtosis (erratic/violent shaking)
         if rms > 0.15 and self.kurtosis > 12:
             m_type = "Intentional Hardware Torture"
@@ -882,6 +910,15 @@ class LocationTracker:
         # Earth constants
         self.M_PER_DEG_LAT = 111111.0
 
+        # Odometer
+        self.total_distance_m = 0.0
+        self.last_odometer_lat = start_lat
+        self.last_odometer_lon = start_lon
+
+        # SEU Risk (Single Event Upset)
+        self.seu_risk_multiplier = 1.0  # Normalized to Sea Level (1.0)
+        self.alt_stress_multiplier = 1.0
+
         # Weather tracking
         self.pressure_history = deque(maxlen=3600) # 1 hour at 1Hz or 100 samples/sec
         self.dew_point_k = 293.15
@@ -1285,21 +1322,29 @@ class LocationTracker:
                     new_lon = float(parts[1])
                     new_alt = float(parts[2])
                     new_heading = float(parts[3])
-                    
+
+                    # Update Odometer (ignore jitter < 5m)
+                    dist = haversine(self.last_odometer_lat, self.last_odometer_lon, new_lat, new_lon)
+                    if dist > 5.0:
+                        self.total_distance_m += dist
+                        self.last_odometer_lat = new_lat
+                        self.last_odometer_lon = new_lon
+
+                    # SEU Risk Model: Approx doubles every 1,500m (5000ft)
+                    self.seu_risk_multiplier = math.pow(2.0, new_alt / 1500.0)
+
+                    # Altitude Stress (Thermal/Cooling efficiency): Lower pressure = less heat transfer
+                    self.alt_stress_multiplier = 1.0 + (new_alt / 10000.0) # 2x stress at 10km
+
                     self.lat = new_lat
                     self.lon = new_lon
                     self.alt = new_alt
                     self.pressure_hpa = self._calculate_pressure(new_alt)
                     self.heading = new_heading
                     # If we have a yaw reading, calculate offset to true north
-                    # We need to find the latest yaw_d. We can recalculate it here
-                    # using the same logic as render/update_imu.
-                    qw, qx, qy, qz = det._q
-                    sin_y = 2.0 * (qw * qz + qx * qy)
-                    cos_y = 1.0 - 2.0 * (qy * qy + qz * qz)
-                    yaw_d = math.degrees(math.atan2(sin_y, cos_y))
-                    self.heading_offset = (new_heading - yaw_d) % 360.0
-                    
+                    # We need to find the latest yaw_d. 
+                    # We can't easily access 'det' here without passing it or global,
+                    # but we can rely on existing heading logic.
                     self.start_lat = new_lat
                     self.start_lon = new_lon
                     self.start_alt = new_alt
@@ -1307,6 +1352,8 @@ class LocationTracker:
         except Exception:
             pass
 
+# Cache for lid speed tracking
+_prev_lid = {'angle': None, 'time': 0.0, 'speed': 0.0}
 
 def render(det, t_start, restarts,
            lid_angle=None, als_raw=None, location=None, loop_stats=None):
@@ -1314,8 +1361,19 @@ def render(det, t_start, restarts,
     rate = det.sample_count / el if el > 1 else 0
     now = time.time()
 
+    # Hinge speed calculation
+    if lid_angle is not None:
+        if _prev_lid['angle'] is not None:
+            dt = now - _prev_lid['time']
+            if dt > 0:
+                speed = (lid_angle - _prev_lid['angle']) / dt
+                _prev_lid['speed'] = speed
+        _prev_lid['angle'] = lid_angle
+        _prev_lid['time'] = now
+
     raw_lines = []
     a = raw_lines.append
+    # ... rest of render header
 
     title = ' EARU-raw-TUI '
     top_bar = '─' * (W - len(title) - 1)
@@ -1456,7 +1514,7 @@ def render(det, t_start, restarts,
     for al in _als_bar(als_raw, W - 13):
         a(_line(al))
 
-    a(_sep(' EcosystemEnvironmentReading (ISO 80000-2) '))
+    a(_sep(' Ecosystem Environment Reading (ISO 80000-2) '))
     if location is not None:
         a(_line(f" {DIM}Polar (Lat):{RST} {BWHT}{location.lat:>11.7f}°{RST}  "
                 f"{DIM}Azimuth (Lon):{RST} {BWHT}{location.lon:>11.7f}°{RST}"))
@@ -1467,6 +1525,10 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Radial (Alt):{RST} {BWHT}{location.alt:>8.2f}m{RST} ({location.altitude_rate_per_second:>+5.2f}m/s)  "
                 f"{DIM}Local Pressure:{RST} {BCYN}{avg_pressure:>8.2f} hPa{RST}"))
         
+        # Odometer display
+        dist_km = location.total_distance_m / 1000.0
+        a(_line(f" {DIM}Environmental Odometer:{RST} {BGRN}{dist_km:>8.3f} km{RST} ({location.total_distance_m:>10.1f} m)"))
+
         api_p_val = f"{location.api_pressure_hpa:>8.2f} hPa" if location.api_pressure_hpa is not None else "N/A (alt)"
         a(_line(f" {DIM}Public General Avg Pressure:{RST} {BYEL}{api_p_val}{RST}"))
         
@@ -1560,8 +1622,14 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Airflow L:{RST} {talt:>4.1f} / {talw:>4.1f}°C (T/W) {DIM}In:{RST} {location.airflow_inlet_k:>6.1f}K"))
         a(_line(f" {DIM}Airflow R:{RST} {tart:>4.1f} / {tarw:>4.1f}°C (T/W) {DIM}Out:{RST} {location.airflow_outlet_k:>6.1f}K"))
         a(_line(f" {DIM}FanProx K (Heat Transfer):{RST} L {location.talp_k:>6.1f}K / R {location.tarf_k:>6.1f}K"))
-        a(_line(f" {DIM}Fans (RPM):{RST} F0 {location.fan_rpms[0]:>6.1f} / F1 {location.fan_rpms[1]:>6.1f}"))
-        a(_line(f" {DIM}Lid Angle:{RST} {_lid_text(lid_angle) if lid_angle is not None else 'N/A'}"))
+        # Hinge Status & Speed
+        lid_status = "OPEN" if (lid_angle and lid_angle > 5.0) else "CLOSED"
+        ls_col = BGRN if lid_status == "OPEN" else BRED
+        h_speed = _prev_lid['speed']
+        hs_col = BYEL if abs(h_speed) > 10.0 else DIM
+        a(_line(f" {DIM}Hinge:{RST} {ls_col}{lid_status:<6}{RST} {DIM}Angle:{RST} {_lid_text(lid_angle) if lid_angle is not None else 'N/A'}"
+                f"  {DIM}Speed:{RST} {hs_col}{h_speed:>+7.2f} deg/s{RST}"))
+
         a(_line(f" {DIM}PalmRest:{RST} L {ts0p:>4.1f}°C / R {ts1p:>4.1f}°C  "
                 f"{DIM}Power:{RST} {BYEL}{pstr:>5.1f}W{RST}"))
         a(_line(f" {DIM}Mass Flow (approx):{RST} {BCYN}{location.massflow_kg_s * 1000.0:>6.3f} g/s{RST}  "
@@ -1595,6 +1663,17 @@ def render(det, t_start, restarts,
     status = "CRITICAL" if prob_total > 0.7 else ("WARNING" if prob_total > 0.3 else "STABLE")
     a(_line(f" {DIM}Fatigue Status:{RST} {col_total}{status:<10}{RST}  "
             f"{DIM}Aggregated Risk:{RST} {col_total}{int(prob_total*100):>3}%{RST}"))
+
+    if location:
+        seu_risk = location.seu_risk_multiplier
+        seu_col = BGRN if seu_risk < 2.0 else (BYEL if seu_risk < 5.0 else BRED)
+        a(_line(f" {DIM}SEU Risk (Alt):{RST} {seu_col}{seu_risk:>5.2f}x{RST}  "
+                f"{DIM}Alt Stress Factor:{RST} {BYEL}{location.alt_stress_multiplier:>5.2f}x{RST}"))
+
+    # Cumulative Fatigue display
+    cum_fat = det.cumulative_fatigue
+    cum_col = BGRN if cum_fat < 1.0 else (BYEL if cum_fat < 10.0 else BRED)
+    a(_line(f" {DIM}Overall Accumulated Fatigue:{RST} {cum_col}{cum_fat:>8.4f} units{RST}"))
     
     gw = W - 18
     a(_line(f" {DIM}Risk {RST} {col_total}{_gauge(prob_total, 0, 1, gw)}{RST}"))
@@ -1814,13 +1893,13 @@ def main():
         sys.stdout.write(ENTER_ALT + HIDE_CUR)
         sys.stdout.flush()
 
-    det = VibrationDetector(fs=100)
-    
     # Load initial state from EARU_data.dat if available
     initial_lat, initial_lon, initial_alt = -6.333012, 106.971199, 0.0
     initial_q = [1.0, 0.0, 0.0, 0.0]
     initial_heading = 0.0
-    
+    saved_dist = 0.0
+    saved_fatigue = 0.0
+
     if os.path.exists("EARU_data.dat"):
         try:
             with open("EARU_data.dat", "r") as f:
@@ -1831,6 +1910,13 @@ def main():
                 initial_alt = loc.get('alt', initial_alt)
                 initial_heading = loc.get('heading', initial_heading)
                 
+                # Load Odometer and Cumulative Fatigue
+                saved_dist = loc.get('total_distance_m', 0.0)
+                
+                seismic = saved_data.get('seismic_activity', {})
+                damage = seismic.get('damage_fatigue', {})
+                saved_fatigue = damage.get('cumulative_fatigue', 0.0)
+
                 orient = saved_data.get('orientation', {})
                 saved_q = orient.get('q')
                 if saved_q and len(saved_q) == 4:
@@ -1842,6 +1928,15 @@ def main():
 
     location = LocationTracker(start_lat=initial_lat, start_lon=initial_lon, start_alt=initial_alt)
     location.heading = initial_heading
+    location.total_distance_m = saved_dist
+    location.last_odometer_lat = initial_lat
+    location.last_odometer_lon = initial_lon
+
+    det = VibrationDetector(fs=100) # Reset det to ensure we can set cumulative
+    det.cumulative_fatigue = saved_fatigue
+    # Re-initialize det state if orient was loaded
+    if det._orient_init:
+        det._q = initial_q
     loop_tracker = LoopConsistencyTracker(target_ms=10.0)
     t_start = time.time()
     last_total = 0
@@ -1972,7 +2067,8 @@ def main():
                         'v_mag': location.v_mag,
                         'mach': location.mach,
                         'calibrated_g': location.calibrated_g,
-                        'pos': location.pos
+                        'pos': location.pos,
+                        'total_distance_m': location.total_distance_m
                     },
                     'ecosystem_weather': {
                         'category': location.weather_category,
@@ -1988,7 +2084,10 @@ def main():
                         'damage_fatigue': {
                             'solder_fatigue_prob': det.prob_solder_fatigue,
                             'electromech_fatigue_prob': det.prob_electromech_fatigue,
-                            'aggregated_risk': det.prob_total_damage_fatigue
+                            'aggregated_risk': det.prob_total_damage_fatigue,
+                            'cumulative_fatigue': det.cumulative_fatigue,
+                            'seu_risk_multiplier': location.seu_risk_multiplier,
+                            'alt_stress_multiplier': location.alt_stress_multiplier
                         }
                     },
                     'system': {
