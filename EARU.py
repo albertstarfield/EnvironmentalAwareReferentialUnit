@@ -674,6 +674,8 @@ class LocationTracker:
         self.smc_temps = {}
         self.smc_turbo = 0
         self.ambient_temp_k = 293.15 # Default 20C in Kelvin
+        self.airflow_inlet_k = 293.15
+        self.airflow_outlet_k = 313.15 # Default 40C proxy for outlet
 
         # IMU state for dead reckoning
         self.vel = [0.0, 0.0, 0.0]  # m/s
@@ -720,6 +722,22 @@ class LocationTracker:
             self.ambient_temp_k = ts0p + 273.15
         elif ts1p is not None:
             self.ambient_temp_k = ts1p + 273.15
+
+        # Inlet (Wrist) min proxy
+        talw = self.smc_temps.get("TaLW")
+        tarw = self.smc_temps.get("TaRW")
+        if talw is not None and tarw is not None:
+            self.airflow_inlet_k = min(talw, tarw) + 273.15
+        elif talw is not None: self.airflow_inlet_k = talw + 273.15
+        elif tarw is not None: self.airflow_inlet_k = tarw + 273.15
+
+        # Outlet (Top) max proxy
+        talt = self.smc_temps.get("TaLT")
+        tart = self.smc_temps.get("TaRT")
+        if talt is not None and tart is not None:
+            self.airflow_outlet_k = max(talt, tart) + 273.15
+        elif talt is not None: self.airflow_outlet_k = talt + 273.15
+        elif tart is not None: self.airflow_outlet_k = tart + 273.15
 
         turbo_p = os.path.join(base_path, "sensor_TURBO_MODE.dat")
         if os.path.exists(turbo_p):
@@ -1181,8 +1199,8 @@ def render(det, t_start, restarts,
         
         a(_line(f" {DIM}Turbo Mode:{RST} {turbo_stat}  "
                 f"{DIM}TCMz:{RST} {tcmz:>4.1f}°C  {DIM}GPU:{RST} {gpu:>4.1f}°C"))
-        a(_line(f" {DIM}Airflow L:{RST} {talt:>4.1f} / {talw:>4.1f}°C (T/W) {DIM}Prox:{RST} {talp:>4.1f}°C"))
-        a(_line(f" {DIM}Airflow R:{RST} {tart:>4.1f} / {tarw:>4.1f}°C (T/W) {DIM}Prox:{RST} {tarf:>4.1f}°C"))
+        a(_line(f" {DIM}Airflow L:{RST} {talt:>4.1f} / {talw:>4.1f}°C (T/W) {DIM}In:{RST} {location.airflow_inlet_k:>6.1f}K"))
+        a(_line(f" {DIM}Airflow R:{RST} {tart:>4.1f} / {tarw:>4.1f}°C (T/W) {DIM}Out:{RST} {location.airflow_outlet_k:>6.1f}K"))
         a(_line(f" {DIM}PalmRest:{RST} L {ts0p:>4.1f}°C / R {ts1p:>4.1f}°C  "
                 f"{DIM}Amb:{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}"))
         a(_line(f" {DIM}Power Consumption (Heatflux):{RST} {BYEL}{pstr:>5.1f}W (J/s){RST}"))
@@ -1563,6 +1581,8 @@ def main():
                         'temps': location.smc_temps,
                         'turbo': location.smc_turbo,
                         'ambient_temp_k': location.ambient_temp_k,
+                        'airflow_inlet_k': location.airflow_inlet_k,
+                        'airflow_outlet_k': location.airflow_outlet_k,
                         'power': location.smc_temps.get("PSTR", 0.0)
                     },
                     'lid_angle': lid_angle,
