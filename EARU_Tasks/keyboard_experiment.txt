@@ -1,0 +1,20 @@
+# EARU Keyboard Experiment: Software vs Hardware Detection
+
+## Overview
+This experiment compares keyboard events detected through two different paths:
+1. **Software Registered**: Keys intercepted via the OS input system (e.g., standard input).
+2. **Hardware Jitter**: Vibrations and accelerations (jitter) detected by the Apple Silicon IMU.
+
+## Hypothesis
+Each physical key press on the MacBook chassis should generate a corresponding high-frequency jitter detectable by the accelerometer at ~100-800Hz. This jitter should precede or be nearly simultaneous with the software-registered event.
+
+## Metrics
+- **Time Offset**: The delta between the peak jitter and the software event timestamp.
+- **Jitter Magnitude**: The peak acceleration (in g) associated with a key press.
+- **False Positives/Negatives**: Occurrences of jitter without keys (e.g., trackpad click, external vibration) vs keys without jitter.
+
+## Procedure
+1. Run `EARU.py` with this task script.
+2. Type a series of keys at varying speeds and force.
+3. Observe the verbose log output for simultaneous detections.
+4. Review the correlation between the "actual" key and the "measured" vibration.

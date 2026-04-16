@@ -252,6 +252,18 @@ def get_device_info():
 def sensor_worker(shm_name, restart_count, gyro_shm_name=None,
                    als_shm_name=None, lid_shm_name=None, decimation=None,
                    shutdown_event=None):
+    try:
+        _sensor_worker_impl(shm_name, restart_count, gyro_shm_name,
+                           als_shm_name, lid_shm_name, decimation,
+                           shutdown_event)
+    except Exception as e:
+        with open("sensor_worker_error.log", "a") as f:
+            f.write(f"[{time.ctime()}] Worker crashed: {e}\n")
+        raise
+
+def _sensor_worker_impl(shm_name, restart_count, gyro_shm_name=None,
+                   als_shm_name=None, lid_shm_name=None, decimation=None,
+                   shutdown_event=None):
     _iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library('IOKit'))
     _cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library('CoreFoundation'))
     _libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library('c'))
