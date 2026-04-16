@@ -678,6 +678,8 @@ class LocationTracker:
         self.airflow_outlet_k = 313.15 # Default 40C proxy for outlet
         self.talp_k = 293.15
         self.tarf_k = 293.15
+        self.fan_rpms = [0.0, 0.0]
+        self.heatflux_j = 0.0
 
         # IMU state for dead reckoning
         self.vel = [0.0, 0.0, 0.0]  # m/s
@@ -746,6 +748,44 @@ class LocationTracker:
         tarf = self.smc_temps.get("TaRF")
         if talp is not None: self.talp_k = talp + 273.15
         if tarf is not None: self.tarf_k = tarf + 273.15
+
+        # Read Fan RPMs for Heatflux calculation
+        for i in range(2):
+            p = os.path.join(base_path, f"sensor_fan_F{i}Ac.dat")
+            if os.path.exists(p):
+                try:
+                    with open(p, "r") as f:
+                        self.fan_rpms[i] = float(f.read().strip())
+                except Exception: pass
+
+        # --- Heatflux Joule Displacement Calculation ---
+        # Q_dot = m_dot * Cp * delta_T
+        # m_dot = density * VolumeFlow
+        # density = P / (R * T_amb)
+        # delta_T = T_outlet - T_inlet
+        
+        # Constants
+        Cp = 1006.0  # J/kg*K (Specific heat of air)
+        R = 287.05   # J/kg*K (Gas constant for air)
+        
+        # Effective Volume Flow Rate (V_dot)
+        # Macbook Pro 14" (Amaryllis) fans move ~15 CFM each at 6000 RPM.
+        # 15 CFM = 0.007079 m^3/s. 
+        # Approx: V_dot (m^3/s) = (RPM / 6000) * 0.007 * num_fans
+        v_dot = (sum(self.fan_rpms) / 6000.0) * 0.007
+        
+        # Pressure (Pa)
+        p_pa = (self.pressure_hpa if self.pressure_hpa else 1013.25) * 100.0
+        
+        # Density (kg/m^3)
+        density = p_pa / (R * self.ambient_temp_k)
+        
+        # delta_T (Kelvin/Celsius difference)
+        delta_t = self.airflow_outlet_k - self.airflow_inlet_k
+        
+        # Heatflux (Watts = Joules/second)
+        self.heatflux_j = density * v_dot * Cp * delta_t
+        if self.heatflux_j < 0: self.heatflux_j = 0.0
 
         turbo_p = os.path.join(base_path, "sensor_TURBO_MODE.dat")
         if os.path.exists(turbo_p):
@@ -1172,7 +1212,8 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Heading:{RST} {BYEL}{location.heading:>6.1f}°{RST}        "
                 f"{DIM}Velocity:{RST} {BWHT}{location.v_mag:>6.2f}m/s{RST}  "
                 f"{DIM}Mach:{RST} {BWHT}{location.mach:.3f}{RST}"))
-        a(_line(f" {DIM}ΔX:{location.pos[0]:>7.2f}m ΔY:{location.pos[1]:>7.2f}m ΔZ:{location.pos[2]:>7.2f}m{RST}"))
+        a(_line(f" {DIM}Ambient Ecosystem:{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}  "
+                f"{DIM}ΔX:{location.pos[0]:>7.2f}m ΔY:{location.pos[1]:>7.2f}m ΔZ:{location.pos[2]:>7.2f}m{RST}"))
         cl_stat = f"{GRN}Available{RST}" if location.cl_available else f"{RED}Missing{RST}"
         a(_line(f" {DIM}CoreLocationCLI: {cl_stat}  Last Check: {now - location.last_cl_check:.1f}s ago{RST}"))
         g_status = f"{location.calibrated_g:.6f}g"
@@ -1210,9 +1251,10 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Airflow L:{RST} {talt:>4.1f} / {talw:>4.1f}°C (T/W) {DIM}In:{RST} {location.airflow_inlet_k:>6.1f}K"))
         a(_line(f" {DIM}Airflow R:{RST} {tart:>4.1f} / {tarw:>4.1f}°C (T/W) {DIM}Out:{RST} {location.airflow_outlet_k:>6.1f}K"))
         a(_line(f" {DIM}FanProx K (Heat Transfer):{RST} L {location.talp_k:>6.1f}K / R {location.tarf_k:>6.1f}K"))
+        a(_line(f" {DIM}Fans (RPM):{RST} F0 {location.fan_rpms[0]:>6.1f} / F1 {location.fan_rpms[1]:>6.1f}"))
         a(_line(f" {DIM}PalmRest:{RST} L {ts0p:>4.1f}°C / R {ts1p:>4.1f}°C  "
-                f"{DIM}Amb:{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}"))
-        a(_line(f" {DIM}Power Consumption (Heatflux):{RST} {BYEL}{pstr:>5.1f}W (J/s){RST}"))
+                f"{DIM}Power:{RST} {BYEL}{pstr:>5.1f}W{RST}"))
+        a(_line(f" {DIM}Heatflux Joule Displacement:{RST} {BCYN}{location.heatflux_j:>6.2f} J/s (Watts){RST}"))
     else:
         a(_line(f"  {DIM}system metrics and location disabled{RST}"))
 
@@ -1594,6 +1636,8 @@ def main():
                         'airflow_outlet_k': location.airflow_outlet_k,
                         'talp_k': location.talp_k,
                         'tarf_k': location.tarf_k,
+                        'fan_rpms': location.fan_rpms,
+                        'heatflux_j': location.heatflux_j,
                         'power': location.smc_temps.get("PSTR", 0.0)
                     },
                     'lid_angle': lid_angle,
