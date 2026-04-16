@@ -152,7 +152,66 @@ class VibrationDetector:
         self.hr_bpm = None
         self.hr_confidence = 0.0
 
+        # Seismic / Motion classification
+        self.motion_type = "Stationary"
+        self.motion_certainty = 0.0
+        self.spectral_balance = 0.0 # <0 low freq, >0 high freq
+
         self._last_evt_t = 0.0
+
+    def classify_seismic(self, location=None):
+        """Categorize motion using spectral energy, periodicity, and environment."""
+        # Energy bands (averages of deques)
+        b_eng = [sum(list(b))/max(1, len(b)) if b else 0.0 for b in self.band_energy]
+        high_freq_pwr = b_eng[0] + b_eng[1] # 50Hz + 25Hz
+        mid_freq_pwr = b_eng[2]             # 12Hz
+        low_freq_pwr = b_eng[3] + b_eng[4]  # 6Hz + 3Hz
+        total_pwr = sum(b_eng) + 1e-30
+        
+        self.spectral_balance = (high_freq_pwr - low_freq_pwr) / total_pwr
+        
+        rms = self.rms
+        peak = self.peak
+        freq = self.period_freq if self.period_freq else 0.0
+        reg = (1.0 - self.period_cv) if self.period_cv is not None else 0.0
+        
+        m_type = "Stationary"
+        cert = 0.0
+        
+        # 1. Rocket/Launch: Extreme peak and high-frequency dominance
+        if peak > 1.2 and high_freq_pwr > 0.05:
+            m_type = "Rocket / High-G Flight"
+            cert = min(1.0, peak / 3.0)
+        # 2. Being Brought (Walking/Hand-carried): Strong 1.5-2.5Hz periodicity
+        elif 1.0 < freq < 3.0 and reg > 0.7:
+            m_type = "Carried (Walking)"
+            cert = reg
+        # 3. Turbulent Flight: Mid-freq vibration + altitude change
+        elif location and abs(location.altitude_rate_per_second) > 1.0 and mid_freq_pwr > 0.001:
+            m_type = "Turbulent Flight"
+            cert = min(1.0, abs(location.altitude_rate_per_second) / 5.0 + 0.3)
+        # 4. Automotive / Transport: High frequency (engine) + RMS
+        elif high_freq_pwr > 0.005 and rms > 0.01:
+            m_type = "Automotive / Transport"
+            cert = min(1.0, high_freq_pwr * 100)
+        # 5. Seismic / Ground: Low frequency dominant, non-periodic
+        elif low_freq_pwr > 0.002 and self.spectral_balance < -0.3:
+            m_type = "Seismic Activity (Ground)"
+            cert = min(1.0, low_freq_pwr * 200)
+        # 6. Stowed (Bag/Pocket): Muffled low-energy motion
+        elif 0.001 < rms < 0.008:
+            m_type = "Stowed / Passive Motion"
+            cert = 0.6
+        # 7. Stationary
+        elif rms < 0.001:
+            m_type = "Stationary"
+            cert = 0.95
+        else:
+            m_type = "Indeterminate Vibration"
+            cert = 0.3
+            
+        self.motion_type = m_type
+        self.motion_certainty = cert
 
     def process_gyro(self, gx, gy, gz):
         self.gyro_latest = (gx, gy, gz)
@@ -1384,6 +1443,17 @@ def render(det, t_start, restarts,
     for _ in range(max(0, 3 - len(recent))):
         a(_line(''))
 
+    a(_sep(' Seismic Activity / Motion Group '))
+    m_type = det.motion_type
+    cert = int(det.motion_certainty * 100)
+    col = BGRN if cert > 70 else (BYEL if cert > 40 else BRED)
+    spec_bal = det.spectral_balance
+    bal_str = f"{'HF+' if spec_bal > 0.2 else ('LF+' if spec_bal < -0.2 else 'MID')}"
+    a(_line(f" {DIM}Classification:{RST} {BWHT}{m_type:<25}{RST}  "
+            f"{DIM}Certainty:{RST} {col}{cert:>3}%{RST}"))
+    a(_line(f" {DIM}Spectral Balance:{RST} {BYEL}{spec_bal:>+5.2f}{RST} {DIM}({bal_str}){RST}  "
+            f"{DIM}Peak Force:{RST} {det.peak:.4f}g"))
+
     a(_sep())
     ax, ay, az = det.latest_raw
     a(_line(f" X:{ax:>+10.6f}g Y:{ay:>+10.6f}g Z:{az:>+10.6f}g"
@@ -1703,6 +1773,7 @@ def main():
                 location.fetch_api_pressure()
                 location.check_smc_sensors()
                 location.check_system_metrics()
+                det.classify_seismic(location)
                 last_period = now
 
             # Loop tracking record
@@ -1745,6 +1816,12 @@ def main():
                         'mach': location.mach,
                         'calibrated_g': location.calibrated_g,
                         'pos': location.pos
+                    },
+                    'seismic_activity': {
+                        'motion_type': det.motion_type,
+                        'certainty': det.motion_certainty,
+                        'spectral_balance': det.spectral_balance,
+                        'peak_g': det.peak
                     },
                     'system': {
                         'cpu_usage': location.cpu_usage,
