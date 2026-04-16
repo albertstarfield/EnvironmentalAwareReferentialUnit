@@ -178,31 +178,39 @@ class VibrationDetector:
         m_type = "Stationary"
         cert = 0.0
         
-        # 1. Rocket/Launch: Extreme peak and high-frequency dominance
-        if peak > 1.2 and high_freq_pwr > 0.05:
+        # 0. Intentional Hardware Torture: Extreme RMS + Kurtosis (erratic/violent shaking)
+        if rms > 0.15 and self.kurtosis > 12:
+            m_type = "Intentional Hardware Torture"
+            cert = min(1.0, (rms * 5.0 + self.kurtosis / 20.0) / 2.0)
+        # 1. Physical Shock: Extreme peak relative to RMS (impact)
+        elif peak > 2.5 or (peak > 1.0 and self.crest > 15):
+            m_type = "Physical Shock"
+            cert = min(1.0, peak / 5.0 + 0.5)
+        # 2. Rocket/Launch: Extreme peak and high-frequency dominance
+        elif peak > 1.2 and high_freq_pwr > 0.05:
             m_type = "Rocket / High-G Flight"
             cert = min(1.0, peak / 3.0)
-        # 2. Being Brought (Walking/Hand-carried): Strong 1.5-2.5Hz periodicity
+        # 3. Being Brought (Walking/Hand-carried): Strong 1.5-2.5Hz periodicity
         elif 1.0 < freq < 3.0 and reg > 0.7:
             m_type = "Carried (Walking)"
             cert = reg
-        # 3. Turbulent Flight: Mid-freq vibration + altitude change
+        # 4. Turbulent Flight: Mid-freq vibration + altitude change
         elif location and abs(location.altitude_rate_per_second) > 1.0 and mid_freq_pwr > 0.001:
             m_type = "Turbulent Flight"
             cert = min(1.0, abs(location.altitude_rate_per_second) / 5.0 + 0.3)
-        # 4. Automotive / Transport: High frequency (engine) + RMS
+        # 5. Automotive / Transport: High frequency (engine) + RMS
         elif high_freq_pwr > 0.005 and rms > 0.01:
             m_type = "Automotive / Transport"
             cert = min(1.0, high_freq_pwr * 100)
-        # 5. Seismic / Ground: Low frequency dominant, non-periodic
+        # 6. Seismic / Ground: Low frequency dominant, non-periodic
         elif low_freq_pwr > 0.002 and self.spectral_balance < -0.3:
             m_type = "Seismic Activity (Ground)"
             cert = min(1.0, low_freq_pwr * 200)
-        # 6. Stowed (Bag/Pocket): Muffled low-energy motion
+        # 7. Stowed (Bag/Pocket): Muffled low-energy motion
         elif 0.001 < rms < 0.008:
             m_type = "Stowed / Passive Motion"
             cert = 0.6
-        # 7. Stationary
+        # 8. Stationary
         elif rms < 0.001:
             m_type = "Stationary"
             cert = 0.95
