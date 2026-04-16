@@ -730,8 +730,10 @@ class LocationTracker:
 
         self.last_cl_check = now
         try:
-            res = subprocess.run([self.cl_path, '-format', '%lat %long', '-once'],
-                               capture_output=True, text=True, timeout=2.0)
+            # Wrap in osascript to handle TCC/Privacy prompts if needed
+            cmd = f'{self.cl_path} -format "%lat %long" -once'
+            res = subprocess.run(['osascript', '-e', f'do shell script "{cmd}"'],
+                               capture_output=True, text=True, timeout=10.0)
             if res.returncode == 0:
                 parts = res.stdout.strip().split()
                 if len(parts) >= 2:
@@ -955,6 +957,9 @@ def main():
     use_tui = sys.stdout.isatty()
     save_log = False
     task_path = None
+    daemon_mode = False
+    kys_mode = False
+
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -962,14 +967,67 @@ def main():
             use_tui = False
         elif arg == '--save-log':
             save_log = True
+        elif arg == '--daemon':
+            daemon_mode = True
+        elif arg in ('--kys', './kys', 'kys'):
+            kys_mode = True
         elif arg == '--task' and i + 1 < len(sys.argv):
             task_path = sys.argv[i+1]
             i += 1
         elif arg in ('-h', '--help'):
-            print(f'usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--task path/to/script.py]')
+            print(f'usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--task path/to/script.py]')
             return
         i += 1
-    
+
+    PID_FILE = "/tmp/EARU.pid"
+
+    if kys_mode:
+        print(f"{YEL}[*] triggering stop via 'kys' file...{RST}")
+        with open("kys", "w") as f:
+            f.write("stop")
+        return
+
+    # Check for existing instance and kill it if found
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            print(f"{YEL}[*] stopping existing instance (pid {old_pid})...{RST}")
+            os.kill(old_pid, signal.SIGTERM)
+            # Give it a moment to shut down gracefully
+            for _ in range(10):
+                time.sleep(0.1)
+                try:
+                    os.kill(old_pid, 0)
+                except OSError:
+                    break
+            else:
+                # Force kill if still alive
+                os.kill(old_pid, signal.SIGKILL)
+        except Exception:
+            pass
+
+        try:
+            os.remove(PID_FILE)
+        except Exception:
+            pass
+
+    if daemon_mode:
+        # Relaunch without --daemon
+        cmd = [sys.executable] + [a for a in sys.argv if a != '--daemon']
+        
+        print(f"{GRN}[*] starting in daemon mode...{RST}")
+        log_file = open("EARU.log", "a")
+        subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=log_file,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        print(f"{GRN}[ok] daemon started. logs in EARU.log{RST}")
+        return
+
     run_task_fn = load_task(task_path)
     if run_task_fn:
         use_tui = False
@@ -977,6 +1035,11 @@ def main():
     if os.geteuid() != 0:
         print(f"\033[91m\033[1m[!] run with: sudo python3 {sys.argv[0]}\033[0m")
         sys.exit(1)
+
+    # If we are running (not in daemon-launcher mode), write our PID
+    if not daemon_mode:
+        with open(PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
 
     all_shms = [
         (SHM_NAME, SHM_SIZE), (SHM_NAME_GYRO, SHM_SIZE),
@@ -1039,6 +1102,11 @@ def main():
 
     try:
         while running[0]:
+            if os.path.exists("kys"):
+                os.remove("kys")
+                running[0] = False
+                break
+
             if worker is None or not worker.is_alive():
                 if worker is not None:
                     restart_count[0] += 1
@@ -1105,7 +1173,7 @@ def main():
                 sin_y = 2.0 * (qw * qz + qx * qy)
                 cos_y = 1.0 - 2.0 * (qy * qy + qz * qz)
                 yaw_d = math.degrees(math.atan2(sin_y, cos_y))
-                
+
                 data = {
                     'time': now,
                     'accel': {'x': det.latest_raw[0], 'y': det.latest_raw[1], 'z': det.latest_raw[2], 'mag': det.latest_mag},
@@ -1114,8 +1182,18 @@ def main():
                     'location': {'lat': location.lat, 'lon': location.lon, 'pos': location.pos},
                     'lid_angle': lid_angle,
                     'als': als_raw, # raw bytes
-                    'events': list(det.events)[-10:] # last 10 events
+                    'events': list(det.events)[-1:] # only the latest event
                 }
+
+                # Write to EARU_data.dat by default
+                try:
+                    with open("EARU_data.dat", "w") as f:
+                        json_data = data.copy()
+                        if json_data['als']:
+                            json_data['als'] = json_data['als'].hex()
+                        json.dump(json_data, f, default=str)
+                except Exception:
+                    pass
 
                 if run_task_fn:
                     try:
@@ -1169,9 +1247,15 @@ def main():
             }
             with open(logpath, 'w') as f:
                 json.dump(obj, f, indent=1, default=str)
-        
+
         print(f"{DIM}[ok] {det.sample_count} samples, "
               f"{restart_count[0]} restarts{RST}")
+
+        if os.path.exists(PID_FILE):
+            try:
+                os.remove(PID_FILE)
+            except Exception:
+                pass
 
         for s in (shm, shm_gyro, shm_als, shm_lid):
             s.close()
