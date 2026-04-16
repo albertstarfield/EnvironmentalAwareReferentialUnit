@@ -1290,13 +1290,16 @@ def render(det, t_start, restarts,
     if location is not None:
         a(_line(f" {DIM}Polar (Lat):{RST} {BWHT}{location.lat:>11.7f}°{RST}  "
                 f"{DIM}Azimuth (Lon):{RST} {BWHT}{location.lon:>11.7f}°{RST}"))
-        p_str = f"{location.pressure_hpa:>8.2f} hPa" if location.pressure_hpa is not None else "N/A (>11km)"
-        smc_p_str = f"{location.smc_pressure_hpa:>8.2f} hPa" if location.smc_pressure_hpa is not None else "waiting..."
-        api_p_str = f"{location.api_pressure_hpa:>8.2f} hPa" if location.api_pressure_hpa is not None else "N/A (alt)"
+        
+        pressures = [p for p in [location.pressure_hpa, location.smc_pressure_hpa, location.api_pressure_hpa] if p is not None]
+        avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
+        
         a(_line(f" {DIM}Radial (Alt):{RST} {BWHT}{location.alt:>8.2f}m{RST} ({location.altitude_rate_per_second:>+5.2f}m/s)  "
-                f"{DIM}ISA Pres: {RST} {BCYN}{p_str}{RST}"))
-        a(_line(f" {DIM}SMC Fan Pres:{RST} {GRN}{smc_p_str}{RST}    "
-                f"{DIM}API Pres: {RST} {BYEL}{api_p_str}{RST}"))
+                f"{DIM}EnvironmentPres:{RST} {BCYN}{avg_pressure:>8.2f} hPa{RST}"))
+        
+        api_p_val = f"{location.api_pressure_hpa:>8.2f} hPa" if location.api_pressure_hpa is not None else "N/A (alt)"
+        a(_line(f" {DIM}Calibrated API Pressure:{RST} {BYEL}{api_p_val}{RST}"))
+        
         a(_line(f" {DIM}Ambient Ecosystem Temp (K):{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}  "
                 f"{DIM}Temp (C):{RST} {BWHT}{location.ambient_temp_k - 273.15:>6.2f}°C{RST}"))
         a(_line(f" {DIM}Humidity:{RST} {BWHT}{location.humidity_pct:>5.1f}%{RST}  "
@@ -1337,8 +1340,10 @@ def render(det, t_start, restarts,
         ts1p = location.smc_temps.get("Ts1P", 0.0)
         pstr = location.smc_temps.get("PSTR", 0.0)
         
+        smc_p_str = f"{location.smc_pressure_hpa:>8.2f} hPa" if location.smc_pressure_hpa is not None else "waiting..."
         a(_line(f" {DIM}Turbo Mode:{RST} {turbo_stat}  "
                 f"{DIM}TCMz:{RST} {tcmz:>4.1f}°C  {DIM}GPU:{RST} {gpu:>4.1f}°C"))
+        a(_line(f" {DIM}SMC Fan Pressure:{RST} {GRN}{smc_p_str}{RST}"))
         a(_line(f" {DIM}Airflow L:{RST} {talt:>4.1f} / {talw:>4.1f}°C (T/W) {DIM}In:{RST} {location.airflow_inlet_k:>6.1f}K"))
         a(_line(f" {DIM}Airflow R:{RST} {tart:>4.1f} / {tarw:>4.1f}°C (T/W) {DIM}Out:{RST} {location.airflow_outlet_k:>6.1f}K"))
         a(_line(f" {DIM}FanProx K (Heat Transfer):{RST} L {location.talp_k:>6.1f}K / R {location.tarf_k:>6.1f}K"))
