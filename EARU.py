@@ -690,6 +690,10 @@ class LocationTracker:
         self.last_t = None
         self.last_cl_check = 0.0
         self.last_api_fetch = 0.0
+        self.humidity_pct = 50.0 # Default 50%
+        self.gas_R = 287.05      # J/kg*K
+        self.gas_Cp = 1006.0     # J/kg*K
+        self.gas_gamma = 1.4     # Ratio of specific heats
         self.cl_path = '/opt/homebrew/bin/CoreLocationCLI'
         self.cl_available = os.path.exists(self.cl_path)
         self.smc_report_path = '/usr/local/EnvironmentalAwareReferentialUnit/smcFanPressurehPaDetection'
@@ -764,28 +768,45 @@ class LocationTracker:
         # density = P / (R * T_amb)
         # delta_T = T_outlet - T_inlet
         
-        # Constants
-        Cp = 1006.0  # J/kg*K (Specific heat of air)
-        R = 287.05   # J/kg*K (Gas constant for air)
-        
         # Effective Volume Flow Rate (V_dot)
         # Macbook Pro 14" (Amaryllis) fans move ~15 CFM each at 6000 RPM.
-        # 15 CFM = 0.007079 m^3/s. 
         # Approx: V_dot (m^3/s) = (RPM / 6000) * 0.007 * num_fans
         v_dot = (sum(self.fan_rpms) / 6000.0) * 0.007
         
         # Pressure (Pa)
         p_pa = (self.pressure_hpa if self.pressure_hpa else 1013.25) * 100.0
         
-        # Density (kg/m^3)
-        density = p_pa / (R * self.ambient_temp_k)
+        # Density (kg/m^3) using dynamic R
+        density = p_pa / (self.gas_R * self.ambient_temp_k)
         
         # delta_T (Kelvin/Celsius difference)
         delta_t = self.airflow_outlet_k - self.airflow_inlet_k
         
-        # Heatflux (Watts = Joules/second)
-        self.heatflux_j = density * v_dot * Cp * delta_t
+        # Heatflux (Watts = Joules/second) using dynamic Cp
+        self.heatflux_j = density * v_dot * self.gas_Cp * delta_t
         if self.heatflux_j < 0: self.heatflux_j = 0.0
+
+        # --- Dynamic Gas Constant Calculation (T & Humidity) ---
+        # T_c = Kelvin - 273.15
+        tc = self.ambient_temp_k - 273.15
+        
+        # 1. Temperature-dependent Cp for dry air (linear approx for 250K-400K)
+        # Cp_dry = 1005 + 0.05 * (T_k - 300)
+        cp_dry = 1005.0 + 0.05 * (self.ambient_temp_k - 300.0)
+        
+        # 2. Humidity corrections
+        # Saturation vapor pressure (Bolton) in hPa
+        p_sat = 6.112 * math.exp(17.67 * tc / (tc + 243.5))
+        # Actual vapor pressure
+        p_v = (self.humidity_pct / 100.0) * p_sat
+        # Specific humidity q
+        p_total = (self.pressure_hpa if self.pressure_hpa else 1013.25)
+        q = 0.622 * p_v / (p_total - 0.378 * p_v)
+        
+        # Adjust R and Cp for moisture
+        self.gas_R = 287.05 * (1.0 + 0.608 * q)
+        self.gas_Cp = cp_dry * (1.0 + 0.84 * q)
+        self.gas_gamma = self.gas_Cp / (self.gas_Cp - self.gas_R)
 
         turbo_p = os.path.join(base_path, "sensor_TURBO_MODE.dat")
         if os.path.exists(turbo_p):
@@ -864,7 +885,7 @@ class LocationTracker:
             self.g_samples = [] # reset if moved
 
     def fetch_api_pressure(self):
-        """Fetch real-world surface pressure from Open-Meteo for comparison."""
+        """Fetch real-world surface pressure and humidity from Open-Meteo."""
         now = time.time()
         # Fetch only every 15 minutes and if altitude is near sea-level
         if now - self.last_api_fetch < 900.0:
@@ -874,11 +895,12 @@ class LocationTracker:
 
         self.last_api_fetch = now
         try:
-            url = f"https://api.open-meteo.com/v1/forecast?latitude={self.lat}&longitude={self.lon}&current=surface_pressure"
+            url = f"https://api.open-meteo.com/v1/forecast?latitude={self.lat}&longitude={self.lon}&current=surface_pressure,relative_humidity_2m"
             response = requests.get(url, timeout=5.0)
             if response.status_code == 200:
                 data = response.json()
                 self.api_pressure_hpa = data['current']['surface_pressure']
+                self.humidity_pct = float(data['current']['relative_humidity_2m'])
         except Exception:
             pass
 
@@ -970,11 +992,10 @@ class LocationTracker:
 
         self.v_mag = math.sqrt(self.vel[0]**2 + self.vel[1]**2 + self.vel[2]**2)
 
-        # Calculate Mach number
-        # T_c = 15 - 0.0065 * h (ISA model)
-        temp_c = 15.0 - 0.0065 * self.alt
-        if temp_c > -273.15:
-            speed_of_sound = 331.3 * math.sqrt(1.0 + temp_c / 273.15)
+        # Calculate Mach number using dynamic gamma, R, and ambient temperature
+        if self.ambient_temp_k > 0:
+            # a = sqrt(gamma * R * T)
+            speed_of_sound = math.sqrt(self.gas_gamma * self.gas_R * self.ambient_temp_k)
             self.mach = self.v_mag / speed_of_sound
         else:
             self.mach = 0.0
@@ -1211,6 +1232,8 @@ def render(det, t_start, restarts,
                 f"{DIM}API Pres: {RST} {BYEL}{api_p_str}{RST}"))
         a(_line(f" {DIM}Ambient Ecosystem Temp (K):{RST} {BWHT}{location.ambient_temp_k:>6.2f}K{RST}  "
                 f"{DIM}Temp (C):{RST} {BWHT}{location.ambient_temp_k - 273.15:>6.2f}°C{RST}"))
+        a(_line(f" {DIM}Humidity:{RST} {BWHT}{location.humidity_pct:>5.1f}%{RST}  "
+                f"{DIM}Cp:{RST} {location.gas_Cp:>7.2f} {DIM}R:{RST} {location.gas_R:>7.2f} {DIM}γ:{RST} {location.gas_gamma:>6.4f}"))
         a(_line(f" {DIM}Heading:{RST} {BYEL}{location.heading:>6.1f}°{RST}        "
                 f"{DIM}Velocity:{RST} {BWHT}{location.v_mag:>6.2f}m/s{RST}  "
                 f"{DIM}Mach:{RST} {BWHT}{location.mach:.3f}{RST}"))
@@ -1639,6 +1662,12 @@ def main():
                         'tarf_k': location.tarf_k,
                         'fan_rpms': location.fan_rpms,
                         'heatflux_j': location.heatflux_j,
+                        'humidity_pct': location.humidity_pct,
+                        'gas_constants': {
+                            'Cp': location.gas_Cp,
+                            'R': location.gas_R,
+                            'gamma': location.gas_gamma
+                        },
                         'power': location.smc_temps.get("PSTR", 0.0)
                     },
                     'lid_angle': lid_angle,
