@@ -162,6 +162,104 @@ _ANSI_RE = re.compile(r'\033\[[^m]*m')
 def haversine(lat1, lon1, lat2, lon2):
     return njit_haversine(lat1, lon1, lat2, lon2)
 
+class WindMapper:
+    """
+    Estimates and maps environmental wind by comparing ground velocity (IMU/GPS)
+    and apparent airspeed (derived from dynamic pressure hPa).
+    Uses a spatial-temporal buffer for averaging at various scales.
+    """
+    def __init__(self, max_age_s=1800):
+        self.lock = threading.Lock()
+        self.history = deque() # (time, x, y, z, vx, vy, vz, v_air_mag)
+        self.max_age_s = max_age_s
+        self.current_wind = (0.0, 0.0, 0.0) # World frame (m/s)
+
+    def add_sample(self, t, pos, vel, pressure_hpa, static_pressure, density):
+        # q = P_total - P_static = 0.5 * rho * v^2
+        # Dynamic pressure q in Pa (hPa * 100)
+        q = abs(pressure_hpa - static_pressure) * 100.0
+        v_air_mag = math.sqrt(2 * q / max(density, 0.1))
+        
+        with self.lock:
+            self.history.append((t, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], v_air_mag))
+            # Expire old data
+            cutoff = t - self.max_age_s
+            while self.history and self.history[0][0] < cutoff:
+                self.history.popleft()
+            
+            # Simple vector estimation:
+            # If moving, we assume wind is relatively constant.
+            # Va^2 = (Vg_x + Vw_x)^2 + (Vg_y + Vw_y)^2 + (Vg_z + Vw_z)^2
+            # For now, we use a heuristic based on the last 5s of samples
+            if len(self.history) > 100:
+                self._estimate_wind_vector()
+
+    def _estimate_wind_vector(self):
+        # We look at the relationship between ground velocity and apparent airspeed
+        # to solve for the constant wind vector that best fits the observations.
+        # This is a simplified rolling average of the delta.
+        # In a perfect world, we'd use a Kalman filter or Least Squares.
+        # Heuristic: Wind = Vector Mean of (V_air_mag * direction_opposite_to_motion) - V_ground
+        # This only works if we move in different directions.
+        samples = list(self.history)[-500:] # Last 5s at 100Hz
+        wx, wy, wz = 0.0, 0.0, 0.0
+        count = 0
+        for s in samples:
+            _, x, y, z, vx, vy, vz, va = s
+            vg_mag = math.sqrt(vx*vx + vy*vy + vz*vz)
+            if vg_mag > 0.1:
+                # Apparent velocity vector (approx)
+                # If va > vg_mag, wind is likely helping or opposing
+                ratio = va / vg_mag
+                # Estimation: Wind vector component along motion
+                wx += vx * (ratio - 1.0)
+                wy += vy * (ratio - 1.0)
+                wz += vz * (ratio - 1.0)
+                count += 1
+        
+        if count > 0:
+            self.current_wind = (wx/count, wy/count, wz/count)
+
+    def get_stats_at_radius(self, current_pos, radius_m):
+        with self.lock:
+            if not self.history:
+                return 0.0, 0.0
+            
+            relevant = []
+            cx, cy, cz = current_pos
+            for s in self.history:
+                _, x, y, z, vx, vy, vz, va = s
+                dist = math.sqrt((x-cx)**2 + (y-cy)**2 + (z-cz)**2)
+                if dist <= radius_m:
+                    relevant.append(s)
+            
+            if not relevant:
+                return None, None
+            
+            # Average magnitude and direction from samples
+            v_sum = 0.0
+            # For direction, we use the global estimate
+            # but ideally we'd re-estimate per-bucket.
+            for s in relevant:
+                v_sum += s[7] # v_air_mag
+            
+            avg_mag = v_sum / len(relevant)
+            # Factor out ground speed to get true wind speed
+            # W = |Va - Vg|
+            vg_sum = 0.0
+            for s in relevant:
+                vg_sum += math.sqrt(s[4]**2 + s[5]**2 + s[6]**2)
+            avg_vg = vg_sum / len(relevant)
+            
+            wind_speed = abs(avg_mag - avg_vg)
+            return wind_speed, _degrees_to_compass(_math_to_bearing(self.current_wind))
+
+def _math_to_bearing(vec):
+    vx, vy, vz = vec
+    # Math atan2 is (y, x), bearing is from North (y-axis)
+    angle = math.degrees(math.atan2(vx, vy))
+    return angle % 360.0
+
 class VibrationDetector:
     def __init__(self, fs=100):
         self.fs = fs
@@ -1000,6 +1098,8 @@ class LocationTracker:
         self.total_distance_m = 0.0
         self.last_odometer_lat = start_lat
         self.last_odometer_lon = start_lon
+        self.air_density = 1.225  # kg/m^3 (Standard Sea Level)
+        self.wind_mapper = WindMapper(max_age_s=1800)
 
         # Async Threading State
         self.lock = threading.Lock()
@@ -1136,6 +1236,7 @@ class LocationTracker:
                 v_dot = (sum(self.fan_rpms) / 6000.0) * 0.007
                 p_pa = (self.pressure_hpa if self.pressure_hpa else 1013.25) * 100.0
                 density = p_pa / (self.gas_R * self.ambient_temp_k)
+                self.air_density = density
                 delta_t = self.airflow_outlet_k - self.airflow_inlet_k
                 self.heatflux_j = max(0.0, density * v_dot * self.gas_Cp * delta_t)
                 self.massflow_kg_s = density * v_dot
@@ -1387,6 +1488,11 @@ class LocationTracker:
         self.lon = self.start_lon + (self.pos[0] / m_per_deg_lon)
         self.alt = self.start_alt + self.pos[2]
         self.altitude_rate_per_second = self.vel[2]
+
+        # Update Wind Map (100Hz)
+        # Use SMC measured pressure vs. altitude-derived static pressure for dynamic pressure (q)
+        meas_p = self.smc_pressure_hpa if self.smc_pressure_hpa is not None else self.pressure_hpa
+        self.wind_mapper.add_sample(t_now, self.pos, self.vel, meas_p, self.pressure_hpa, self.air_density)
         self.pressure_hpa = self._calculate_pressure(self.alt)
 
         # Safety check: if drift/movement exceeds 1000m, reset locationd
@@ -1659,6 +1765,10 @@ def render(det, t_start, restarts,
         spr_col = BGRN if spread > 5.0 else (BYEL if spread > 2.0 else BRED)
         a(_line(f" {DIM}Dew Point Spread:{RST} {spr_col}{spread:>5.2f}°C{RST} {DIM}(Low spread = Fog/Rain risk){RST}"))
         
+        # Display Air Fluid Density
+        den_col = BGRN if location.air_density > 1.1 else (BYEL if location.air_density > 0.9 else BRED)
+        a(_line(f" {DIM}Air Fluid Density:{RST} {den_col}{location.air_density:>7.4f} kg/m³{RST}"))
+        
         # Calculate tendency string
         tendency = 0.0
         if len(location.pressure_history) > 60:
@@ -1667,6 +1777,19 @@ def render(det, t_start, restarts,
         ten_col = BRED if tendency < -0.5 else (BGRN if tendency > 0.5 else DIM)
         ten_dir = "↓↓" if tendency < -0.5 else ("↑↑" if tendency > 0.5 else "→")
         a(_line(f" {DIM}Pressure Tendency:{RST} {ten_col}{tendency:>+6.2f} hPa{RST} {ten_col}{ten_dir}{RST}"))
+
+    a(_sep(' Environmental Wind Map (Scale-Averaged) '))
+    if location is not None:
+        for r in [0.1, 1.0, 10.0, 100.0]:
+            speed, w_dir = location.wind_mapper.get_stats_at_radius(location.pos, r)
+            if speed is not None:
+                # 1 m/s = 1.94384 knots
+                knots = speed * 1.94384
+                label = f"Radius {r:>5.1f}m:"
+                a(_line(f" {DIM}{label}{RST} {BWHT}{speed:>6.2f} m/s{RST} ({BCYN}{knots:>6.2f} kt{RST}) {BYEL}{w_dir:<4}{RST}"))
+            else:
+                label = f"Radius {r:>5.1f}m:"
+                a(_line(f" {DIM}{label}{RST} {DIM}waiting for travel...{RST}"))
 
     a(_sep(' System & SMC Thermal '))
     if location is not None:
@@ -2208,7 +2331,11 @@ def main():
                         'category': location.weather_category,
                         'dew_point_k': location.dew_point_k,
                         'dew_point_spread': location.dew_point_spread,
-                        'pressure_tendency_hpa': (location.pressure_history[-1] - location.pressure_history[0]) if len(location.pressure_history) > 60 else 0.0
+                        'air_fluid_density': location.air_density,
+                        'pressure_tendency_hpa': (location.pressure_history[-1] - location.pressure_history[0]) if len(location.pressure_history) > 60 else 0.0,
+                        'wind_map': {
+                            str(r): location.wind_mapper.get_stats_at_radius(location.pos, r) for r in [0.1, 1.0, 10.0, 100.0]
+                        }
                     },
                     'seismic_activity': {
                         'motion_type': det.motion_type,
