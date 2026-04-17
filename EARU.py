@@ -1873,12 +1873,27 @@ class LocationTracker:
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
 
-            MovementAugAmpKnob = 0.01  # (default 1m/s equal to 100cm? idk we just trial and error movementaugampknob for least drift too far)
+            # Dynamic Tuning of MovementAugAmpKnob
+            # Based on how many g is moving (raw_mag) and how it cancels with gravity (calibrated_g)
+            rax, ray, raz = raw_accel if raw_accel is not None else (0.0, 0.0, 0.0)
+            raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
+            
+            # The 'moving g' is the delta from the calibrated baseline
+            moving_g = abs(raw_mag - self.calibrated_g)
+            
+            # Base knob is 0.01, but we scale it by the moving g to tune drift
+            # If moving_g is high, we might want to trust the IMU more or less.
+            # Here we apply a simple linear scaling from the user's trial-and-error base.
+            MovementAugAmpKnob = 0.01 * (1.0 + moving_g)
+            
             self.pos[0] += dx * MovementAugAmpKnob
             self.pos[1] += dy * MovementAugAmpKnob
             self.pos[2] += dz * MovementAugAmpKnob
 
-            dist_inc = math.sqrt(dx * dx + dy * dy + dz * dz)
+            # Environmental Odometer also respects the knob
+            dist_inc = math.sqrt((dx * MovementAugAmpKnob) ** 2 + 
+                                (dy * MovementAugAmpKnob) ** 2 + 
+                                (dz * MovementAugAmpKnob) ** 2)
             self.total_distance_m += dist_inc
             self.odometer_30m_history.append(
                 (t_now, (self.pos[0], self.pos[1], self.pos[2]))
