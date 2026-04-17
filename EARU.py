@@ -170,14 +170,37 @@ def njit_imu_rotate_and_subtract_gravity(q, accel, calibrated_g):
 
 
 @njit(cache=True)
-def njit_solder_fatigue_increment(f_dom, dt, rms, k, eps_crit, b):
-    # Physical stress proxy
+def njit_solder_fatigue_increment(f_dom, dt, rms, peak, k, eps_crit, b, current_damage):
+    """
+    Habibie Microcrack Propagation Model:
+    1. Linear cumulative damage (Miner's Rule) for vibration.
+    2. Non-linear acceleration factor (Crack growth intensity) as D increases.
+    3. Plasticity / Impact term for high-G Physical Shocks.
+    """
+    # 1. Physical stress proxy for vibration
     g_rms = max(1e-10, rms)
     # Z_d = (G * G_rms) / (2*pi*f)^2
     z_d = (9.80665 * g_rms) / ((2.0 * 3.141592653589793 * f_dom) ** 2)
     eps = k * z_d
-    # Miner's Rule
-    return f_dom * dt * (eps / eps_crit) ** b
+    
+    # Miner's increment (vibration-based)
+    d_vibe = f_dom * dt * (eps / eps_crit) ** b
+    
+    # 2. Habibie Crack Tip Acceleration Factor
+    # As damage increases, crack propagation accelerates (Stress Intensity Factor proxy)
+    # Factor: 1.0 + alpha * D^m
+    habibie_accel = 1.0 + 5.0 * (current_damage ** 0.5)
+    
+    # 3. Impact-Induced Plasticity / Micro-cleavage (Broadband Shock)
+    # Impacts (Peak G) bypass the frequency-based displacement model.
+    # We use a lower exponent for shocks (e.g. 3.0 instead of 6.4) to reflect plasticity.
+    eps_peak = k * (9.80665 * peak) / ((2.0 * 3.141592653589793 * 100.0) ** 2) # Assume 100Hz impulsive peak
+    d_impact = (eps_peak / (eps_crit * 0.5)) ** 3.0 # Impact uses lower crit threshold and lower exponent
+    
+    # Combine increments
+    total_inc = (d_vibe + d_impact * 0.05) * habibie_accel
+    
+    return total_inc
 
 
 _ANSI_RE = re.compile(r"\033\[([^m]*)m")
@@ -498,6 +521,7 @@ def _math_to_bearing(vec):
 class VibrationDetector:
     def __init__(self, fs=100):
         self.fs = fs
+        self._lock = threading.Lock()
         self.sample_count = 0
         # ... (rest of init)
         self.prob_total_damage_fatigue = 0.0
@@ -586,6 +610,7 @@ class VibrationDetector:
 
         # gyroscope latest values (deg/s)
         self.gyro_latest = (0.0, 0.0, 0.0)
+        self.lid_speed = 0.0
 
         # Mahony AHRS — quaternion orientation (no gimbal lock)
         self._q = [1.0, 0.0, 0.0, 0.0]
@@ -625,161 +650,164 @@ class VibrationDetector:
 
     def classify_seismic(self, location=None):
         """Categorize motion using spectral energy, periodicity, and environment."""
-        # Energy bands (averages of deques)
-        b_eng = [sum(list(b)) / max(1, len(b)) if b else 0.0 for b in self.band_energy]
-        high_freq_pwr = b_eng[0] + b_eng[1]  # Top two bands
-        mid_freq_pwr = b_eng[2]             # Middle band
-        low_freq_pwr = b_eng[3] + b_eng[4]   # Bottom two bands
-        total_pwr = sum(b_eng) + 1e-30
+        with self._lock:
+            # Energy bands (averages of deques)
+            b_eng = [sum(list(b)) / max(1, len(b)) if b else 0.0 for b in self.band_energy]
+            high_freq_pwr = b_eng[0] + b_eng[1]  # Top two bands
+            mid_freq_pwr = b_eng[2]             # Middle band
+            low_freq_pwr = b_eng[3] + b_eng[4]   # Bottom two bands
+            total_pwr = sum(b_eng) + 1e-30
 
-        self.spectral_balance = (high_freq_pwr - low_freq_pwr) / total_pwr
+            self.spectral_balance = (high_freq_pwr - low_freq_pwr) / total_pwr
 
-        rms = self.rms
-        peak = self.peak
-        freq = self.period_freq if self.period_freq else 0.0
-        reg = (1.0 - self.period_cv) if self.period_cv is not None else 0.0
+            rms = self.rms
+            peak = self.peak
+            freq = self.period_freq if self.period_freq else 0.0
+            reg = (1.0 - self.period_cv) if self.period_cv is not None else 0.0
 
-        m_type = "Stationary"
-        cert = 0.0
-
-        # --- Electronic Damage Fatigue Logic (Solder Microcrack - SAC305) ---
-        # 1. Physics Model Calculation
-        now = time.time()
-        dt = max(0.001, now - self._last_fatigue_update)
-        self._last_fatigue_update = now
-
-        # Derive dominant frequency f_dom
-        if self.period_freq and self.period_cv < 0.4:
-            f_dom = self.period_freq
-        else:
-            # Weighted average frequency from spectral bands
-            total_eng = sum(b_eng)
-            if total_eng > 1e-9:
-                f_dom = sum(f * e for f, e in zip(self.band_freqs, b_eng)) / total_eng
-            else:
-                f_dom = 30.0  # Default to 30Hz for noise floor
-
-        f_dom = max(5.0, f_dom)  # Cap at 5Hz to avoid displacement singularities
-
-        # Use a more realistic fatigue threshold (0.1% strain)
-        s_eps_crit = self.solder_eps_crit * 2.0  # 0.1% strain failure limit
-
-        # Noise gate: If RMS is below 0.002g, assume zero damage
-        if self.rms < 0.002:
-            d_damage = 0.0
-        else:
-            # Physics-based damage increment (Miner's Rule) via NJIT
-            d_damage = njit_solder_fatigue_increment(
-                f_dom, dt, self.rms, self.solder_k, s_eps_crit, self.solder_b
-            )
-            # Apply a "Life Scaler": Solder shouldn't fail in seconds
-            # Scale down by 1000 to represent a longer fatigue life
-            d_damage /= 1000.0
-
-        # Electromech fatigue remains heuristic for now
-        electromech_p = min(0.7, (self.crest / 40.0) + (self.kurtosis / 50.0))
-
-        # 2. Environmental Multipliers (The "Mix")
-        thermal_stress = 1.0
-        humidity_stress = 1.0
-        pressure_stress = 1.0
-        seu_risk = 1.0
-
-        if location:
-            # Thermal: Solder joint fatigue increases at high temperatures (TCMz > 80C)
-            tcmz = location.smc_temps.get("TCMz", 50.0)
-            if tcmz > 80.0:
-                thermal_stress = 1.0 + (tcmz - 80.0) / 40.0  # Scales up to 1.5x at 100C
-
-            # Altitude Stress (Cooling efficiency)
-            thermal_stress *= location.alt_stress_multiplier
-
-            # Humidity: Risk of electromech transience (shorts/corrosion) at high RH
-            rh = location.humidity_pct
-            if rh > 70.0:
-                humidity_stress = (
-                    1.0 + (rh - 70.0) / 60.0
-                )  # Scales up to 1.5x at 100% RH
-
-            # Pressure Tendency: Rapid atmospheric shift contributes to fatigue
-            if len(location.pressure_history) > 60:
-                tendency = abs(
-                    location.pressure_history[-1] - location.pressure_history[0]
-                )
-                if tendency > 1.0:
-                    pressure_stress = 1.0 + min(0.3, tendency / 10.0)
-
-            # SEU Risk (Single Event Upset) from altitude
-            seu_risk = location.seu_risk_multiplier
-
-            # Combined Environmental Fatigue (Atmospheric Aging)
-            env_fatigue = (
-                thermal_stress * humidity_stress * pressure_stress * seu_risk
-            ) - 1.0
-
-            # Apply multipliers to the physics-based damage increment
-            d_damage *= thermal_stress * humidity_stress * pressure_stress
-            electromech_p = min(
-                1.0, electromech_p * humidity_stress + env_fatigue * 0.1
-            )
-
-        # 3. Cumulative Fatigue Accumulation (Palmgren-Miner Rule)
-        # Cap d_damage to prevent explosive runaway (max 0.1% increase per step)
-        d_damage = min(0.001, d_damage)
-        self.cumulative_fatigue += d_damage
-        self.prob_solder_fatigue = min(1.0, self.cumulative_fatigue)
-        self.prob_electromech_fatigue = electromech_p
-        self.prob_total_damage_fatigue = max(
-            self.prob_solder_fatigue, electromech_p
-        )
-
-        # --- Motion Classification Logic ---
-        # 0. Intentional Hardware Torture: Extreme RMS + Kurtosis (erratic/violent shaking)
-        if rms > 0.15 and self.kurtosis > 12:
-            m_type = "Intentional Hardware Torture"
-            cert = min(1.0, (rms * 5.0 + self.kurtosis / 20.0) / 2.0)
-        # 1. Physical Shock: Extreme peak relative to RMS (impact)
-        elif peak > 2.5 or (peak > 1.0 and self.crest > 15):
-            m_type = "Physical Shock"
-            cert = min(1.0, peak / 5.0 + 0.5)
-        # 2. Rocket/Launch: Extreme peak and high-frequency dominance
-        elif peak > 1.2 and high_freq_pwr > 0.05:
-            m_type = "Rocket / High-G Flight"
-            cert = min(1.0, peak / 3.0)
-        # 3. Being Brought (Walking/Hand-carried): Strong 1.5-2.5Hz periodicity
-        elif 1.0 < freq < 3.0 and reg > 0.7:
-            m_type = "Carried (Walking)"
-            cert = reg
-        # 4. Turbulent Flight: Mid-freq vibration + altitude change
-        elif (
-            location
-            and abs(location.altitude_rate_per_second) > 1.0
-            and mid_freq_pwr > 0.001
-        ):
-            m_type = "Turbulent Flight"
-            cert = min(1.0, abs(location.altitude_rate_per_second) / 5.0 + 0.3)
-        # 5. Automotive / Transport: High frequency (engine) + RMS
-        elif high_freq_pwr > 0.005 and rms > 0.01:
-            m_type = "Automotive / Transport"
-            cert = min(1.0, high_freq_pwr * 100)
-        # 6. Seismic / Ground: Low frequency dominant, non-periodic
-        elif low_freq_pwr > 0.002 and self.spectral_balance < -0.3:
-            m_type = "Seismic Activity (Ground)"
-            cert = min(1.0, low_freq_pwr * 200)
-        # 7. Stowed (Bag/Pocket): Muffled low-energy motion
-        elif 0.001 < rms < 0.008:
-            m_type = "Stowed / Passive Motion"
-            cert = 0.6
-        # 8. Stationary
-        elif rms < 0.001:
             m_type = "Stationary"
-            cert = 0.95
-        else:
-            m_type = "Indeterminate Vibration"
-            cert = 0.3
+            cert = 0.0
 
-        self.motion_type = m_type
-        self.motion_certainty = cert
+            # --- Electronic Damage Fatigue Logic (Solder Microcrack - SAC305) ---
+            # 1. Physics Model Calculation
+            now = time.time()
+            dt = max(0.001, now - self._last_fatigue_update)
+            self._last_fatigue_update = now
+
+            # Derive dominant frequency f_dom
+            if self.period_freq and self.period_cv < 0.4:
+                f_dom = self.period_freq
+            else:
+                # Weighted average frequency from spectral bands
+                total_eng = sum(b_eng)
+                if total_eng > 1e-9:
+                    f_dom = sum(f * e for f, e in zip(self.band_freqs, b_eng)) / total_eng
+                else:
+                    f_dom = 30.0  # Default to 30Hz for noise floor
+
+            f_dom = max(5.0, f_dom)  # Cap at 5Hz to avoid displacement singularities
+
+            # Use a more realistic fatigue threshold (0.1% strain)
+            s_eps_crit = self.solder_eps_crit * 2.0  # 0.1% strain failure limit
+
+            # Habibie Model Calculation (Solder Microcrack - SAC305)
+            if self.rms < 0.002 and self.peak < 0.05:
+                d_damage = 0.0
+            else:
+                # Habibie Microcrack Propagation logic (Non-linear acceleration)
+                d_damage = njit_solder_fatigue_increment(
+                    f_dom, dt, self.rms, self.peak, self.solder_k, s_eps_crit, self.solder_b, self.cumulative_fatigue
+                )
+                # Life Scaler: Adjusted from 1000.0 to 10.0 for prototype visibility
+                # (Still represents long life, but jog increments are now visible)
+                d_damage /= 10.0
+
+            # Electromech fatigue remains heuristic
+            # Factor in screen angular velocity (Lid Hinge/Cable wear)
+            # Penalty starts above 10 deg/s. 100 deg/s ~ +0.3 damage risk.
+            lid_penalty = max(0.0, (self.lid_speed - 10.0) / 300.0) 
+            electromech_p = min(0.9, (self.crest / 40.0) + (self.kurtosis / 50.0) + lid_penalty)
+
+            thermal_stress = 1.0
+            humidity_stress = 1.0
+            pressure_stress = 1.0
+            seu_risk = 1.0
+
+            if location:
+                # Thermal: Solder joint fatigue increases at high temperatures (TCMz > 80C)
+                tcmz = location.smc_temps.get("TCMz", 50.0)
+                if tcmz > 80.0:
+                    thermal_stress = 1.0 + (tcmz - 80.0) / 40.0  # Scales up to 1.5x at 100C
+
+                # Altitude Stress (Cooling efficiency)
+                thermal_stress *= location.alt_stress_multiplier
+
+                # Humidity: Risk of electromech transience (shorts/corrosion) at high RH
+                rh = location.humidity_pct
+                if rh > 70.0:
+                    humidity_stress = (
+                        1.0 + (rh - 70.0) / 60.0
+                    )  # Scales up to 1.5x at 100% RH
+
+                # Pressure Tendency: Rapid atmospheric shift contributes to fatigue
+                if len(location.pressure_history) > 60:
+                    tendency = abs(
+                        location.pressure_history[-1] - location.pressure_history[0]
+                    )
+                    if tendency > 1.0:
+                        pressure_stress = 1.0 + min(0.3, tendency / 10.0)
+
+                # SEU Risk (Single Event Upset) from altitude
+                seu_risk = location.seu_risk_multiplier
+
+                # Combined Environmental Fatigue (Atmospheric Aging)
+                env_fatigue = (
+                    thermal_stress * humidity_stress * pressure_stress * seu_risk
+                ) - 1.0
+
+                # Apply multipliers to the physics-based damage increment
+                d_damage *= thermal_stress * humidity_stress * pressure_stress
+                electromech_p = min(
+                    1.0, electromech_p * humidity_stress + env_fatigue * 0.1
+                )
+
+            # 3. Cumulative Fatigue Accumulation (Palmgren-Miner Rule + Habibie)
+            # Cap d_damage to prevent explosive runaway (max 1% increase per step)
+            d_damage = min(0.01, d_damage)
+            self.cumulative_fatigue += d_damage
+            self.prob_solder_fatigue = min(1.0, self.cumulative_fatigue)
+            self.prob_electromech_fatigue = electromech_p
+            self.prob_total_damage_fatigue = max(
+                self.prob_solder_fatigue, electromech_p
+            )
+
+            # --- Motion Classification Logic ---
+            # 0. Intentional Hardware Torture: Extreme RMS + Kurtosis (erratic/violent shaking)
+            if rms > 0.15 and self.kurtosis > 12:
+                m_type = "Intentional Hardware Torture"
+                cert = min(1.0, (rms * 5.0 + self.kurtosis / 20.0) / 2.0)
+            # 1. Physical Shock: Extreme peak relative to RMS (impact)
+            elif peak > 2.5 or (peak > 1.0 and self.crest > 15):
+                m_type = "Physical Shock"
+                cert = min(1.0, peak / 5.0 + 0.5)
+            # 2. Rocket/Launch: Extreme peak and high-frequency dominance
+            elif peak > 1.2 and high_freq_pwr > 0.05:
+                m_type = "Rocket / High-G Flight"
+                cert = min(1.0, peak / 3.0)
+            # 3. Being Brought (Walking/Hand-carried): Strong 1.5-2.5Hz periodicity
+            elif 1.0 < freq < 3.0 and reg > 0.7:
+                m_type = "Carried (Walking)"
+                cert = reg
+            # 4. Turbulent Flight: Mid-freq vibration + altitude change
+            elif (
+                location
+                and abs(location.altitude_rate_per_second) > 1.0
+                and mid_freq_pwr > 0.001
+            ):
+                m_type = "Turbulent Flight"
+                cert = min(1.0, abs(location.altitude_rate_per_second) / 5.0 + 0.3)
+            # 5. Automotive / Transport: High frequency (engine) + RMS
+            elif high_freq_pwr > 0.005 and rms > 0.01:
+                m_type = "Automotive / Transport"
+                cert = min(1.0, high_freq_pwr * 100)
+            # 6. Seismic / Ground: Low frequency dominant, non-periodic
+            elif low_freq_pwr > 0.002 and self.spectral_balance < -0.3:
+                m_type = "Seismic Activity (Ground)"
+                cert = min(1.0, low_freq_pwr * 200)
+            # 7. Stowed (Bag/Pocket): Muffled low-energy motion
+            elif 0.001 < rms < 0.008:
+                m_type = "Stowed / Passive Motion"
+                cert = 0.6
+            # 8. Stationary
+            elif rms < 0.001:
+                m_type = "Stationary"
+                cert = 0.95
+            else:
+                m_type = "Indeterminate Vibration"
+                cert = 0.3
+
+            self.motion_type = m_type
+            self.motion_certainty = cert
 
     def process_gyro(self, gx, gy, gz):
         self.gyro_latest = (gx, gy, gz)
@@ -2123,8 +2151,8 @@ class LocationTracker:
         self.check_core_location_async(now)
 
 
-# Cache for lid speed tracking
-_prev_lid = {"angle": None, "time": 0.0, "speed": 0.0}
+# Cache for lid state tracking (UI)
+_prev_lid = {"status": "OPEN", "angle": None}
 
 
 def render(
@@ -2133,16 +2161,6 @@ def render(
     el = time.time() - t_start
     rate = det.sample_count / el if el > 1 else 0
     now = time.time()
-
-    # Hinge speed calculation
-    if lid_angle is not None:
-        if _prev_lid["angle"] is not None:
-            dt = now - _prev_lid["time"]
-            if dt > 0:
-                speed = (lid_angle - _prev_lid["angle"]) / dt
-                _prev_lid["speed"] = speed
-        _prev_lid["angle"] = lid_angle
-        _prev_lid["time"] = now
 
     raw_lines = []
     a = raw_lines.append
@@ -2682,7 +2700,7 @@ def render(
         # Hinge Status & Speed
         lid_status = "OPEN" if (lid_angle and lid_angle > 5.0) else "CLOSED"
         ls_col = BGRN if lid_status == "OPEN" else BRED
-        h_speed = _prev_lid["speed"]
+        h_speed = det.lid_speed
         hs_col = BYEL if abs(h_speed) > 10.0 else DIM
         a(
             _line(
@@ -3144,8 +3162,12 @@ def main(stdscr=None):
     last_als_count = 0
     last_lid_count = 0
     lid_angle = None
+    last_lid_angle = None
+    last_lid_t = 0.0
+    lid_speed = 0.0
     als_raw = None
     last_draw = 0.0
+    last_impact_save = 0.0
     last_dwt = 0.0
     last_period = 0.0
     worker = None
@@ -3171,6 +3193,8 @@ def main(stdscr=None):
                     det.detect_periodicity()
                     location.check_core_location(now)
                     location.check_system_metrics()
+                    location.check_smc_sensors()
+                    location.check_smc_pressure()
                     last_period = now
 
                 # 2b. Heartbeat Analysis (Every 20.0s)
@@ -3178,16 +3202,14 @@ def main(stdscr=None):
                     det.detect_heartbeat()
                     det.last_heartbeat_update = now
 
-                # 2c. Seismic Classification (Every 48.0s)
-                if now - det.last_seismic_update >= 48.0:
+                # 2c. Seismic Classification (Every 0.2s)
+                if now - det.last_seismic_update >= 0.2:
                     det.classify_seismic(location)
                     det.last_seismic_update = now
 
-                # 2d. Weather & Thermodynamics Analysis (Every 60.0s)
+                # 2d. Weather Analysis (Every 60.0s)
                 if now - location.last_weather_update >= 60.0:
-                    location.check_smc_pressure()
                     location.fetch_api_pressure()
-                    location.check_smc_sensors()
                     location.update_weather_thermodynamics()
                     location.last_weather_update = now
 
@@ -3276,13 +3298,34 @@ def main(stdscr=None):
             lid_data, last_lid_count = shm_snap_read(shm_lid.buf, last_lid_count, 4)
             if lid_data is not None:
                 lid_angle = struct.unpack("<f", lid_data)[0]
+                if last_lid_angle is not None:
+                    dt_lid = now - last_lid_t
+                    if dt_lid > 0:
+                        raw_speed = abs(lid_angle - last_lid_angle) / dt_lid
+                        # Filter/Smoothing for the speed
+                        lid_speed = lid_speed * 0.7 + raw_speed * 0.3
+                last_lid_angle = lid_angle
+                last_lid_t = now
+            else:
+                # Decay lid speed if no new data
+                lid_speed *= 0.95
+            
+            det.lid_speed = lid_speed
 
             # Loop tracking record
             loop_duration = (time.time() - loop_start) * 1000.0
             loop_tracker.record_loop(loop_duration)
 
-            draw_period = 1.0
-            if now - last_draw >= draw_period:
+            # 4. Emergency Impact Save Trigger
+            is_impact = (det.peak > 3.0)
+            draw_period = 0.5
+            
+            if (now - last_draw >= draw_period) or (is_impact and now - last_impact_save > 0.5):
+                if is_impact:
+                    # Emergency Classification to capture impact damage immediately
+                    det.classify_seismic(location)
+                    last_impact_save = now
+                last_draw = now
                 # Prepare complete data for potential task
                 qw, qx, qy, qz = det._q
                 sin_r = 2.0 * (qw * qx + qy * qz)
@@ -3424,6 +3467,7 @@ def main(stdscr=None):
                         "power": location.smc_temps.get("PSTR", 0.0),
                     },
                     "lid_angle": lid_angle,
+                    "lid_speed": det.lid_speed,
                     "als": als_raw,  # raw bytes
                     "events": list(det.events)[-1:] if det.events else [],
                 }
