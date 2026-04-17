@@ -11,6 +11,7 @@ import os
 import re
 import json
 import hashlib
+import base64
 import signal
 import math
 import datetime
@@ -1927,19 +1928,46 @@ def main():
     if os.path.exists("EARU_data.dat"):
         try:
             with open("EARU_data.dat", "r") as f:
-                saved_data = json.load(f)
+                raw_content = f.read()
 
-                # Verify data parity if available
+            saved_data = None
+            try:
+                # 1. Attempt standard JSON load from the top of the file
+                # Split by \n[RECOVERY_V1: just in case there's a footer
+                json_part = raw_content.split("\n[RECOVERY_V1:")[0]
+                saved_data = json.loads(json_part)
+                
+                # 2. Verify primary data parity if available
                 if 'parity' in saved_data:
                     actual_parity = saved_data.pop('parity')
-                    # Use sort_keys=True to ensure consistent JSON string for hashing
+                    # Use sort_keys=True for consistent hashing
                     payload = json.dumps(saved_data, default=str, sort_keys=True)
                     expected_parity = hashlib.sha256(payload.encode()).hexdigest()
                     if actual_parity != expected_parity:
-                        sys.stderr.write(f"{YEL}[!] Warning: EARU_data.dat parity check failed!{RST}\n")
+                        sys.stderr.write(f"{YEL}[!] Warning: EARU_data.dat primary parity check failed!{RST}\n")
+                        raise ValueError("Parity Mismatch")
                     else:
-                        sys.stderr.write(f"{DIM}[*] EARU_data.dat parity check passed.{RST}\n")
+                        sys.stderr.write(f"{DIM}[*] EARU_data.dat primary parity check passed.{RST}\n")
+            except Exception as e:
+                # 3. Fallback: Restore from RECOVERY_V1 footer
+                sys.stderr.write(f"{YEL}[!] Attempting restoration from recovery footer...{RST}\n")
+                match = re.search(r"\[RECOVERY_V1:([^:]+):([^\]]+)\]", raw_content)
+                if match:
+                    rec_b64, rec_hash = match.groups()
+                    try:
+                        rec_payload = base64.b64decode(rec_b64).decode()
+                        actual_rec_hash = hashlib.sha256(rec_payload.encode()).hexdigest()
+                        if actual_rec_hash == rec_hash:
+                            saved_data = json.loads(rec_payload)
+                            sys.stderr.write(f"{BGRN}[ok] Data restored from recovery parity footer!{RST}\n")
+                        else:
+                            sys.stderr.write(f"{BRED}[!] Recovery parity footer also corrupted!{RST}\n")
+                    except Exception as rec_err:
+                        sys.stderr.write(f"{BRED}[!] Restoration failed: {rec_err}{RST}\n")
+                else:
+                    sys.stderr.write(f"{RED}[!] No recovery footer found.{RST}\n")
 
+            if saved_data:
                 loc = saved_data.get('location', {})
                 initial_lat = loc.get('lat', initial_lat)
                 initial_lon = loc.get('lon', initial_lon)
@@ -1960,7 +1988,7 @@ def main():
                     det._q = initial_q
                     det._orient_init = True
         except Exception as e:
-            sys.stderr.write(f"{RED}[!] Error loading state: {e}{RST}\n")
+            sys.stderr.write(f"{RED}[!] Fatal error loading state: {e}{RST}\n")
             pass
 
     location = LocationTracker(start_lat=initial_lat, start_lon=initial_lon, start_alt=initial_alt)
@@ -2173,11 +2201,22 @@ def main():
                         json_data = data.copy()
                         if json_data['als']:
                             json_data['als'] = json_data['als'].hex()
-                        # Calculate parity for data integrity
+                        
+                        # Calculate primary parity for data integrity
                         # We use sort_keys=True to ensure consistent JSON string for hashing
                         payload = json.dumps(json_data, default=str, sort_keys=True)
                         json_data['parity'] = hashlib.sha256(payload.encode()).hexdigest()
-                        json.dump(json_data, f, default=str, sort_keys=True)
+                        
+                        # Write main JSON block
+                        full_json_str = json.dumps(json_data, default=str, sort_keys=True)
+                        f.write(full_json_str)
+                        
+                        # Append redundant recovery footer for bit-flip correction/restoration
+                        # Format: \n[RECOVERY_V1:<base64_of_payload>:<sha256_of_payload>]
+                        # This allows manual or automatic restoration if the main JSON is corrupted.
+                        recovery_b64 = base64.b64encode(payload.encode()).decode()
+                        recovery_hash = hashlib.sha256(payload.encode()).hexdigest()
+                        f.write(f"\n[RECOVERY_V1:{recovery_b64}:{recovery_hash}]")
                 except Exception:
                     pass
 
