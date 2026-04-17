@@ -1308,13 +1308,14 @@ class LocationTracker:
             return
         dt = t_now - self.last_t
         self.last_t = t_now
+        
+        qw, qx, qy, qz = q
 
         # Gravity subtraction and World Frame transformation
         if raw_accel is not None:
             wx, wy, wz = njit_imu_rotate_and_subtract_gravity(tuple(q), raw_accel, self.calibrated_g)
         else:
             # Fallback to high-pass if raw_accel is missing (less accurate)
-            qw, qx, qy, qz = q
             r11 = 1 - 2*qy*qy - 2*qz*qz
             r12 = 2*qx*qy - 2*qz*qw
             r13 = 2*qx*qz + 2*qy*qw
@@ -1344,7 +1345,8 @@ class LocationTracker:
         # We bleed velocity to zero to combat integration drift.
         if gyro_mag < 0.5:
             # Check if acceleration magnitude is also near 1g
-            raw_mag = math.sqrt(rax**2 + ray**2 + raz**2) if raw_accel else self.calibrated_g
+            rax, ray, raz = raw_accel if raw_accel is not None else (ax, ay, az)
+            raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
             if abs(raw_mag - self.calibrated_g) < 0.1:
                 # Very stationary: aggressive damping
                 # damping = 0.90 (10% reduction per sample) if very still
@@ -1991,6 +1993,8 @@ def main():
     saved_dist = 0.0
     saved_fatigue = 0.0
 
+    det = VibrationDetector(fs=100)
+
     if os.path.exists("EARU_data.dat"):
         try:
             with open("EARU_data.dat", "r") as f:
@@ -2063,7 +2067,6 @@ def main():
     location.last_odometer_lat = initial_lat
     location.last_odometer_lon = initial_lon
 
-    det = VibrationDetector(fs=100) # Reset det to ensure we can set cumulative
     det.cumulative_fatigue = saved_fatigue
     # Re-initialize det state if orient was loaded
     if det._orient_init:
