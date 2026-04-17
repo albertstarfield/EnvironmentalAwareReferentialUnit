@@ -3001,6 +3001,7 @@ def main(stdscr=None):
     lid_angle = None
     als_raw = None
     last_draw = 0.0
+    last_tui_draw = 0.0
     last_dwt = 0.0
     last_period = 0.0
     worker = None
@@ -3275,7 +3276,7 @@ def main(stdscr=None):
                         # Don't crash if task fails once
                         pass
 
-                if use_tui:
+                if use_tui and (now - last_tui_draw >= 1.0):
                     frame = render(
                         det,
                         t_start,
@@ -3292,6 +3293,7 @@ def main(stdscr=None):
                     else:
                         sys.stdout.write(CLEAR + frame)
                         sys.stdout.flush()
+                    last_tui_draw = now
                 last_draw = now
 
     finally:
