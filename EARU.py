@@ -2606,7 +2606,9 @@ def main(stdscr=None):
                         'calibrated_g': location.calibrated_g,
                         'pos': location.pos,
                         'total_distance_m': location.total_distance_m,
-                        'odometer_30m': sum(d for t, d in location.odometer_30m_history)
+                        'odometer_30m': math.sqrt((location.pos[0] - location.odometer_30m_history[0][1][0])**2 +
+                                                   (location.pos[1] - location.odometer_30m_history[0][1][1])**2 +
+                                                   (location.pos[2] - location.odometer_30m_history[0][1][2])**2) if location.odometer_30m_history else 0.0
                     },
                     'ecosystem_weather': {
                         'category': location.weather_category,
