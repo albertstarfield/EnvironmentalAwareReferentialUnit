@@ -1641,17 +1641,17 @@ class LocationTracker:
             rax, ray, raz = raw_accel if raw_accel is not None else (ax, ay, az)
             raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
             if abs(raw_mag - self.calibrated_g) < 0.1:
-                # Very stationary: aggressive damping
-                # damping = 0.90 (10% reduction per sample) if very still
-                damping = 0.90 if gyro_mag < 0.1 else 0.96
+                # Very stationary: slightly less aggressive damping to preserve subtle motion
+                # Changed from 0.90/0.96 to 0.95/0.98 to "amplify" velocity preservation
+                damping = 0.95 if gyro_mag < 0.1 else 0.98
                 for i in range(3):
                     self.vel[i] *= damping
-                    if abs(self.vel[i]) < 0.005:
+                    if abs(self.vel[i]) < 0.001:
                         self.vel[i] = 0.0
             else:
-                # Moving but no rotation: light damping
+                # Moving but no rotation: very light damping
                 for i in range(3):
-                    self.vel[i] *= 0.995
+                    self.vel[i] *= 0.998
 
         self.v_mag = math.sqrt(self.vel[0]**2 + self.vel[1]**2 + self.vel[2]**2)
 
@@ -1679,7 +1679,7 @@ class LocationTracker:
         self.heading = (yaw_d + self.heading_offset) % 360.0
 
         # Integrate position using augmented velocity
-        if self.v_mag >= 0.1:
+        if self.v_mag >= 0.001:
             dx = v_aug[0] * dt
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
@@ -1703,7 +1703,7 @@ class LocationTracker:
             # Noise filter: no delta for coordinates
             self.altitude_rate_per_second = 0.0
             # Optional: bleed velocity to absolute zero if it was already tiny
-            if self.v_mag < 0.05:
+            if self.v_mag < 0.0005:
                 for i in range(3):
                     self.vel[i] = 0.0
                 self.v_mag = 0.0
