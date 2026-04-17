@@ -173,12 +173,30 @@ class WindMapper:
         self.history = deque() # (time, x, y, z, vx, vy, vz, v_air_mag)
         self.max_age_s = max_age_s
         self.current_wind = (0.0, 0.0, 0.0) # World frame (m/s)
+        self.pressure_offset_hpa = 0.0
+        self.offset_samples = []
 
     def add_sample(self, t, pos, vel, pressure_hpa, static_pressure, density):
-        # q = P_total - P_static = 0.5 * rho * v^2
-        # Dynamic pressure q in Pa (hPa * 100)
-        q = abs(pressure_hpa - static_pressure) * 100.0
+        # 1. Stationary Calibration (ZUPT-style)
+        # If ground speed < 0.05 m/s, we assume any pressure delta is sensor offset
+        vg_mag = math.sqrt(vel[0]**2 + vel[1]**2 + vel[2]**2)
+        
+        if vg_mag < 0.05:
+            # Accumulate offset sample
+            self.offset_samples.append(pressure_hpa - static_pressure)
+            if len(self.offset_samples) > 100: # 1s at 100Hz
+                self.pressure_offset_hpa = sum(self.offset_samples) / len(self.offset_samples)
+                self.offset_samples = self.offset_samples[-100:]
+        
+        # 2. Calculate Corrected Dynamic Pressure
+        # q = P_total - (P_static + P_offset)
+        corrected_delta = pressure_hpa - (static_pressure + self.pressure_offset_hpa)
+        q = max(0.0, corrected_delta) * 100.0
         v_air_mag = math.sqrt(2 * q / max(density, 0.1))
+        
+        # Cap unreasonable values (e.g. 50m/s ≈ 100 knots) unless actually moving fast
+        if vg_mag < 1.0:
+            v_air_mag = min(v_air_mag, 15.0) # Cap at ~30 knots if not in vehicle
         
         with self.lock:
             self.history.append((t, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], v_air_mag))
@@ -187,38 +205,32 @@ class WindMapper:
             while self.history and self.history[0][0] < cutoff:
                 self.history.popleft()
             
-            # Simple vector estimation:
-            # If moving, we assume wind is relatively constant.
-            # Va^2 = (Vg_x + Vw_x)^2 + (Vg_y + Vw_y)^2 + (Vg_z + Vw_z)^2
-            # For now, we use a heuristic based on the last 5s of samples
             if len(self.history) > 100:
                 self._estimate_wind_vector()
 
     def _estimate_wind_vector(self):
-        # We look at the relationship between ground velocity and apparent airspeed
-        # to solve for the constant wind vector that best fits the observations.
-        # This is a simplified rolling average of the delta.
-        # In a perfect world, we'd use a Kalman filter or Least Squares.
-        # Heuristic: Wind = Vector Mean of (V_air_mag * direction_opposite_to_motion) - V_ground
-        # This only works if we move in different directions.
-        samples = list(self.history)[-500:] # Last 5s at 100Hz
+        # Weighted Vector Mean
+        samples = list(self.history)[-1000:] # Last 10s
         wx, wy, wz = 0.0, 0.0, 0.0
-        count = 0
+        total_w = 0.0
+        
         for s in samples:
             _, x, y, z, vx, vy, vz, va = s
             vg_mag = math.sqrt(vx*vx + vy*vy + vz*vz)
-            if vg_mag > 0.1:
-                # Apparent velocity vector (approx)
-                # If va > vg_mag, wind is likely helping or opposing
+            
+            if vg_mag > 0.2:
+                # Relationship: Va = |Vg + Vw|
+                # We use a simple projection: if Va > Vg, wind is partially aligned with Vg
+                # weight by velocity - more motion = better data
+                weight = vg_mag
                 ratio = va / vg_mag
-                # Estimation: Wind vector component along motion
-                wx += vx * (ratio - 1.0)
-                wy += vy * (ratio - 1.0)
-                wz += vz * (ratio - 1.0)
-                count += 1
+                wx += vx * (ratio - 1.0) * weight
+                wy += vy * (ratio - 1.0) * weight
+                wz += vz * (ratio - 1.0) * weight
+                total_w += weight
         
-        if count > 0:
-            self.current_wind = (wx/count, wy/count, wz/count)
+        if total_w > 0:
+            self.current_wind = (wx/total_w, wy/total_w, wz/total_w)
 
     def get_stats_at_radius(self, current_pos, radius_m):
         with self.lock:
@@ -236,22 +248,23 @@ class WindMapper:
             if not relevant:
                 return None, None, None
             
-            # Average magnitude and direction from samples
+            # Weighted average wind speed
             v_sum = 0.0
-            # For direction, we use the global estimate
-            # but ideally we'd re-estimate per-bucket.
-            for s in relevant:
-                v_sum += s[7] # v_air_mag
-            
-            avg_mag = v_sum / len(relevant)
-            # Factor out ground speed to get true wind speed
-            # W = |Va - Vg|
             vg_sum = 0.0
             for s in relevant:
+                v_sum += s[7] # v_air_mag
                 vg_sum += math.sqrt(s[4]**2 + s[5]**2 + s[6]**2)
+            
+            avg_mag = v_sum / len(relevant)
             avg_vg = vg_sum / len(relevant)
             
-            wind_speed = abs(avg_mag - avg_vg)
+            # The wind speed is the delta that isn't explained by motion
+            # but we also factor in our vector estimate
+            vw_mag = math.sqrt(sum(c*c for c in self.current_wind))
+            
+            # Combined estimate: 70% current vector, 30% local scalar delta
+            wind_speed = (vw_mag * 0.7) + (abs(avg_mag - avg_vg) * 0.3)
+            
             bearing = _math_to_bearing(self.current_wind)
             return wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing)
 
