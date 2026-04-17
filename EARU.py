@@ -1421,11 +1421,17 @@ class ProfilerDebug:
         name, start = self.stack.pop()
         dt = (time.perf_counter() - start) * 1000.0  # ms
         
-        # Build hierarchical path: "Parent > Child > Subchild"
+        # Build hierarchical path
         path = " > ".join([s[0] for s in self.stack] + [name])
         if path not in self.block_times:
             self.block_times[path] = deque(maxlen=100)
         self.block_times[path].append(dt)
+
+    def clear_stack(self):
+        """Emergency cleanup to prevent nesting leaks across loop boundaries."""
+        if not self.enabled:
+            return
+        self.stack.clear()
 
     def track_size(self, name, obj):
         if not self.enabled:
@@ -1471,21 +1477,37 @@ class ProfilerDebug:
 
         lines.append("Block Timings (ms):")
         
-        # Sort paths to keep hierarchy logical
-        sorted_paths = sorted(self.block_times.keys())
-        for path in sorted_paths:
-            history = self.block_times[path]
-            if not history:
-                continue
-            
+        # Build tree structure
+        tree = {}
+        for path, history in self.block_times.items():
             parts = path.split(" > ")
-            indent = "  " * (len(parts) - 1)
-            display_name = parts[-1]
-            
-            avg_t = sum(history) / len(history)
-            max_t = max(history)
-            lines.append(f"  {indent}- {display_name:20}: avg {avg_t:6.2f}ms | max {max_t:6.2f}ms")
-        
+            curr = tree
+            for i, p in enumerate(parts):
+                if p not in curr:
+                    curr[p] = {"children": {}, "stats": None}
+                if i == len(parts) - 1:
+                    avg_t = sum(history) / len(history)
+                    max_t = max(history)
+                    curr[p]["stats"] = (avg_t, max_t)
+                curr = curr[p]["children"]
+
+        def render_tree(node, prefix=""):
+            items = sorted(node.items())
+            for i, (name, data) in enumerate(items):
+                is_last = (i == len(items) - 1)
+                connector = "└─ " if is_last else "├─ "
+                
+                stat_str = ""
+                if data["stats"]:
+                    avg_t, max_t = data["stats"]
+                    stat_str = f": {avg_t:6.2f}ms | max {max_t:6.2f}ms"
+                
+                lines.append(f"{prefix}{connector}{name:20}{stat_str}")
+                
+                new_prefix = prefix + ("   " if is_last else "│  ")
+                render_tree(data["children"], new_prefix)
+
+        render_tree(tree)
         lines.append("-" * 40 + "\n")
 
         try:
@@ -3344,16 +3366,17 @@ def main(stdscr=None):
     try:
         while running[0]:
             loop_start = time.time()
+            profiler.clear_stack()
             profiler.start_block("loop_init")
             
             profiler.start_block("li_kys_check")
             if os.path.exists("kys"):
                 os.remove("kys")
                 running[0] = False
-                profiler.end_block() # end li_kys_check
-                profiler.end_block() # end loop_init
+                profiler.end_block() # li_kys_check
+                profiler.end_block() # loop_init
                 break
-            profiler.end_block() # end li_kys_check
+            profiler.end_block() # li_kys_check
 
             profiler.start_block("li_worker_check")
             if worker is None or not worker.is_alive():
@@ -3371,14 +3394,14 @@ def main(stdscr=None):
                     daemon=True,
                 )
                 worker.start()
-            profiler.end_block() # end li_worker_check
+            profiler.end_block() # li_worker_check
 
             profiler.start_block("li_sleep")
             time.sleep(0.033 if low_power_mode else 0.005)
-            profiler.end_block() # end li_sleep
+            profiler.end_block() # li_sleep
 
             now = time.time()
-            profiler.end_block() # end loop_init
+            profiler.end_block() # loop_init
 
             profiler.start_block("shm_read")
             samples, last_total = shm_read_new(shm.buf, last_total)
@@ -3388,7 +3411,7 @@ def main(stdscr=None):
 
             # Get latest gyro magnitude for ZUPT
             gyro_mag = math.sqrt(sum(g * g for g in det.gyro_latest))
-            profiler.end_block()
+            profiler.end_block() # shm_read
 
             profiler.start_block("process_accel")
             for idx, (sx, sy, sz) in enumerate(samples):
@@ -3408,7 +3431,7 @@ def main(stdscr=None):
                     raw_accel=(sx, sy, sz),
                     gyro_mag=gyro_mag,
                 )
-            profiler.end_block()
+            profiler.end_block() # process_accel
 
             profiler.start_block("process_gyro")
             gyro_samples, last_gyro_total = shm_read_new_gyro(
@@ -3418,7 +3441,7 @@ def main(stdscr=None):
                 gyro_samples = gyro_samples[-MAX_BATCH:]
             for gx, gy, gz in gyro_samples:
                 det.process_gyro(gx, gy, gz)
-            profiler.end_block()
+            profiler.end_block() # process_gyro
 
             profiler.start_block("process_als_lid")
             als_data, last_als_count = shm_snap_read(
@@ -3443,7 +3466,7 @@ def main(stdscr=None):
                 lid_speed *= 0.95
             
             det.lid_speed = lid_speed
-            profiler.end_block()
+            profiler.end_block() # process_als_lid
 
             # Loop tracking record
             loop_duration = (time.time() - loop_start) * 1000.0
@@ -3477,6 +3500,7 @@ def main(stdscr=None):
                 sin_y = 2.0 * (qw * qz + qx * qy)
                 cos_y = 1.0 - 2.0 * (qy * qy + qz * qz)
                 yaw_d = math.degrees(math.atan2(sin_y, cos_y))
+                profiler.end_block() # dp_orientation
 
                 profiler.start_block("dp_pressure")
                 # Calculate averaged pressure excluding None values
@@ -3490,11 +3514,13 @@ def main(stdscr=None):
                     if p is not None
                 ]
                 avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
+                profiler.end_block() # dp_pressure
 
                 profiler.start_block("dp_loop_stats")
                 l_pct_90, l_low_1, l_low_01, l_avg, l_stutters, l_hz_history = (
                     loop_tracker.get_stats()
                 )
+                profiler.end_block() # dp_loop_stats
 
                 profiler.start_block("dp_wind_map")
                 # Extract wind map stats separately to profile its weight
@@ -3504,6 +3530,7 @@ def main(stdscr=None):
                     )
                     for r in [0.1, 1.0, 10.0, 100.0]
                 }
+                profiler.end_block() # dp_wind_map
 
                 profiler.start_block("dp_dict_build")
                 data = {
@@ -3618,10 +3645,12 @@ def main(stdscr=None):
                     "als": als_raw,  # raw bytes
                     "events": list(det.events)[-1:] if det.events else [],
                 }
+                profiler.end_block() # dp_dict_build
 
                 if not no_writing_dat:
                     profiler.start_block("bg_write_spawn")
                     threading.Thread(target=_write_data_bg, args=(data.copy(),), daemon=True).start()
+                    profiler.end_block() # bg_write_spawn
 
                     if run_task_fn:
                         profiler.start_block("task_exec")
@@ -3630,6 +3659,7 @@ def main(stdscr=None):
                         except Exception as e:
                             # Don't crash if task fails once
                             pass
+                        profiler.end_block() # task_exec
 
                 if use_tui:
                     profiler.start_block("tui_render")
@@ -3649,6 +3679,8 @@ def main(stdscr=None):
                             l_hz_history,
                         ),
                     )
+                    profiler.end_block() # tui_render
+
                     profiler.start_block("tui_refresh")
                     if stdscr:
                         stdscr.erase()
@@ -3657,8 +3689,9 @@ def main(stdscr=None):
                     else:
                         sys.stdout.write(CLEAR + frame)
                         sys.stdout.flush()
+                    profiler.end_block() # tui_refresh
                 last_draw = now
-            profiler.end_block()
+            profiler.end_block() # render_save_check
 
             profiler.start_block("profiler_track")
             # Variable size tracking
@@ -3675,7 +3708,7 @@ def main(stdscr=None):
             profiler.track_size("det.events", det.events)
             
             profiler.report(interval=10.0)
-            profiler.end_block()
+            profiler.end_block() # profiler_track
 
     finally:
         if worker and worker.is_alive():
