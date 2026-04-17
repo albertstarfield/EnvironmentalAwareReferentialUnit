@@ -1403,6 +1403,7 @@ class ProfilerDebug:
         self.start_time = time.time()
         self.last_report = time.time()
         self.block_times = {}
+        self.block_max_deltas = {}  # Path -> max observed abs(delta)
         self.hz_history = deque(maxlen=10)
         self.stack = []
 
@@ -1425,6 +1426,14 @@ class ProfilerDebug:
         path = " > ".join([s[0] for s in self.stack] + [name])
         if path not in self.block_times:
             self.block_times[path] = deque(maxlen=100)
+            self.block_max_deltas[path] = 0.0
+        
+        if len(self.block_times[path]) > 0:
+            prev = self.block_times[path][-1]
+            delta = abs(dt - prev)
+            if delta > self.block_max_deltas[path]:
+                self.block_max_deltas[path] = delta
+        
         self.block_times[path].append(dt)
 
     def clear_stack(self):
@@ -1488,7 +1497,10 @@ class ProfilerDebug:
                 if i == len(parts) - 1:
                     avg_t = sum(history) / len(history)
                     max_t = max(history)
-                    curr[p]["stats"] = (avg_t, max_t)
+                    latest_t = history[-1]
+                    delta = latest_t - history[-2] if len(history) > 1 else 0.0
+                    max_delta = self.block_max_deltas[path]
+                    curr[p]["stats"] = (avg_t, max_t, delta, max_delta)
                 curr = curr[p]["children"]
 
         def render_tree(node, prefix=""):
@@ -1499,8 +1511,8 @@ class ProfilerDebug:
                 
                 stat_str = ""
                 if data["stats"]:
-                    avg_t, max_t = data["stats"]
-                    stat_str = f": {avg_t:6.2f}ms | max {max_t:6.2f}ms"
+                    avg_t, max_t, delta, max_delta = data["stats"]
+                    stat_str = f": avg {avg_t:6.2f}ms | max {max_t:6.2f}ms | Δ {delta:+6.2f}ms | maxΔ {max_delta:6.2f}ms"
                 
                 lines.append(f"{prefix}{connector}{name:20}{stat_str}")
                 
