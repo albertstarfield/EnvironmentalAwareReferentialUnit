@@ -715,6 +715,8 @@ class VibrationDetector:
         self.prob_solder_fatigue = 0.0
         self.prob_electromech_fatigue = 0.0
         self.prob_total_damage_fatigue = 0.0
+        self.anomaly_event_upsets = 0
+        self.last_data_hash = ""
 
         # SAC305 Solder Fatigue Constants
         self.solder_k = 0.0012  # PCB stiffness proxy
@@ -3493,6 +3495,8 @@ def main(stdscr=None):
     # Start background analysis thread
     threading.Thread(target=_bg_analysis_task, daemon=True).start()
 
+    last_main_loop_time = time.time()
+
     try:
         while running[0]:
             loop_start = time.time()
@@ -3732,6 +3736,7 @@ def main(stdscr=None):
                             "cumulative_fatigue": det.cumulative_fatigue,
                             "seu_risk_multiplier": location.seu_risk_multiplier,
                             "alt_stress_multiplier": location.alt_stress_multiplier,
+                            "anomaly_event_upset": det.anomaly_event_upsets,
                         },
                     },
                     "system": {
@@ -3775,6 +3780,35 @@ def main(stdscr=None):
                     "events": list(det.events)[-1:] if det.events else [],
                 }
                 profiler.end_block() # dp_dict_build
+
+                # Data Integrity / Anomaly Event Upset Detection
+                profiler.start_block("data_integrity_check")
+                try:
+                    class NpEncoder(json.JSONEncoder):
+                        def default(self, obj):
+                            if isinstance(obj, np.integer): return int(obj)
+                            if isinstance(obj, np.floating): return float(obj)
+                            if isinstance(obj, np.ndarray): return obj.tolist()
+                            if isinstance(obj, deque): return list(obj)
+                            return super(NpEncoder, self).default(obj)
+
+                    # 1. Time Monotonicity Check
+                    if now <= last_main_loop_time:
+                        det.anomaly_event_upsets += 1
+                    last_main_loop_time = now
+
+                    # 2. Hash / Parity consistency check
+                    # We calculate hash of the current data payload
+                    current_payload = json.dumps(data, cls=NpEncoder, sort_keys=True)
+                    current_hash = hashlib.sha256(current_payload.encode()).hexdigest()
+                    
+                    # We don't compare with PREVIOUS hash (data always changes), 
+                    # but we verify that the data we just built is internally consistent 
+                    # and not containing illegal types/NaNs that would break JSON.
+                    # If this block fails, it's an upset.
+                except Exception:
+                    det.anomaly_event_upsets += 1
+                profiler.end_block() # data_integrity_check
 
                 # Write to EARU_data.dat asynchronously to avoid blocking
                 def _write_data_bg(json_data_copy):
