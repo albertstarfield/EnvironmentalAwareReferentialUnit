@@ -3007,6 +3007,7 @@ def main(stdscr=None):
     kys_mode = False
     low_power_mode = False
     profiler_debug = False
+    no_writing_dat = False
 
     i = 1
     while i < len(sys.argv):
@@ -3023,12 +3024,14 @@ def main(stdscr=None):
             low_power_mode = True
         elif arg == "--profilerDebug":
             profiler_debug = True
+        elif arg == "--no-writing-dat-API-bridge":
+            no_writing_dat = True
         elif arg == "--task" and i + 1 < len(sys.argv):
             task_path = sys.argv[i + 1]
             i += 1
         elif arg in ("-h", "--help"):
             print(
-                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--low-power] [--profilerDebug] [--task path/to/script.py]"
+                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--low-power] [--profilerDebug] [--no-writing-dat-API-bridge] [--task path/to/script.py]"
             )
             return
         i += 1
@@ -3626,14 +3629,15 @@ def main(stdscr=None):
                     except Exception:
                         pass
 
-                threading.Thread(target=_write_data_bg, args=(data.copy(),), daemon=True).start()
+                if not no_writing_dat:
+                    threading.Thread(target=_write_data_bg, args=(data.copy(),), daemon=True).start()
 
-                if run_task_fn:
-                    try:
-                        run_task_fn(data)
-                    except Exception as e:
-                        # Don't crash if task fails once
-                        pass
+                    if run_task_fn:
+                        try:
+                            run_task_fn(data)
+                        except Exception as e:
+                            # Don't crash if task fails once
+                            pass
 
                 if use_tui:
                     frame = render(
