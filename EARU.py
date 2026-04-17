@@ -1873,27 +1873,29 @@ class LocationTracker:
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
 
-            # Dynamic Tuning of MovementAugAmpKnob
-            # Based on how many g is moving (raw_mag) and how it cancels with gravity (calibrated_g)
-            rax, ray, raz = raw_accel if raw_accel is not None else (0.0, 0.0, 0.0)
-            raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
+            # Properly Derived MovementAugAmpKnob
+            # We use the magnitude of the world-frame dynamic acceleration (wx, wy, wz)
+            # which is already gravity-compensated. This captures "moving g" that
+            # has been cancelled out from the static gravity baseline.
+            dyn_accel_mag = math.sqrt(wx**2 + wy**2 + wz**2)
             
-            # The 'moving g' is the delta from the calibrated baseline
-            moving_g = abs(raw_mag - self.calibrated_g)
+            # Normalized Dynamic G (How much the motion deviates from 1g equilibrium)
+            moving_g_normalized = dyn_accel_mag / 9.80665
             
-            # Base knob is 0.01, but we scale it by the moving g to tune drift
-            # If moving_g is high, we might want to trust the IMU more or less.
-            # Here we apply a simple linear scaling from the user's trial-and-error base.
-            MovementAugAmpKnob = 0.01 * (1.0 + moving_g)
+            # Derive Knob: Base scale + dynamic response. 
+            # We use a slight non-linear boost (pow 1.1) to favor clear motion over vibration noise.
+            MovementAugAmpKnob = 0.01 * (1.0 + math.pow(moving_g_normalized, 1.1))
             
             self.pos[0] += dx * MovementAugAmpKnob
             self.pos[1] += dy * MovementAugAmpKnob
             self.pos[2] += dz * MovementAugAmpKnob
 
-            # Environmental Odometer also respects the knob
-            dist_inc = math.sqrt((dx * MovementAugAmpKnob) ** 2 + 
-                                (dy * MovementAugAmpKnob) ** 2 + 
-                                (dz * MovementAugAmpKnob) ** 2)
+            # Environmental Odometer also respects the derived knob
+            # dist_inc = |v_aug * dt * Knob|
+            weighted_dx = dx * MovementAugAmpKnob
+            weighted_dy = dy * MovementAugAmpKnob
+            weighted_dz = dz * MovementAugAmpKnob
+            dist_inc = math.sqrt(weighted_dx**2 + weighted_dy**2 + weighted_dz**2)
             self.total_distance_m += dist_inc
             self.odometer_30m_history.append(
                 (t_now, (self.pos[0], self.pos[1], self.pos[2]))
