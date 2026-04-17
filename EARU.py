@@ -693,18 +693,18 @@ class VibrationDetector:
         self._mahony_ki = 0.05
         self._mahony_err_int = [0.0, 0.0, 0.0]
         self._orient_init = False
-        self.last_heartbeat_update = 0.0
+        self.last_entity_update = 0.0
         self.last_seismic_update = 0.0
 
-        # heartbeat bcg - bandpass 0.8-3hz via cascaded 1st order iir
-        self.hr_hp_alpha = fs / (fs + 2.0 * math.pi * 0.8)
-        self.hr_lp_alpha = 2.0 * math.pi * 3.0 / (2.0 * math.pi * 3.0 + fs)
-        self.hr_hp_prev_in = 0.0
-        self.hr_hp_prev_out = 0.0
-        self.hr_lp_prev = 0.0
-        self.hr_buf = deque(maxlen=fs * 20)
-        self.hr_bpm = None
-        self.hr_confidence = 0.0
+        # User/Entity Detection (BCG) - bandpass 0.8-3hz via cascaded 1st order iir
+        self.ent_hp_alpha = fs / (fs + 2.0 * math.pi * 0.8)
+        self.ent_lp_alpha = 2.0 * math.pi * 3.0 / (2.0 * math.pi * 3.0 + fs)
+        self.ent_hp_prev_in = 0.0
+        self.ent_hp_prev_out = 0.0
+        self.ent_lp_prev = 0.0
+        self.ent_buf = deque(maxlen=fs * 20)
+        self.ent_detected = []  # List of (bpm, confidence) tuples
+        self.ent_count = 0
 
         # Seismic / Motion classification
         self.motion_type = "Stationary"
@@ -979,13 +979,13 @@ class VibrationDetector:
         self.waveform_xyz.append((hx, hy, hz))
         self.dwt_buffer.append(mag)
 
-        # heartbeat bandpass
-        hp_out = self.hr_hp_alpha * (self.hr_hp_prev_out + mag - self.hr_hp_prev_in)
-        self.hr_hp_prev_in = mag
-        self.hr_hp_prev_out = hp_out
-        lp_out = self.hr_lp_alpha * hp_out + (1.0 - self.hr_lp_alpha) * self.hr_lp_prev
-        self.hr_lp_prev = lp_out
-        self.hr_buf.append(lp_out)
+        # Entity detection bandpass
+        ent_hp_out = self.ent_hp_alpha * (self.ent_hp_prev_out + mag - self.ent_hp_prev_in)
+        self.ent_hp_prev_in = mag
+        self.ent_hp_prev_out = ent_hp_out
+        ent_lp_out = self.ent_lp_alpha * ent_hp_out + (1.0 - self.ent_lp_alpha) * self.ent_lp_prev
+        self.ent_lp_prev = ent_lp_out
+        self.ent_buf.append(ent_lp_out)
 
         self._rms_window.append(mag)
         self._rms_dec += 1
@@ -1141,47 +1141,64 @@ class VibrationDetector:
             self.period_cv = None
             self.period_std = None
 
-    def detect_heartbeat(self):
+    def detect_entities(self):
+        """
+        Decomposes BCG signal to detect multiple User/Entity heartbeats.
+        """
         min_n = self.fs * 5
-        if len(self.hr_buf) < min_n:
-            self.hr_bpm = None
-            self.hr_confidence = 0.0
+        if len(self.ent_buf) < min_n:
+            self.ent_detected = []
+            self.ent_count = 0
             return
-        buf = np.array(list(self.hr_buf)[-self.fs * 20 :], dtype=np.float32)
+        
+        buf = np.array(list(self.ent_buf)[-self.fs * 20 :], dtype=np.float32)
         n = len(buf)
         mean = np.mean(buf)
         centered = buf - mean
         var = np.var(buf) * n
         if var < 1e-20:
-            self.hr_bpm = None
-            self.hr_confidence = 0.0
+            self.ent_detected = []
+            self.ent_count = 0
             return
+            
         lag_lo = int(self.fs * 0.3)
-        lag_hi = min(int(self.fs * 1.0), n // 2)
+        lag_hi = min(int(self.fs * 1.5), n // 2) # Extended range for slower heartbeats
         if lag_lo >= lag_hi:
-            self.hr_bpm = None
-            self.hr_confidence = 0.0
+            self.ent_detected = []
+            self.ent_count = 0
             return
 
-        # Use numpy.correlate
         acorr_full = np.correlate(centered, centered, mode='full')
         acorr = acorr_full[n-1+lag_lo : n-1+lag_hi] / var
 
-        if len(acorr) == 0:
-            self.hr_bpm = None
-            self.hr_confidence = 0.0
+        if len(acorr) < 3:
+            self.ent_detected = []
+            self.ent_count = 0
             return
 
-        best_i = np.argmax(acorr)
-        best_r = acorr[best_i]
-        best_lag = lag_lo + best_i
+        # Multi-peak detection in autocorrelation
+        found = []
+        for i in range(1, len(acorr) - 1):
+            val = acorr[i]
+            # Significant local peak
+            if val > acorr[i-1] and val > acorr[i+1] and val > 0.15:
+                lag = lag_lo + i
+                bpm = 60.0 / (lag / self.fs)
+                
+                # Check if this BPM is already covered by a higher confidence one (harmonics)
+                is_duplicate = False
+                for existing_bpm, _ in found:
+                    if abs(existing_bpm - bpm) < 10 or abs(existing_bpm*2 - bpm) < 10 or abs(existing_bpm/2 - bpm) < 10:
+                        is_duplicate = True
+                        break
+                
+                if not is_duplicate:
+                    found.append((bpm, min(1.0, float(val))))
 
-        if best_r > 0.15:
-            self.hr_bpm = 60.0 / (best_lag / self.fs)
-            self.hr_confidence = min(1.0, float(best_r))
-        else:
-            self.hr_bpm = None
-            self.hr_confidence = 0.0
+        # Sort by confidence
+        found.sort(key=lambda x: x[1], reverse=True)
+        self.ent_detected = found[:3] # Cap at 3 entities
+        self.ent_count = len(self.ent_detected)
 
     def _classify(self, detections, t, amp):
         sources = set(d[0] for d in detections)
@@ -2533,32 +2550,38 @@ def render(
         a(_line(f" {DIM}no regular pattern detected{RST}"))
         a(_line(""))
 
-    hr_active = det.hr_bpm is not None and det.hr_confidence > 0.15
-    if hr_active:
-        bpm = det.hr_bpm
-        period_s = 60.0 / bpm
+    ent_active = len(det.ent_detected) > 0
+    if ent_active:
+        bpm_primary = det.ent_detected[0][0]
+        period_s = 60.0 / bpm_primary
         phase = (now % period_s) < (period_s * 0.3)
         hb_sym = f"{BRED}❤{RST}{DIM}" if phase else f"♡"
-        a(_sep(f" Heartbeat BCG {hb_sym} "))
+        a(_sep(f" User/Entity Detection {hb_sym} "))
     else:
-        a(_sep(" Heartbeat BCG "))
-    if hr_active:
-        conf = int(det.hr_confidence * 100)
-        heart = f"{BRED}♥{RST}" if phase else f"{DIM}♡{RST}"
-        a(
-            _line(
-                f" {heart} {BRED}{BOLD}{bpm:>5.1f} BPM{RST}"
-                f"   confidence: {conf}%   band: 0.8-3Hz"
+        a(_sep(" User/Entity Detection "))
+
+    if ent_active:
+        for idx, (bpm, conf) in enumerate(det.ent_detected):
+            heart = f"{BRED}♥{RST}" if (idx == 0 and phase) else f"{DIM}♡{RST}"
+            conf_pct = int(conf * 100)
+            a(
+                _line(
+                    f" {heart} Entity #{idx+1}: {BRED}{BOLD}{bpm:>5.1f} BPM{RST}"
+                    f"   confidence: {conf_pct}%   band: 0.8-3Hz"
+                )
             )
-        )
+        
+        # Visualize primary pulse
+        bpm_p = det.ent_detected[0][0]
+        p_s = 60.0 / bpm_p
         n_beats = max(1, int(GW / 3))
         beat_line = ""
         for b in range(n_beats):
-            bp = ((now + b * period_s * 0.3) % period_s) < (period_s * 0.3)
+            bp = ((now + b * p_s * 0.3) % p_s) < (p_s * 0.3)
             beat_line += f"{BRED}♥{RST}─" if bp else f"{DIM}♡{RST}─"
         a(_line(f" {beat_line}"))
     else:
-        a(_line(f" {DIM}no heartbeat detected (rest wrists on laptop){RST}"))
+        a(_line(f" {DIM}no entity detected (rest wrists on laptop){RST}"))
         a(_line(""))
 
     a(_sep(" Orientation "))
@@ -3476,10 +3499,10 @@ def main(stdscr=None):
                     location.check_smc_pressure()
                     last_period = now
 
-                # 2b. Heartbeat Analysis (Every 20.0s)
-                if now - det.last_heartbeat_update >= 20.0:
-                    det.detect_heartbeat()
-                    det.last_heartbeat_update = now
+                # 2b. User/Entity Detection Analysis (Every 20.0s)
+                if now - det.last_entity_update >= 20.0:
+                    det.detect_entities()
+                    det.last_entity_update = now
 
                 # 2c. Seismic Classification (Every 0.2s)
                 if now - det.last_seismic_update >= 0.2:
@@ -3802,6 +3825,10 @@ def main(stdscr=None):
                     "lid_angle": lid_angle,
                     "lid_speed": det.lid_speed,
                     "als": als_raw,  # raw bytes
+                    "user_entity_detection": {
+                        "detected": det.ent_detected,
+                        "count": det.ent_count,
+                    },
                     "events": list(det.events)[-1:] if det.events else [],
                 }
                 profiler.end_block() # dp_dict_build
