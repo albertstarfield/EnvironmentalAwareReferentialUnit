@@ -3200,6 +3200,15 @@ def main(stdscr=None):
         except Exception:
             pass
 
+    # One-time initial check for 'kys' file
+    if os.path.exists("kys"):
+        print(f"{YEL}[*] 'kys' file found at startup. cleaning up and exiting...{RST}")
+        try:
+            os.remove("kys")
+        except Exception:
+            pass
+        return
+
     if daemon_mode:
         # Relaunch without --daemon
         cmd = [sys.executable] + [a for a in sys.argv if a != "--daemon"]
@@ -3411,13 +3420,25 @@ def main(stdscr=None):
     # Background processing state
     _bg_running = [False]
     _bg_data_lock = threading.Lock()
+    last_kys_check = 0.0
 
     def _bg_analysis_task():
-        nonlocal last_dwt, last_period
+        nonlocal last_dwt, last_period, last_kys_check
         while running[0]:
             try:
                 now = time.time()
                 
+                # 0. Async KYS check (Every 3.0s)
+                if now - last_kys_check >= 3.0:
+                    if os.path.exists("kys"):
+                        try:
+                            os.remove("kys")
+                        except Exception:
+                            pass
+                        running[0] = False
+                        break
+                    last_kys_check = now
+
                 # 1. DWT Calculation (Every 0.2s)
                 if now - last_dwt >= 0.2:
                     det.compute_dwt()
@@ -3468,15 +3489,6 @@ def main(stdscr=None):
             loop_start = time.time()
             profiler.clear_stack()
             profiler.start_block("loop_init")
-            
-            profiler.start_block("li_kys_check")
-            if os.path.exists("kys"):
-                os.remove("kys")
-                running[0] = False
-                profiler.end_block() # li_kys_check
-                profiler.end_block() # loop_init
-                break
-            profiler.end_block() # li_kys_check
 
             profiler.start_block("li_worker_check")
             if worker is None or not worker.is_alive():
