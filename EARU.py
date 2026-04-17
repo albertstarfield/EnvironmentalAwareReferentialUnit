@@ -1391,8 +1391,7 @@ def _downsample(data, width):
 
 class ProfilerDebug:
     """
-    Tracks memory usage, CPU usage, and object sizes to identify resource leaks
-    or bottlenecks. Only active if --profilerDebug is used.
+    Tracks memory usage, CPU usage, and object sizes with hierarchical block timing.
     """
 
     def __init__(self, enabled=False):
@@ -1405,8 +1404,7 @@ class ProfilerDebug:
         self.last_report = time.time()
         self.block_times = {}
         self.hz_history = deque(maxlen=10)
-        self._current_block = None
-        self._block_start = 0
+        self.stack = []
 
     def record_hz(self, hz):
         if self.enabled:
@@ -1415,19 +1413,19 @@ class ProfilerDebug:
     def start_block(self, name):
         if not self.enabled:
             return
-        if self._current_block is not None:
-            self.end_block()
-        self._current_block = name
-        self._block_start = time.perf_counter()
+        self.stack.append((name, time.perf_counter()))
 
     def end_block(self):
-        if not self.enabled or self._current_block is None:
+        if not self.enabled or not self.stack:
             return
-        dt = (time.perf_counter() - self._block_start) * 1000.0  # ms
-        if self._current_block not in self.block_times:
-            self.block_times[self._current_block] = deque(maxlen=100)
-        self.block_times[self._current_block].append(dt)
-        self._current_block = None
+        name, start = self.stack.pop()
+        dt = (time.perf_counter() - start) * 1000.0  # ms
+        
+        # Build hierarchical path: "Parent > Child > Subchild"
+        path = " > ".join([s[0] for s in self.stack] + [name])
+        if path not in self.block_times:
+            self.block_times[path] = deque(maxlen=100)
+        self.block_times[path].append(dt)
 
     def track_size(self, name, obj):
         if not self.enabled:
@@ -1472,12 +1470,21 @@ class ProfilerDebug:
             lines.append(f"  - {name:20}: {history[-1]:8} (avg: {avg_size:8.1f}, Δ: {growth:+d})")
 
         lines.append("Block Timings (ms):")
-        for name, history in self.block_times.items():
+        
+        # Sort paths to keep hierarchy logical
+        sorted_paths = sorted(self.block_times.keys())
+        for path in sorted_paths:
+            history = self.block_times[path]
             if not history:
                 continue
+            
+            parts = path.split(" > ")
+            indent = "  " * (len(parts) - 1)
+            display_name = parts[-1]
+            
             avg_t = sum(history) / len(history)
             max_t = max(history)
-            lines.append(f"  - {name:20}: avg {avg_t:6.2f}ms | max {max_t:6.2f}ms")
+            lines.append(f"  {indent}- {display_name:20}: avg {avg_t:6.2f}ms | max {max_t:6.2f}ms")
         
         lines.append("-" * 40 + "\n")
 
@@ -3338,11 +3345,17 @@ def main(stdscr=None):
         while running[0]:
             loop_start = time.time()
             profiler.start_block("loop_init")
+            
+            profiler.start_block("li_kys_check")
             if os.path.exists("kys"):
                 os.remove("kys")
                 running[0] = False
+                profiler.end_block() # end li_kys_check
+                profiler.end_block() # end loop_init
                 break
+            profiler.end_block() # end li_kys_check
 
+            profiler.start_block("li_worker_check")
             if worker is None or not worker.is_alive():
                 if worker is not None:
                     restart_count[0] += 1
@@ -3358,10 +3371,14 @@ def main(stdscr=None):
                     daemon=True,
                 )
                 worker.start()
+            profiler.end_block() # end li_worker_check
 
+            profiler.start_block("li_sleep")
             time.sleep(0.033 if low_power_mode else 0.005)
+            profiler.end_block() # end li_sleep
+
             now = time.time()
-            profiler.end_block()
+            profiler.end_block() # end loop_init
 
             profiler.start_block("shm_read")
             samples, last_total = shm_read_new(shm.buf, last_total)
@@ -3654,6 +3671,7 @@ def main(stdscr=None):
             profiler.track_size("det.rms_window", det._rms_window)
             profiler.track_size("loc.pressure_history", location.pressure_history)
             profiler.track_size("loc.odometer_history", location.odometer_30m_history)
+            profiler.track_size("loc.wind_history", location.wind_mapper.history)
             profiler.track_size("det.events", det.events)
             
             profiler.report(interval=10.0)
