@@ -716,6 +716,7 @@ class VibrationDetector:
         self.prob_electromech_fatigue = 0.0
         self.prob_total_damage_fatigue = 0.0
         self.anomaly_event_upsets = 0
+        self.vibe_while_open_events = 0
         self.last_data_hash = ""
 
         # SAC305 Solder Fatigue Constants
@@ -837,6 +838,16 @@ class VibrationDetector:
             self.prob_total_damage_fatigue = max(
                 self.prob_solder_fatigue, electromech_p
             )
+
+            # Track risk: Vibration/Shock while Lid is open
+            if hasattr(self, 'lid_speed'): # Check if lid info is available
+                # Assuming lid_angle > 5.0 means OPEN
+                # Significant event: RMS > 0.05 or Peak > 0.5
+                if (self.rms > 0.05 or self.peak > 0.5):
+                    # We need to know the lid status. Since classify_seismic doesn't 
+                    # explicitly receive lid_angle, we'll check if it was set on the object
+                    if hasattr(self, 'current_lid_angle') and self.current_lid_angle > 5.0:
+                        self.vibe_while_open_events += 1
 
             # --- Motion Classification Logic ---
             # 0. Intentional Hardware Torture: Extreme RMS + Kurtosis (erratic/violent shaking)
@@ -2991,10 +3002,12 @@ def render(
 
     status = (
         "CRITICAL"
-        if prob_total > 0.7 or det.anomaly_event_upsets > 50
-        else ("WARNING" if prob_total > 0.3 or det.anomaly_event_upsets > 0 else "STABLE")
+        if prob_total > 0.7 or det.anomaly_event_upsets > 50 or det.vibe_while_open_events > 100
+        else ("WARNING" if prob_total > 0.3 or det.anomaly_event_upsets > 0 or det.vibe_while_open_events > 0 else "STABLE")
     )
     upset_col = BRED if det.anomaly_event_upsets > 50 else (BYEL if det.anomaly_event_upsets > 0 else DIM)
+    vibe_open_col = BRED if det.vibe_while_open_events > 100 else (BYEL if det.vibe_while_open_events > 0 else DIM)
+    
     a(
         _line(
             f" {DIM}Fatigue Status:{RST} {col_total}{status:<10}{RST}  "
@@ -3003,7 +3016,8 @@ def render(
     )
     a(
         _line(
-            f" {DIM}Aggregated Risk:{RST} {col_total}{int(prob_total * 100):>3}%{RST}"
+            f" {DIM}Aggregated Risk:{RST} {col_total}{int(prob_total * 100):>3}%{RST}  "
+            f"{DIM}Vibe while Open:{RST} {vibe_open_col}{det.vibe_while_open_events:>4} ev{RST}"
         )
     )
 
@@ -3469,6 +3483,9 @@ def main(stdscr=None):
 
                 # 2c. Seismic Classification (Every 0.2s)
                 if now - det.last_seismic_update >= 0.2:
+                    # Provide lid context if available
+                    if 'lid_angle' in locals() or 'lid_angle' in globals():
+                        det.current_lid_angle = lid_angle
                     det.classify_seismic(location)
                     det.last_seismic_update = now
 
@@ -3623,6 +3640,7 @@ def main(stdscr=None):
             if (now - last_draw >= draw_period) or (is_impact and now - last_impact_save > 0.5):
                 if is_impact:
                     # Emergency Classification to capture impact damage immediately
+                    det.current_lid_angle = lid_angle
                     det.classify_seismic(location)
                     last_impact_save = now
                 last_draw = now
