@@ -3204,10 +3204,13 @@ def main(stdscr=None):
                         if len(location.pressure_history) > 60
                         else 0.0,
                         "wind_map": {
-                            str(r): location.wind_mapper.get_stats_at_radius(
-                                location.pos, r
-                            )
-                            for r in [0.1, 1.0, 10.0, 100.0]
+                            "grid_7x7_10m": location.wind_mapper.get_wind_grid(location.pos, location.heading, size=7, step=10.0),
+                            "stats": {
+                                str(r): location.wind_mapper.get_stats_at_radius(
+                                    location.pos, r
+                                )
+                                for r in [0.1, 1.0, 10.0, 100.0]
+                            }
                         },
                     },
                     "seismic_activity": {
@@ -3266,27 +3269,36 @@ def main(stdscr=None):
 
                 # Write to EARU_data.dat by default
                 try:
+                    class NpEncoder(json.JSONEncoder):
+                        def default(self, obj):
+                            if isinstance(obj, np.integer):
+                                return int(obj)
+                            if isinstance(obj, np.floating):
+                                return float(obj)
+                            if isinstance(obj, np.ndarray):
+                                return obj.tolist()
+                            if isinstance(obj, deque):
+                                return list(obj)
+                            return super(NpEncoder, self).default(obj)
+
                     with open("EARU_data.dat", "w") as f:
                         json_data = data.copy()
                         if json_data["als"]:
                             json_data["als"] = json_data["als"].hex()
 
                         # Calculate primary parity for data integrity
-                        # We use sort_keys=True to ensure consistent JSON string for hashing
-                        payload = json.dumps(json_data, default=str, sort_keys=True)
+                        payload = json.dumps(json_data, cls=NpEncoder, sort_keys=True)
                         json_data["parity"] = hashlib.sha256(
                             payload.encode()
                         ).hexdigest()
 
                         # Write main JSON block
                         full_json_str = json.dumps(
-                            json_data, default=str, sort_keys=True
+                            json_data, cls=NpEncoder, sort_keys=True
                         )
                         f.write(full_json_str)
 
-                        # Append redundant recovery footer for bit-flip correction/restoration
-                        # Format: \n[RECOVERY_V1:<base64_of_payload>:<sha256_of_payload>]
-                        # This allows manual or automatic restoration if the main JSON is corrupted.
+                        # Append redundant recovery footer
                         recovery_b64 = base64.b64encode(payload.encode()).decode()
                         recovery_hash = hashlib.sha256(payload.encode()).hexdigest()
                         f.write(f"\n[RECOVERY_V1:{recovery_b64}:{recovery_hash}]")
