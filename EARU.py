@@ -1543,6 +1543,7 @@ class ProfilerDebug:
             return
         self.last_report = now
 
+        uptime = now - self.start_time
         mem = self.process.memory_info().rss / (1024 * 1024)  # MB
         cpu = self.process.cpu_percent()
         
@@ -1552,7 +1553,7 @@ class ProfilerDebug:
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lines = [
-            f"--- {timestamp} ---",
+            f"--- {timestamp} (Uptime: {uptime:.1f}s) ---",
             f"[PROFILER] Mem: {mem:.2f}MB | CPU: {cpu:.1f}% | Loop: {avg_hz:.1f}Hz (Δ {hz_delta:+.1f}, maxΔ {self.hz_max_delta:.1f})",
             "Variable Sizes (length/bytes):",
         ]
@@ -1564,7 +1565,13 @@ class ProfilerDebug:
             growth = history[-1] - history[0] if len(history) > 1 else 0
             lines.append(f"  - {name:20}: {history[-1]:8} (avg: {avg_size:8.1f}, Δ: {growth:+d})")
 
-        lines.append("Block Timings (ms):")
+        # Calculate total active time (sum of top-level blocks) for percentage baseline
+        total_active_ms = 0.0
+        for path, history in self.block_times.items():
+            if " > " not in path: # Top-level block
+                total_active_ms += sum(history) / len(history) if history else 0.0
+
+        lines.append(f"Block Timings (Total active loop: {total_active_ms:.2f}ms):")
         
         # Build tree structure
         tree = {}
@@ -1592,7 +1599,8 @@ class ProfilerDebug:
                 stat_str = ""
                 if data["stats"]:
                     avg_t, max_t, delta, max_delta = data["stats"]
-                    stat_str = f": avg {avg_t:6.2f}ms | max {max_t:6.2f}ms | Δ {delta:+6.2f}ms | maxΔ {max_delta:6.2f}ms"
+                    pct = (avg_t / total_active_ms * 100.0) if total_active_ms > 0 else 0.0
+                    stat_str = f": {pct:5.1f}% | avg {avg_t:6.2f}ms | max {max_t:6.2f}ms | Δ {delta:+6.2f}ms | maxΔ {max_delta:6.2f}ms"
                 
                 lines.append(f"{prefix}{connector}{name:20}{stat_str}")
                 
