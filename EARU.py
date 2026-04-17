@@ -199,7 +199,7 @@ class WindMapper:
             v_air_mag = min(v_air_mag, 15.0) # Cap at ~30 knots if not in vehicle
         
         with self.lock:
-            self.history.append((t, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], v_air_mag))
+            self.history.append((t, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], v_air_mag, pressure_hpa))
             # Expire old data
             cutoff = t - self.max_age_s
             while self.history and self.history[0][0] < cutoff:
@@ -216,8 +216,8 @@ class WindMapper:
         total_w = 0.0
         
         for s in samples:
-            # t, x, y, z, vx, vy, vz, va
-            _, _, _, _, vx, vy, vz, va = s
+            # t, x, y, z, vx, vy, vz, va, phpa
+            _, _, _, _, vx, vy, vz, va, _ = s
             vg_mag = math.sqrt(vx*vx + vy*vy + vz*vz)
             
             if vg_mag > 0.2:
@@ -259,7 +259,8 @@ class WindMapper:
             relevant = []
             cx, cy, cz = current_pos
             for s in self.history:
-                _, x, y, z, vx, vy, vz, va = s
+                # t, x, y, z, vx, vy, vz, va, phpa
+                _, x, y, z, vx, vy, vz, va, _ = s
                 dist = math.sqrt((x-cx)**2 + (y-cy)**2 + (z-cz)**2)
                 if dist <= radius_m:
                     relevant.append(s)
@@ -271,8 +272,11 @@ class WindMapper:
             v_sum = 0.0
             vg_sum = 0.0
             for s in relevant:
-                v_sum += s[7] # v_air_mag
-                vg_sum += math.sqrt(s[4]**2 + s[5]**2 + s[6]**2)
+                # t, x, y, z, vx, vy, vz, va, phpa
+                va_s = s[7]
+                vx, vy, vz = s[4], s[5], s[6]
+                v_sum += va_s
+                vg_sum += math.sqrt(vx*vx + vy*vy + vz*vz)
             
             avg_mag = v_sum / len(relevant)
             avg_vg = vg_sum / len(relevant)
@@ -287,41 +291,41 @@ class WindMapper:
             bearing = _math_to_bearing(self.current_wind)
             return wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing), bearing
 
-    def get_interpolated_wind_speed(self, target_pos, radius_m=30.0):
-        """Interpolates wind speed at a specific world coordinate using history."""
+    def get_interpolated_wind_data(self, target_pos, radius_m=30.0):
+        """Interpolates wind speed, direction, and pressure at world coordinate."""
         with self.lock:
             if not self.history:
-                return 0.0
+                return 0.0, self.current_wind, 1013.25
             
             tx, ty, tz = target_pos
             total_w = 0.0
             total_s = 0.0
+            total_p = 0.0
+            vx, vy, vz = 0.0, 0.0, 0.0
             
-            # Simple Inverse Distance Weighting
             for s in self.history:
-                # t, x, y, z, vx, vy, vz, va
-                _, sx, sy, sz, svx, svy, svz, sva = s
+                # t, x, y, z, vx, vy, vz, va, phpa
+                _, sx, sy, sz, svx, svy, svz, sva, phpa = s
                 d = math.sqrt((sx-tx)**2 + (sy-ty)**2 + (sz-tz)**2)
+                if d > radius_m: continue
                 
-                if d > radius_m:
-                    continue
-                
-                # Weight = 1 / d^2
                 w = 1.0 / (d + 0.5)**2
-                
-                # Wind proxy: delta between ground and air speed
                 vg_mag = math.sqrt(svx**2 + svy**2 + svz**2)
                 s_local = abs(sva - vg_mag)
                 
                 total_s += s_local * w
+                total_p += phpa * w
+                vx += self.current_wind[0] * w
+                vy += self.current_wind[1] * w
+                vz += self.current_wind[2] * w
                 total_w += w
             
             if total_w > 0:
-                return total_s / total_w
-            return 0.0
+                return total_s/total_w, (vx/total_w, vy/total_w, vz/total_w), total_p/total_w
+            return 0.0, self.current_wind, 1013.25
 
     def get_wind_grid(self, center_pos, heading=0.0, size=7, step=10.0):
-        """Generates a rotated 2D grid of wind speeds (Head-Up display)."""
+        """Generates a rotated 2D grid of wind data (Head-Up)."""
         grid = []
         cx, cy, cz = center_pos
         theta = math.radians(heading)
@@ -331,16 +335,11 @@ class WindMapper:
         for j in range(size):
             row = []
             for i in range(size):
-                # Screen-space offsets (lx=Right, ly=Up/Forward)
                 lx = (i - size//2) * step
                 ly = (size//2 - j) * step
-                
-                # Rotate screen-space to world-frame (North-East-Down)
-                # World-Y is North, World-X is East
                 tx = cx + lx * cos_t + ly * sin_t
                 ty = cy - lx * sin_t + ly * cos_t
-                
-                row.append(self.get_interpolated_wind_speed((tx, ty, cz), radius_m=step*1.5))
+                row.append(self.get_interpolated_wind_data((tx, ty, cz), radius_m=step*1.5))
             grid.append(row)
         return grid
 
@@ -933,6 +932,24 @@ def _degrees_to_arrow(d):
     arrows = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
     ix = int((d + 22.5) / 45.0)
     return arrows[ix % 8]
+
+
+def _get_dynamic_pressure_color(p, min_p, max_p):
+    """Maps pressure to a color range: Highest=Red, Lowest=Blue."""
+    if max_p == min_p:
+        return "\033[38;5;46m" # Green if no variation
+    
+    # Normalize 0.0 to 1.0 (0=min, 1=max)
+    norm = (p - min_p) / (max_p - min_p)
+    
+    # Map to 256 colors
+    # Blue: 21, Cyan: 51, Green: 46, Yellow: 226, Orange: 208, Red: 196
+    if norm < 0.2: return "\033[38;5;21m"  # Blue (Lowest)
+    if norm < 0.4: return "\033[38;5;51m"  # Cyan
+    if norm < 0.6: return "\033[38;5;46m"  # Green
+    if norm < 0.8: return "\033[38;5;226m" # Yellow
+    if norm < 0.9: return "\033[38;5;208m" # Orange
+    return "\033[38;5;196m" # Red (Highest)
 
 
 def _get_speed_ansi(speed):
@@ -1925,21 +1942,38 @@ def render(det, t_start, restarts,
             else:
                 a(_line(f" {DIM}{label}{RST} {DIM}N/A (waiting for travel){RST}"))
 
-        # Spatial Wind Intensity Map (Grid)
-        a(_line(f" {DIM}Spatial Wind Intensity Map (Grid Resolution: 10m/cell):{RST}"))
+        # Spatial Wind Vector & Pressure Map (Grid)
+        a(_line(f" {DIM}Spatial Wind Vector & Pressure Map (10m/cell):{RST}"))
         if odo_30m > 10.0:
             grid = location.wind_mapper.get_wind_grid(location.pos, heading=location.heading, size=7, step=10.0)
             a(_line(f"      {DIM}▲ [Ahead: {_degrees_to_compass(location.heading)}]{RST}"))
+            
+            # Find local min/max pressure in grid for dynamic coloring
+            all_p = [d[2] for row in grid for d in row]
+            min_p, max_p = min(all_p), max(all_p)
+            
             for j, row in enumerate(grid):
                 grid_str = ""
-                for i, speed in enumerate(row):
+                for i, data in enumerate(row):
+                    speed, vec, pressure = data
+                    col = _get_dynamic_pressure_color(pressure, min_p, max_p)
                     # Center marker
                     if i == 3 and j == 3:
-                        grid_str += f"{_get_speed_ansi(speed)}┼{RST} "
+                        grid_str += f"{col}┼{RST} "
+                    elif speed < 0.2:
+                        grid_str += f"{DIM}·{RST} "
                     else:
-                        grid_str += f"{_speed_to_color_block(speed)} "
+                        # Rotate wind vector into screen-space
+                        vwx, vwy, _ = vec
+                        theta = math.radians(location.heading)
+                        sx = vwx * math.cos(theta) - vwy * math.sin(theta)
+                        sy = vwx * math.sin(theta) + vwy * math.cos(theta)
+                        bearing_rel = math.degrees(math.atan2(sx, sy)) % 360.0
+                        arrow = _degrees_to_arrow(bearing_rel)
+                        grid_str += f"{col}{arrow}{RST} "
                 a(_line(f"   {grid_str}"))
-            a(_line(f"   {DIM}Green: < 2m/s  Yellow: 5m/s  Red: > 10m/s  (┼ = Current Pos){RST}"))
+            a(_line(f"   {DIM}Arrow: Direction (Flow) | Color: Pressure (Blue=Min, Red=Max){RST}"))
+            a(_line(f"   {DIM}Local Range: {BCYN}{min_p:.2f}{RST} {DIM}to{RST} {BRED}{max_p:.2f} hPa{RST}"))
         else:
             a(_line(f"   {DIM}[Map requires > 10m travel to interpolate local field]{RST}"))
 
