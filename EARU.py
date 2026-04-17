@@ -1415,6 +1415,8 @@ class ProfilerDebug:
     def start_block(self, name):
         if not self.enabled:
             return
+        if self._current_block is not None:
+            self.end_block()
         self._current_block = name
         self._block_start = time.perf_counter()
 
@@ -3438,13 +3440,15 @@ def main(stdscr=None):
             is_impact = (det.peak > 3.0)
             draw_period = 0.5
             
-            profiler.start_block("render_save")
+            profiler.start_block("render_save_check")
             if (now - last_draw >= draw_period) or (is_impact and now - last_impact_save > 0.5):
                 if is_impact:
                     # Emergency Classification to capture impact damage immediately
                     det.classify_seismic(location)
                     last_impact_save = now
                 last_draw = now
+                
+                profiler.start_block("data_prep")
                 # Prepare complete data for potential task
                 qw, qx, qy, qz = det._q
                 sin_r = 2.0 * (qw * qx + qy * qz)
@@ -3591,48 +3595,12 @@ def main(stdscr=None):
                     "events": list(det.events)[-1:] if det.events else [],
                 }
 
-                # Write to EARU_data.dat asynchronously to avoid blocking
-                def _write_data_bg(json_data_copy):
-                    try:
-                        class NpEncoder(json.JSONEncoder):
-                            def default(self, obj):
-                                if isinstance(obj, np.integer):
-                                    return int(obj)
-                                if isinstance(obj, np.floating):
-                                    return float(obj)
-                                if isinstance(obj, np.ndarray):
-                                    return obj.tolist()
-                                if isinstance(obj, deque):
-                                    return list(obj)
-                                return super(NpEncoder, self).default(obj)
-
-                        with open("EARU_data.dat", "w") as f:
-                            if json_data_copy["als"]:
-                                json_data_copy["als"] = json_data_copy["als"].hex()
-
-                            # Calculate primary parity for data integrity
-                            payload = json.dumps(json_data_copy, cls=NpEncoder, sort_keys=True)
-                            json_data_copy["parity"] = hashlib.sha256(
-                                payload.encode()
-                            ).hexdigest()
-
-                            # Write main JSON block
-                            full_json_str = json.dumps(
-                                json_data_copy, cls=NpEncoder, sort_keys=True
-                            )
-                            f.write(full_json_str)
-
-                            # Append redundant recovery footer
-                            recovery_b64 = base64.b64encode(payload.encode()).decode()
-                            recovery_hash = hashlib.sha256(payload.encode()).hexdigest()
-                            f.write(f"\n[RECOVERY_V1:{recovery_b64}:{recovery_hash}]")
-                    except Exception:
-                        pass
-
                 if not no_writing_dat:
+                    profiler.start_block("bg_write_spawn")
                     threading.Thread(target=_write_data_bg, args=(data.copy(),), daemon=True).start()
 
                     if run_task_fn:
+                        profiler.start_block("task_exec")
                         try:
                             run_task_fn(data)
                         except Exception as e:
@@ -3640,6 +3608,7 @@ def main(stdscr=None):
                             pass
 
                 if use_tui:
+                    profiler.start_block("tui_render")
                     frame = render(
                         det,
                         t_start,
@@ -3656,6 +3625,7 @@ def main(stdscr=None):
                             l_hz_history,
                         ),
                     )
+                    profiler.start_block("tui_refresh")
                     if stdscr:
                         stdscr.erase()
                         _add_ansi_to_curses(stdscr, frame)
