@@ -266,13 +266,13 @@ class WindMapper:
 
     def __init__(self, max_age_s=1800):
         self.lock = threading.Lock()
-        self.history = deque()  # (time, x, y, z, vx, vy, vz, v_air_mag)
+        self.history = deque()  # (time, x, y, z, vx, vy, vz, v_air_mag, pressure_hpa, temp_k)
         self.max_age_s = max_age_s
         self.current_wind = (0.0, 0.0, 0.0)  # World frame (m/s)
         self.pressure_offset_hpa = 0.0
         self.offset_samples = []
 
-    def add_sample(self, t, pos, vel, pressure_hpa, static_pressure, density):
+    def add_sample(self, t, pos, vel, pressure_hpa, static_pressure, density, temp_k=293.15):
         # 1. Stationary Calibration (ZUPT-style)
         # If ground speed < 0.05 m/s, we assume any pressure delta is sensor offset
         vg_mag = math.sqrt(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
@@ -308,6 +308,7 @@ class WindMapper:
                     vel[2],
                     v_air_mag,
                     pressure_hpa,
+                    temp_k,
                 )
             )
             # Expire old data
@@ -315,6 +316,9 @@ class WindMapper:
             while self.history and self.history[0][0] < cutoff:
                 self.history.popleft()
 
+    def update_estimation(self):
+        """Perform the heavy vector calculation (called at lower rate)."""
+        with self.lock:
             if len(self.history) > 100:
                 self._estimate_wind_vector()
 
@@ -326,8 +330,8 @@ class WindMapper:
         total_w = 0.0
 
         for s in samples:
-            # t, x, y, z, vx, vy, vz, va, phpa
-            _, _, _, _, vx, vy, vz, va, _ = s
+            # t, x, y, z, vx, vy, vz, va, phpa, temp_k
+            _, _, _, _, vx, vy, vz, va, _, _ = s
             vg_mag = math.sqrt(vx * vx + vy * vy + vz * vz)
 
             if vg_mag > 0.2:
@@ -369,8 +373,8 @@ class WindMapper:
             relevant = []
             cx, cy, cz = current_pos
             for s in self.history:
-                # t, x, y, z, vx, vy, vz, va, phpa
-                _, x, y, z, vx, vy, vz, va, _ = s
+                # t, x, y, z, vx, vy, vz, va, phpa, temp_k
+                _, x, y, z, vx, vy, vz, va, _, _ = s
                 dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2)
                 if dist <= radius_m:
                     relevant.append(s)
@@ -407,20 +411,21 @@ class WindMapper:
             )
 
     def get_interpolated_wind_data(self, target_pos, radius_m=30.0):
-        """Interpolates wind speed, direction, and pressure at world coordinate."""
+        """Interpolates wind speed, direction, pressure, and temperature at world coordinate."""
         with self.lock:
             if not self.history:
-                return 0.0, self.current_wind, 1013.25
+                return 0.0, self.current_wind, 1013.25, 293.15
 
             tx, ty, tz = target_pos
             total_w = 0.0
             total_s = 0.0
             total_p = 0.0
+            total_t = 0.0
             vx, vy, vz = 0.0, 0.0, 0.0
 
             for s in self.history:
-                # t, x, y, z, vx, vy, vz, va, phpa
-                _, sx, sy, sz, svx, svy, svz, sva, phpa = s
+                # t, x, y, z, vx, vy, vz, va, phpa, temp_k
+                _, sx, sy, sz, svx, svy, svz, sva, phpa, temp_k = s
                 d = math.sqrt((sx - tx) ** 2 + (sy - ty) ** 2 + (sz - tz) ** 2)
                 if d > radius_m:
                     continue
@@ -431,6 +436,7 @@ class WindMapper:
 
                 total_s += s_local * w
                 total_p += phpa * w
+                total_t += temp_k * w
                 vx += self.current_wind[0] * w
                 vy += self.current_wind[1] * w
                 vz += self.current_wind[2] * w
@@ -441,8 +447,9 @@ class WindMapper:
                     total_s / total_w,
                     (vx / total_w, vy / total_w, vz / total_w),
                     total_p / total_w,
+                    total_t / total_w,
                 )
-            return 0.0, self.current_wind, 1013.25
+            return 0.0, self.current_wind, 1013.25, 293.15
 
     def get_wind_grid(self, center_pos, heading=0.0, size=7, step=10.0):
         """Generates a rotated 2D grid of wind data (Head-Up)."""
@@ -508,11 +515,16 @@ class VibrationDetector:
         self.sta_lta_latest = [1.0, 1.0, 1.0]
         self._sta_dec = 0
 
-        # dwt - 5 levels at 100hz
+        # dwt - 5 levels scaled to fs
         self.dwt_buffer = deque(maxlen=512)
         SPEC_W = 50
         self.band_energy = [deque(maxlen=SPEC_W) for _ in range(5)]
-        self.band_labels = ["50Hz", "25Hz", "12Hz", " 6Hz", " 3Hz"]
+        
+        # Band frequencies: Half of Nyquist per level
+        f_nq = fs / 2.0
+        self.band_freqs = [f_nq / (2**i) for i in range(1, 6)]
+        self.band_labels = [f"{int(f)}Hz" if f >= 1 else f"{f:.1f}Hz" for f in self.band_freqs]
+        
         self._dwt_ok = False
         try:
             import pywt
@@ -542,7 +554,7 @@ class VibrationDetector:
         self.peak = 0.0
         self.mad_sigma = 0.0
 
-        self.events = deque(maxlen=500)
+        self.events = deque(maxlen=5)
         self.event_ts = deque(maxlen=200)
 
         # periodicity via autocorrelation
@@ -598,9 +610,9 @@ class VibrationDetector:
         """Categorize motion using spectral energy, periodicity, and environment."""
         # Energy bands (averages of deques)
         b_eng = [sum(list(b)) / max(1, len(b)) if b else 0.0 for b in self.band_energy]
-        high_freq_pwr = b_eng[0] + b_eng[1]  # 50Hz + 25Hz
-        mid_freq_pwr = b_eng[2]  # 12Hz
-        low_freq_pwr = b_eng[3] + b_eng[4]  # 6Hz + 3Hz
+        high_freq_pwr = b_eng[0] + b_eng[1]  # Top two bands
+        mid_freq_pwr = b_eng[2]             # Middle band
+        low_freq_pwr = b_eng[3] + b_eng[4]   # Bottom two bands
         total_pwr = sum(b_eng) + 1e-30
 
         self.spectral_balance = (high_freq_pwr - low_freq_pwr) / total_pwr
@@ -620,20 +632,32 @@ class VibrationDetector:
         self._last_fatigue_update = now
 
         # Derive dominant frequency f_dom
-        band_freqs = [50.0, 25.0, 12.5, 6.25, 3.125]
         if self.period_freq and self.period_cv < 0.4:
             f_dom = self.period_freq
         else:
             # Weighted average frequency from spectral bands
-            total_eng = sum(b_eng) + 1e-30
-            f_dom = sum(f * e for f, e in zip(band_freqs, b_eng)) / total_eng
+            total_eng = sum(b_eng)
+            if total_eng > 1e-9:
+                f_dom = sum(f * e for f, e in zip(self.band_freqs, b_eng)) / total_eng
+            else:
+                f_dom = 30.0  # Default to 30Hz for noise floor
 
-        f_dom = max(1.0, f_dom)  # Avoid div by zero, min 1Hz
+        f_dom = max(5.0, f_dom)  # Cap at 5Hz to avoid displacement singularities
 
-        # Physics-based damage increment (Miner's Rule) via NJIT
-        d_damage = njit_solder_fatigue_increment(
-            f_dom, dt, self.rms, self.solder_k, self.solder_eps_crit, self.solder_b
-        )
+        # Use a more realistic fatigue threshold (0.1% strain)
+        s_eps_crit = self.solder_eps_crit * 2.0  # 0.1% strain failure limit
+
+        # Noise gate: If RMS is below 0.002g, assume zero damage
+        if self.rms < 0.002:
+            d_damage = 0.0
+        else:
+            # Physics-based damage increment (Miner's Rule) via NJIT
+            d_damage = njit_solder_fatigue_increment(
+                f_dom, dt, self.rms, self.solder_k, s_eps_crit, self.solder_b
+            )
+            # Apply a "Life Scaler": Solder shouldn't fail in seconds
+            # Scale down by 1000 to represent a longer fatigue life
+            d_damage /= 1000.0
 
         # Electromech fatigue remains heuristic for now
         electromech_p = min(0.7, (self.crest / 40.0) + (self.kurtosis / 50.0))
@@ -683,11 +707,13 @@ class VibrationDetector:
             )
 
         # 3. Cumulative Fatigue Accumulation (Palmgren-Miner Rule)
+        # Cap d_damage to prevent explosive runaway (max 0.1% increase per step)
+        d_damage = min(0.001, d_damage)
         self.cumulative_fatigue += d_damage
-        self.prob_solder_fatigue = self.cumulative_fatigue
+        self.prob_solder_fatigue = min(1.0, self.cumulative_fatigue)
         self.prob_electromech_fatigue = electromech_p
         self.prob_total_damage_fatigue = max(
-            min(1.0, self.prob_solder_fatigue), electromech_p
+            self.prob_solder_fatigue, electromech_p
         )
 
         # --- Motion Classification Logic ---
@@ -794,7 +820,7 @@ class VibrationDetector:
         self._mahony_err_int = list(new_err_int)
 
     def process(self, ax, ay, az, t_now):
-        if self.sample_count < 10000:
+        if self.sample_count < 100:
             self.sample_count += 1
         self.latest_raw = (ax, ay, az)
         self.latest_mag = math.sqrt(ax * ax + ay * ay + az * az)
@@ -875,39 +901,43 @@ class VibrationDetector:
         # kurtosis
         self.kurt_buf.append(mag)
         self._kurt_dec += 1
-        if self._kurt_dec >= 10 and len(self.kurt_buf) >= 50:
+        if self._kurt_dec >= max(1, self.fs // 10) and len(self.kurt_buf) >= 50:
             self._kurt_dec = 0
-            buf = list(self.kurt_buf)
-            n = len(buf)
-            mu = sum(buf) / n
-            m2 = sum((x - mu) ** 2 for x in buf) / n
-            m4 = sum((x - mu) ** 4 for x in buf) / n
+            buf = np.array(list(self.kurt_buf), dtype=np.float32)
+            mu = np.mean(buf)
+            centered = buf - mu
+            m2 = np.mean(centered ** 2)
+            m4 = np.mean(centered ** 4)
             k = m4 / (m2 * m2 + 1e-30)
-            self.kurtosis = k
+            self.kurtosis = float(k)
             if k > 6:
-                evts.append(("KURTOSIS", k, mag))
+                evts.append(("KURTOSIS", float(k), mag))
 
         # peak / mad
         self.peak_buf.append(mag)
-        if len(self.peak_buf) >= 50 and self.sample_count % 10 == 0:
-            srt = sorted(self.peak_buf)
-            n = len(srt)
-            median = srt[n // 2]
-            mad = sorted(abs(x - median) for x in srt)[n // 2]
+        if not hasattr(self, '_peak_dec'):
+            self._peak_dec = 0
+        self._peak_dec += 1
+        
+        if len(self.peak_buf) >= 50 and self._peak_dec >= max(1, self.fs // 10):
+            self._peak_dec = 0
+            buf = np.array(list(self.peak_buf), dtype=np.float32)
+            median = np.median(buf)
+            mad = np.median(np.abs(buf - median))
             sigma = 1.4826 * mad + 1e-30
-            self.mad_sigma = sigma
-            self.rms = math.sqrt(sum(x * x for x in self.peak_buf) / n)
-            self.peak = max(abs(x) for x in self.peak_buf)
+            self.mad_sigma = float(sigma)
+            self.rms = float(np.sqrt(np.mean(buf * buf)))
+            self.peak = float(np.max(np.abs(buf)))
             self.crest = self.peak / (self.rms + 1e-30)
             dev = abs(mag - median) / sigma
             if dev > 8.0:
-                evts.append(("PEAK", "majeur", dev, mag))
+                evts.append(("PEAK", "majeur", float(dev), mag))
             elif dev > 5.0:
-                evts.append(("PEAK", "fort", dev, mag))
+                evts.append(("PEAK", "fort", float(dev), mag))
             elif dev > 3.5:
-                evts.append(("PEAK", "moyen", dev, mag))
+                evts.append(("PEAK", "moyen", float(dev), mag))
             elif dev > 2.0:
-                evts.append(("PEAK", "micro", dev, mag))
+                evts.append(("PEAK", "micro", float(dev), mag))
 
         if evts and (t_now - self._last_evt_t) > 0.01:
             self._last_evt_t = t_now
@@ -942,28 +972,34 @@ class VibrationDetector:
             self.period = None
             self.acorr_ring = []
             return
-        buf = list(self.waveform)[-self.fs * 5 :]
+        buf = np.array(list(self.waveform)[-self.fs * 5 :], dtype=np.float32)
         n = len(buf)
-        mean = sum(buf) / n
-        centered = [x - mean for x in buf]
-        var = sum(x * x for x in centered)
+        mean = np.mean(buf)
+        centered = buf - mean
+        var = np.var(buf) * n
         if var < 1e-20:
             self.period = None
             self.acorr_ring = []
             return
+
         min_lag = max(5, int(self.fs * 0.05))
         max_lag = min(n // 2, int(self.fs * 2.5))
-        acorr = []
-        for lag in range(min_lag, max_lag):
-            s = sum(centered[i] * centered[i + lag] for i in range(n - lag))
-            acorr.append(s / var)
-        self.acorr_ring = acorr
-        if not acorr:
+
+        # Use numpy.correlate for much faster autocorrelation
+        # result[k] = sum(centered[i] * centered[i + k])
+        acorr_full = np.correlate(centered, centered, mode='full')
+        # correlate 'full' returns length 2*n-1, middle is zero lag
+        acorr = acorr_full[n-1+min_lag : n-1+max_lag] / var
+
+        self.acorr_ring = acorr.tolist()
+        if len(acorr) == 0:
             self.period = None
             return
-        best_i = max(range(len(acorr)), key=lambda i: acorr[i])
+
+        best_i = np.argmax(acorr)
         best_val = acorr[best_i]
         best_lag = min_lag + best_i
+
         if best_val > 0.1:
             self.period = best_lag / self.fs
             self.period_freq = self.fs / best_lag
@@ -981,11 +1017,11 @@ class VibrationDetector:
             self.hr_bpm = None
             self.hr_confidence = 0.0
             return
-        buf = list(self.hr_buf)[-self.fs * 10 :]
+        buf = np.array(list(self.hr_buf)[-self.fs * 10 :], dtype=np.float32)
         n = len(buf)
-        mean = sum(buf) / n
-        centered = [x - mean for x in buf]
-        var = sum(x * x for x in centered)
+        mean = np.mean(buf)
+        centered = buf - mean
+        var = np.var(buf) * n
         if var < 1e-20:
             self.hr_bpm = None
             self.hr_confidence = 0.0
@@ -996,17 +1032,23 @@ class VibrationDetector:
             self.hr_bpm = None
             self.hr_confidence = 0.0
             return
-        best_r = -1.0
-        best_lag = lag_lo
-        for lag in range(lag_lo, lag_hi):
-            s = sum(centered[i] * centered[i + lag] for i in range(n - lag))
-            r = s / var
-            if r > best_r:
-                best_r = r
-                best_lag = lag
+
+        # Use numpy.correlate
+        acorr_full = np.correlate(centered, centered, mode='full')
+        acorr = acorr_full[n-1+lag_lo : n-1+lag_hi] / var
+
+        if len(acorr) == 0:
+            self.hr_bpm = None
+            self.hr_confidence = 0.0
+            return
+
+        best_i = np.argmax(acorr)
+        best_r = acorr[best_i]
+        best_lag = lag_lo + best_i
+
         if best_r > 0.15:
             self.hr_bpm = 60.0 / (best_lag / self.fs)
-            self.hr_confidence = min(1.0, best_r)
+            self.hr_confidence = min(1.0, float(best_r))
         else:
             self.hr_bpm = None
             self.hr_confidence = 0.0
@@ -1307,15 +1349,27 @@ class LoopConsistencyTracker:
         self.target_ms = target_ms
         self.window_size = window_size
         self.loop_times = deque(maxlen=window_size)
+        self.hz_history = deque(maxlen=60)  # 60s history
         self.stutter_count = 0
         self.total_loops = 0
-        self.last_t = None
+        self.last_t = time.time()
+        self.last_hz_calc = time.time()
+        self.loops_since_last_hz = 0
 
     def record_loop(self, duration_ms):
         self.total_loops += 1
+        self.loops_since_last_hz += 1
         self.loop_times.append(duration_ms)
         if duration_ms > self.target_ms * 2.0:
             self.stutter_count += 1
+            
+        now = time.time()
+        if now - self.last_hz_calc >= 1.0:
+            dt = now - self.last_hz_calc
+            hz = self.loops_since_last_hz / dt
+            self.hz_history.append(hz)
+            self.loops_since_last_hz = 0
+            self.last_hz_calc = now
 
     def get_stats(self):
         if not self.loop_times:
@@ -1338,7 +1392,7 @@ class LoopConsistencyTracker:
 
         avg = sum(self.loop_times) / n
 
-        return pct_90, low_1, low_01, avg, self.stutter_count
+        return pct_90, low_1, low_01, avg, self.stutter_count, list(self.hz_history)
 
 
 class LocationTracker:
@@ -1355,7 +1409,8 @@ class LocationTracker:
     - Ambient: Proxied from palm rest sensors (Ts0P, Ts1P).
     """
 
-    def __init__(self, start_lat=-6.333012, start_lon=106.971199, start_alt=0.0):
+    def __init__(self, start_lat=-6.333012, start_lon=106.971199, start_alt=0.0, fs=100):
+        self.fs = fs
         self.lat = np.float64(start_lat)
         self.lon = np.float64(start_lon)
         self.alt = np.float64(start_alt)
@@ -1428,6 +1483,8 @@ class LocationTracker:
         self.odometer_30m_history = deque()  # (time, dist_inc)
         self.air_density = 1.225  # kg/m^3 (Standard Sea Level)
         self.wind_mapper = WindMapper(max_age_s=1800)
+        self.cached_wind_grid = None
+        self.last_wind_grid_update = 0.0
 
         # Async Threading State
         self.lock = threading.Lock()
@@ -1808,7 +1865,7 @@ class LocationTracker:
         wy *= G
         wz *= G
 
-        KnobAmpVel = 0.12478  # Calibrate
+        KnobAmpVel = 1.0  # Physically correct: dv = a * dt
         # Integrate velocity
         self.vel[0] += wx * dt * KnobAmpVel
         self.vel[1] += wy * dt * KnobAmpVel
@@ -1816,23 +1873,23 @@ class LocationTracker:
 
         # Velocity Damping / ZUPT (Zero Velocity Update)
         # If gyro is quiet, we are likely stationary or in uniform motion.
-        # We bleed velocity to zero to combat integration drift.
+        # We bleed velocity to zero to combat integration drift, but maintain inertia.
         if gyro_mag < 0.5:
             # Check if acceleration magnitude is also near 1g
             rax, ray, raz = raw_accel if raw_accel is not None else (ax, ay, az)
             raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
             if abs(raw_mag - self.calibrated_g) < 0.1:
-                # Stationary to make or support inertia to be supported like hard brake and etc
-                # This is to change if you need to change the supression on dampening the lower it is the aggresive
-                damping = 0.273 if gyro_mag < 0.1 else 0.42069
+                # Soften damping to simulate momentum/inertia
+                # At 800Hz, 0.999 is ~45% retention per second
+                damping = math.pow(0.5, 1.0/self.fs) if gyro_mag < 0.1 else math.pow(0.8, 1.0/self.fs)
                 for i in range(3):
                     self.vel[i] *= damping
-                    if abs(self.vel[i]) < 0.001:
+                    if abs(self.vel[i]) < 0.0005:
                         self.vel[i] = 0.0
             else:
-                # Moving but no rotation: Hard damping
+                # Moving but no rotation: Bleed drift slightly faster
                 for i in range(3):
-                    self.vel[i] *= 2  # dampening high
+                    self.vel[i] *= math.pow(0.9, 1.0/self.fs)
 
         self.v_mag = math.sqrt(self.vel[0] ** 2 + self.vel[1] ** 2 + self.vel[2] ** 2)
 
@@ -1868,30 +1925,25 @@ class LocationTracker:
         self.heading = (yaw_d + self.heading_offset) % 360.0
 
         # Integrate position using augmented velocity
-        if self.v_mag >= 0.01:
+        if self.v_mag >= 0.005:
             dx = v_aug[0] * dt
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
 
-            # Properly Derived MovementAugAmpKnob
-            # We use the magnitude of the world-frame dynamic acceleration (wx, wy, wz)
-            # which is already gravity-compensated. This captures "moving g" that
-            # has been cancelled out from the static gravity baseline.
+            # Physical Movement Integration: Use a realistic physical knob (1.0)
+            # We preserve the dynamic g multiplier as a "responsiveness" factor
+            # but keep the base physics at 1:1 scale.
             dyn_accel_mag = math.sqrt(wx**2 + wy**2 + wz**2)
-            
-            # Normalized Dynamic G (How much the motion deviates from 1g equilibrium)
             moving_g_normalized = dyn_accel_mag / 9.80665
             
-            # Derive Knob: Base scale + dynamic response. 
-            # We use a slight non-linear boost (pow 1.1) to favor clear motion over vibration noise.
-            MovementAugAmpKnob = 0.01 * (1.0 + math.pow(moving_g_normalized, 1.1))
+            # Knob is now a physical modifier (1.0 = pure inertial)
+            MovementAugAmpKnob = 1.0 * (1.0 + min(0.1, moving_g_normalized))
             
             self.pos[0] += dx * MovementAugAmpKnob
             self.pos[1] += dy * MovementAugAmpKnob
             self.pos[2] += dz * MovementAugAmpKnob
 
-            # Environmental Odometer also respects the derived knob
-            # dist_inc = |v_aug * dt * Knob|
+            # Environmental Odometer also respects the physical scale
             weighted_dx = dx * MovementAugAmpKnob
             weighted_dy = dy * MovementAugAmpKnob
             weighted_dz = dz * MovementAugAmpKnob
@@ -1929,7 +1981,7 @@ class LocationTracker:
             else self.pressure_hpa
         )
         self.wind_mapper.add_sample(
-            t_now, self.pos, self.vel, meas_p, self.pressure_hpa, self.air_density
+            t_now, self.pos, self.vel, meas_p, self.pressure_hpa, self.air_density, self.ambient_temp_k
         )
         self.pressure_hpa = self._calculate_pressure(self.alt)
 
@@ -2064,7 +2116,7 @@ def render(
     a(f"{DIM}┌─{RST}{BWHT}{title}{RST}{DIM}{top_bar}┐{RST}")
 
     smp_str = f"{det.sample_count:>10,} smp"
-    if det.sample_count >= 10000:
+    if det.sample_count >= 100:
         smp_str = f"{'MAX':>10} smp"
 
     hdr = (
@@ -2077,10 +2129,12 @@ def render(
     GW = W - 4
 
     a(_sep(" Waveform |a_dyn| 5s "))
-    wd = list(det.waveform)
-    if wd:
-        mx = max(max(abs(v) for v in wd), 0.0002)
-        ds = _downsample(wd, GW)
+    wd_raw = list(det.waveform)
+    if wd_raw:
+        wd = np.array(wd_raw, dtype=np.float32)
+        mx = float(np.max(np.abs(wd)))
+        mx = max(mx, 0.0002)
+        ds = _downsample(wd_raw, GW)
         a(_line(f"  {GRN}{_sparkline(ds, GW, mx)}{RST}"))
         a(_line(f"  {DIM}{mx:.5f}g{' ' * (GW - 22)}0g{RST}"))
     else:
@@ -2093,23 +2147,25 @@ def render(
     # Width for sparkline: total minus label (4) and value (12)
     AW = GW - 16
     if xyz:
-        xs = [t[0] for t in xyz]
-        ys = [t[1] for t in xyz]
-        zs = [t[2] for t in xyz]
-        amx = max(max(abs(v) for v in xs + ys + zs), 0.0001)
+        xyz_arr = np.array(xyz, dtype=np.float32)
+        xs = xyz_arr[:, 0]
+        ys = xyz_arr[:, 1]
+        zs = xyz_arr[:, 2]
+        amx = float(np.max(np.abs(xyz_arr)))
+        amx = max(amx, 0.0001)
         a(
             _line(
-                f"  {RED}X{RST} {_sparkline(_downsample(xs, AW), AW, amx)}{RST} {ax_raw[0]:>+9.6f}g"
+                f"  {RED}X{RST} {_sparkline(_downsample(xs.tolist(), AW), AW, amx)}{RST} {ax_raw[0]:>+9.6f}g"
             )
         )
         a(
             _line(
-                f"  {GRN}Y{RST} {_sparkline(_downsample(ys, AW), AW, amx)}{RST} {ax_raw[1]:>+9.6f}g"
+                f"  {GRN}Y{RST} {_sparkline(_downsample(ys.tolist(), AW), AW, amx)}{RST} {ax_raw[1]:>+9.6f}g"
             )
         )
         a(
             _line(
-                f"  {CYN}Z{RST} {_sparkline(_downsample(zs, AW), AW, amx)}{RST} {ax_raw[2]:>+9.6f}g"
+                f"  {CYN}Z{RST} {_sparkline(_downsample(zs.tolist(), AW), AW, amx)}{RST} {ax_raw[2]:>+9.6f}g"
             )
         )
     else:
@@ -2432,23 +2488,27 @@ def render(
         # Spatial Wind Vector & Pressure Map (Grid)
         a(_line(f" {DIM}Spatial Wind Vector & Pressure Map (10m/cell):{RST}"))
         if odo_30m > 10.0:
-            grid = location.wind_mapper.get_wind_grid(
-                location.pos, heading=location.heading, size=7, step=10.0
-            )
+            if location.cached_wind_grid is None:
+                location.cached_wind_grid = location.wind_mapper.get_wind_grid(
+                    location.pos, heading=location.heading, size=7, step=10.0
+                )
+            grid = location.cached_wind_grid
             a(
                 _line(
                     f"      {DIM}▲ [Ahead: {_degrees_to_compass(location.heading)}]{RST}"
                 )
             )
 
-            # Find local min/max pressure in grid for dynamic coloring
+            # Find local min/max pressure and temp in grid for dynamic coloring and legend
             all_p = [d[2] for row in grid for d in row]
+            all_t = [d[3] for row in grid for d in row]
             min_p, max_p = min(all_p), max(all_p)
+            min_t, max_t = min(all_t), max(all_t)
 
             for j, row in enumerate(grid):
                 grid_str = ""
                 for i, data in enumerate(row):
-                    speed, vec, pressure = data
+                    speed, vec, pressure, temp_k = data
                     col = _get_dynamic_pressure_color(pressure, min_p, max_p)
                     # Center marker
                     if i == 3 and j == 3:
@@ -2472,7 +2532,7 @@ def render(
             )
             a(
                 _line(
-                    f"   {DIM}Local Range: {BCYN}{min_p:.2f}{RST} {DIM}to{RST} {BRED}{max_p:.2f} hPa{RST}"
+                    f"   {DIM}Local Range: {BCYN}{min_p:.2f}{RST} {DIM}to{RST} {BRED}{max_p:.2f} hPa{RST} | {BWHT}{min_t-273.15:.1f}{RST} {DIM}to{RST} {BWHT}{max_t-273.15:.1f} °C{RST}"
                 )
             )
         else:
@@ -2512,7 +2572,7 @@ def render(
         )
 
         if loop_stats:
-            l_pct_90, l_low_1, l_low_01, l_avg, l_stutters = loop_stats
+            l_pct_90, l_low_1, l_low_01, l_avg, l_stutters, l_hz_history = loop_stats
             col_90 = BGRN if l_pct_90 >= 90 else (BYEL if l_pct_90 >= 80 else BRED)
             col_1 = BGRN if l_low_1 <= 15 else (BYEL if l_low_1 <= 20 else BRED)
             col_01 = BGRN if l_low_01 <= 20 else (BYEL if l_low_01 <= 30 else BRED)
@@ -2532,6 +2592,13 @@ def render(
                     f"{DIM}Avg Loop:{RST} {l_avg:>4.1f}ms"
                 )
             )
+            
+            # Hz Trend display (1 minute)
+            if l_hz_history:
+                hz_mx = max(max(l_hz_history), 1.0)
+                hz_curr = l_hz_history[-1]
+                hz_spark = _sparkline(l_hz_history, W - 25, ceil=hz_mx)
+                a(_line(f" {DIM}Hz Trend (1m):{RST} {BWHT}{hz_spark}{RST} {BYEL}{hz_curr:>4.1f}{RST}Hz"))
 
         turbo_stat = (
             f"{BRED}ACTIVE{RST}" if location.smc_turbo else f"{DIM}inactive{RST}"
@@ -2664,7 +2731,7 @@ def render(
     cum_col = BGRN if cum_fat < 1.0 else (BYEL if cum_fat < 10.0 else BRED)
     a(
         _line(
-            f" {DIM}Overall Accumulated Fatigue:{RST} {cum_col}{cum_fat:>8.4f} units{RST}"
+            f" {DIM}Overall Accumulated Fatigue:{RST} {cum_col}{cum_fat:>10.6f} units{RST}"
         )
     )
 
@@ -2786,6 +2853,7 @@ def main(stdscr=None):
     task_path = None
     daemon_mode = False
     kys_mode = False
+    low_power_mode = False
 
     i = 1
     while i < len(sys.argv):
@@ -2798,12 +2866,14 @@ def main(stdscr=None):
             daemon_mode = True
         elif arg in ("--kys", "./kys", "kys"):
             kys_mode = True
+        elif arg in ("-lp", "--low-power"):
+            low_power_mode = True
         elif arg == "--task" and i + 1 < len(sys.argv):
             task_path = sys.argv[i + 1]
             i += 1
         elif arg in ("-h", "--help"):
             print(
-                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--task path/to/script.py]"
+                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--low-power] [--task path/to/script.py]"
             )
             return
         i += 1
@@ -2923,7 +2993,18 @@ def main(stdscr=None):
     saved_dist = 0.0
     saved_fatigue = 0.0
 
-    det = VibrationDetector(fs=100)
+    # Set sampling frequency and decimation based on mode
+    # Base rate is 800Hz. dec=1 -> 800Hz, dec=26 -> ~30.7Hz
+    if low_power_mode:
+        fs = 30
+        decimation = 26
+        print(f"{GRN}[*] mode: LOW POWER (30Hz background){RST}")
+    else:
+        fs = 800
+        decimation = 1
+        print(f"{GRN}[*] mode: HIGH PERFORMANCE (800Hz viewing){RST}")
+
+    det = VibrationDetector(fs=fs)
 
     if os.path.exists("EARU_data.dat"):
         try:
@@ -3006,7 +3087,7 @@ def main(stdscr=None):
             pass
 
     location = LocationTracker(
-        start_lat=initial_lat, start_lon=initial_lon, start_alt=initial_alt
+        start_lat=initial_lat, start_lon=initial_lon, start_alt=initial_alt, fs=fs
     )
     location.heading = initial_heading
     location.total_distance_m = saved_dist
@@ -3017,7 +3098,9 @@ def main(stdscr=None):
     # Re-initialize det state if orient was loaded
     if det._orient_init:
         det._q = initial_q
-    loop_tracker = LoopConsistencyTracker(target_ms=10.0)
+
+    target_ms = 33.3 if low_power_mode else 10.0
+    loop_tracker = LoopConsistencyTracker(target_ms=target_ms)
     t_start = time.time()
     last_total = 0
     last_gyro_total = 0
@@ -3029,7 +3112,50 @@ def main(stdscr=None):
     last_dwt = 0.0
     last_period = 0.0
     worker = None
-    MAX_BATCH = 200
+    MAX_BATCH = 4000 if not low_power_mode else 200
+
+    # Background processing state
+    _bg_running = [False]
+    _bg_data_lock = threading.Lock()
+
+    def _bg_analysis_task():
+        nonlocal last_dwt, last_period
+        while running[0]:
+            try:
+                now = time.time()
+                
+                # 1. DWT Calculation (Every 0.2s)
+                if now - last_dwt >= 0.2:
+                    det.compute_dwt()
+                    last_dwt = now
+                
+                # 2. Heavy Periodicity and Ecosystem Analysis (Every 1.0s)
+                if now - last_period >= 1.0:
+                    det.detect_periodicity()
+                    det.detect_heartbeat()
+                    location.check_core_location(now)
+                    location.check_smc_pressure()
+                    location.fetch_api_pressure()
+                    location.check_smc_sensors()
+                    location.check_system_metrics()
+                    location.update_weather_thermodynamics()
+                    det.classify_seismic(location)
+                    last_period = now
+
+                # 3. Wind Map Estimation and Grid Generation (Every 10.0s)
+                if now - location.last_wind_grid_update >= 10.0:
+                    location.wind_mapper.update_estimation()
+                    location.cached_wind_grid = location.wind_mapper.get_wind_grid(
+                        location.pos, heading=location.heading, size=7, step=10.0
+                    )
+                    location.last_wind_grid_update = now
+                
+                time.sleep(0.1)
+            except Exception:
+                time.sleep(0.5)
+
+    # Start background analysis thread
+    threading.Thread(target=_bg_analysis_task, daemon=True).start()
 
     try:
         while running[0]:
@@ -3049,12 +3175,13 @@ def main(stdscr=None):
                         "gyro_shm_name": SHM_NAME_GYRO,
                         "als_shm_name": SHM_NAME_ALS,
                         "lid_shm_name": SHM_NAME_LID,
+                        "decimation": decimation,
                     },
                     daemon=True,
                 )
                 worker.start()
 
-            time.sleep(0.005)
+            time.sleep(0.033 if low_power_mode else 0.005)
             now = time.time()
 
             samples, last_total = shm_read_new(shm.buf, last_total)
@@ -3101,27 +3228,12 @@ def main(stdscr=None):
             if lid_data is not None:
                 lid_angle = struct.unpack("<f", lid_data)[0]
 
-            if now - last_dwt >= 0.2:
-                det.compute_dwt()
-                last_dwt = now
-
-            if now - last_period >= 1.0:
-                det.detect_periodicity()
-                det.detect_heartbeat()
-                location.check_core_location(now)
-                location.check_smc_pressure()
-                location.fetch_api_pressure()
-                location.check_smc_sensors()
-                location.check_system_metrics()
-                location.update_weather_thermodynamics()
-                det.classify_seismic(location)
-                last_period = now
-
             # Loop tracking record
             loop_duration = (time.time() - loop_start) * 1000.0
             loop_tracker.record_loop(loop_duration)
 
-            if now - last_draw >= 0.1:
+            draw_period = 1.0
+            if now - last_draw >= draw_period:
                 # Prepare complete data for potential task
                 qw, qx, qy, qz = det._q
                 sin_r = 2.0 * (qw * qx + qy * qz)
@@ -3146,7 +3258,7 @@ def main(stdscr=None):
                 ]
                 avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
 
-                l_pct_90, l_low_1, l_low_01, l_avg, l_stutters = (
+                l_pct_90, l_low_1, l_low_01, l_avg, l_stutters, l_hz_history = (
                     loop_tracker.get_stats()
                 )
 
@@ -3204,7 +3316,7 @@ def main(stdscr=None):
                         if len(location.pressure_history) > 60
                         else 0.0,
                         "wind_map": {
-                            "grid_7x7_10m": location.wind_mapper.get_wind_grid(location.pos, location.heading, size=7, step=10.0),
+                            "grid_7x7_10m": location.cached_wind_grid if location.cached_wind_grid is not None else [],
                             "stats": {
                                 str(r): location.wind_mapper.get_stats_at_radius(
                                     location.pos, r
@@ -3267,43 +3379,45 @@ def main(stdscr=None):
                     "events": list(det.events)[-1:] if det.events else [],
                 }
 
-                # Write to EARU_data.dat by default
-                try:
-                    class NpEncoder(json.JSONEncoder):
-                        def default(self, obj):
-                            if isinstance(obj, np.integer):
-                                return int(obj)
-                            if isinstance(obj, np.floating):
-                                return float(obj)
-                            if isinstance(obj, np.ndarray):
-                                return obj.tolist()
-                            if isinstance(obj, deque):
-                                return list(obj)
-                            return super(NpEncoder, self).default(obj)
+                # Write to EARU_data.dat asynchronously to avoid blocking
+                def _write_data_bg(json_data_copy):
+                    try:
+                        class NpEncoder(json.JSONEncoder):
+                            def default(self, obj):
+                                if isinstance(obj, np.integer):
+                                    return int(obj)
+                                if isinstance(obj, np.floating):
+                                    return float(obj)
+                                if isinstance(obj, np.ndarray):
+                                    return obj.tolist()
+                                if isinstance(obj, deque):
+                                    return list(obj)
+                                return super(NpEncoder, self).default(obj)
 
-                    with open("EARU_data.dat", "w") as f:
-                        json_data = data.copy()
-                        if json_data["als"]:
-                            json_data["als"] = json_data["als"].hex()
+                        with open("EARU_data.dat", "w") as f:
+                            if json_data_copy["als"]:
+                                json_data_copy["als"] = json_data_copy["als"].hex()
 
-                        # Calculate primary parity for data integrity
-                        payload = json.dumps(json_data, cls=NpEncoder, sort_keys=True)
-                        json_data["parity"] = hashlib.sha256(
-                            payload.encode()
-                        ).hexdigest()
+                            # Calculate primary parity for data integrity
+                            payload = json.dumps(json_data_copy, cls=NpEncoder, sort_keys=True)
+                            json_data_copy["parity"] = hashlib.sha256(
+                                payload.encode()
+                            ).hexdigest()
 
-                        # Write main JSON block
-                        full_json_str = json.dumps(
-                            json_data, cls=NpEncoder, sort_keys=True
-                        )
-                        f.write(full_json_str)
+                            # Write main JSON block
+                            full_json_str = json.dumps(
+                                json_data_copy, cls=NpEncoder, sort_keys=True
+                            )
+                            f.write(full_json_str)
 
-                        # Append redundant recovery footer
-                        recovery_b64 = base64.b64encode(payload.encode()).decode()
-                        recovery_hash = hashlib.sha256(payload.encode()).hexdigest()
-                        f.write(f"\n[RECOVERY_V1:{recovery_b64}:{recovery_hash}]")
-                except Exception:
-                    pass
+                            # Append redundant recovery footer
+                            recovery_b64 = base64.b64encode(payload.encode()).decode()
+                            recovery_hash = hashlib.sha256(payload.encode()).hexdigest()
+                            f.write(f"\n[RECOVERY_V1:{recovery_b64}:{recovery_hash}]")
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_write_data_bg, args=(data.copy(),), daemon=True).start()
 
                 if run_task_fn:
                     try:
@@ -3320,7 +3434,14 @@ def main(stdscr=None):
                         lid_angle=lid_angle,
                         als_raw=als_raw,
                         location=location,
-                        loop_stats=(l_pct_90, l_low_1, l_low_01, l_avg, l_stutters),
+                        loop_stats=(
+                            l_pct_90,
+                            l_low_1,
+                            l_low_01,
+                            l_avg,
+                            l_stutters,
+                            l_hz_history,
+                        ),
                     )
                     if stdscr:
                         stdscr.erase()
@@ -3365,7 +3486,7 @@ def main(stdscr=None):
                 json.dump(obj, f, indent=1, default=str)
 
         final_smp = det.sample_count
-        if final_smp >= 10000:
+        if final_smp >= 100:
             final_smp = "MAX"
         print(f"{DIM}[ok] {final_smp} samples, {restart_count[0]} restarts{RST}")
 
