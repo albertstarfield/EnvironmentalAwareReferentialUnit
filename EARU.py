@@ -1497,7 +1497,7 @@ class ProfilerDebug:
         if not self.enabled or not self.stack:
             return
         name, start = self.stack.pop()
-        dt = (time.perf_counter() - start) * 1000.0  # ms
+        dt = (time.perf_counter() - start) * 1_000_000.0  # microseconds (us)
         
         # Build hierarchical path
         path = " > ".join([s[0] for s in self.stack] + [name])
@@ -1566,12 +1566,12 @@ class ProfilerDebug:
             lines.append(f"  - {name:20}: {history[-1]:8} (avg: {avg_size:8.1f}, Δ: {growth:+d})")
 
         # Calculate total active time (sum of top-level blocks) for percentage baseline
-        total_active_ms = 0.0
+        total_active_us = 0.0
         for path, history in self.block_times.items():
             if " > " not in path: # Top-level block
-                total_active_ms += sum(history) / len(history) if history else 0.0
+                total_active_us += sum(history) / len(history) if history else 0.0
 
-        lines.append(f"Block Timings (Total active loop: {total_active_ms:.2f}ms):")
+        lines.append(f"Block Timings (Total active loop: {total_active_us:.2f}us):")
         
         # Build tree structure
         tree = {}
@@ -1599,8 +1599,8 @@ class ProfilerDebug:
                 stat_str = ""
                 if data["stats"]:
                     avg_t, max_t, delta, max_delta = data["stats"]
-                    pct = (avg_t / total_active_ms * 100.0) if total_active_ms > 0 else 0.0
-                    stat_str = f": {pct:5.1f}% | avg {avg_t:6.2f}ms | max {max_t:6.2f}ms | Δ {delta:+6.2f}ms | maxΔ {max_delta:6.2f}ms"
+                    pct = (avg_t / total_active_us * 100.0) if total_active_us > 0 else 0.0
+                    stat_str = f": {pct:5.1f}% | avg {avg_t:8.2f}us | max {max_t:8.2f}us | Δ {delta:+8.2f}us | maxΔ {max_delta:8.2f}us"
                 
                 lines.append(f"{prefix}{connector}{name:20}{stat_str}")
                 
@@ -3537,11 +3537,17 @@ def main(stdscr=None):
             profiler.start_block("process_accel")
             for idx, (sx, sy, sz) in enumerate(samples):
                 t_sample = now - (n_samples - idx - 1) / det.fs
+                
+                profiler.start_block("pa_det_process")
                 dyn_mag = det.process(sx, sy, sz, t_sample)
+                profiler.end_block() # pa_det_process
 
+                profiler.start_block("pa_loc_calibrate")
                 # Perform gravity calibration if stationary
                 location.calibrate_gravity(det.latest_mag, gyro_mag)
+                profiler.end_block() # pa_loc_calibrate
 
+                profiler.start_block("pa_loc_update_imu")
                 # Use raw acceleration for better gravity subtraction in update_imu
                 location.update_imu(
                     det.hp_prev_out[0],
@@ -3552,6 +3558,7 @@ def main(stdscr=None):
                     raw_accel=(sx, sy, sz),
                     gyro_mag=gyro_mag,
                 )
+                profiler.end_block() # pa_loc_update_imu
             profiler.end_block() # process_accel
 
             profiler.start_block("process_gyro")
