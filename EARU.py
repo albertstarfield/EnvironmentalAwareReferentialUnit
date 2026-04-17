@@ -1679,7 +1679,7 @@ class LocationTracker:
         self.heading = (yaw_d + self.heading_offset) % 360.0
 
         # Integrate position using augmented velocity
-        if self.v_mag >= 0.01:
+        if self.v_mag >= 0.5:
             dx = v_aug[0] * dt
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
@@ -1703,9 +1703,10 @@ class LocationTracker:
             # Noise filter: no delta for coordinates
             self.altitude_rate_per_second = 0.0
             # Optional: bleed velocity to absolute zero if it was already tiny
-            for i in range(3):
-                self.vel[i] = 0.0
-            self.v_mag = 0.0
+            if self.v_mag < 0.05:
+                for i in range(3):
+                    self.vel[i] = 0.0
+                self.v_mag = 0.0
 
         # Update Wind Map (100Hz)
         # Use SMC measured pressure vs. altitude-derived static pressure for dynamic pressure (q)
