@@ -473,7 +473,7 @@ def _math_to_bearing(vec):
 
 
 class VibrationDetector:
-    def __init__(self, fs=800):
+    def __init__(self, fs=100):
         self.fs = fs
         self.sample_count = 0
         # ... (rest of init)
@@ -482,7 +482,7 @@ class VibrationDetector:
         self._last_fatigue_update = time.time()
 
         # high-pass iir for gravity removal
-        self.hp_alpha = 0.99
+        self.hp_alpha = 0.95
         self.hp_prev_raw = [0.0, 0.0, 0.0]
         self.hp_prev_out = [0.0, 0.0, 0.0]
         self.hp_ready = False
@@ -494,11 +494,11 @@ class VibrationDetector:
         self.latest_raw = (0.0, 0.0, 0.0)
         self.latest_mag = 0.0
 
-        # sta/lta at 3 timescales (scaled for 800Hz)
+        # sta/lta at 3 timescales
         self.sta = [0.0, 0.0, 0.0]
         self.lta = [1e-10, 1e-10, 1e-10]
-        self.sta_n = [24, 120, 400]
-        self.lta_n = [800, 4000, 16000]
+        self.sta_n = [3, 15, 50]
+        self.lta_n = [100, 500, 2000]
         self.sta_lta_thresh_on = [3.0, 2.5, 2.0]
         self.sta_lta_thresh_off = [1.5, 1.3, 1.2]
         self.sta_lta_active = [False, False, False]
@@ -507,11 +507,11 @@ class VibrationDetector:
         self.sta_lta_latest = [1.0, 1.0, 1.0]
         self._sta_dec = 0
 
-        # dwt - 5 levels (scaled for 800Hz)
-        self.dwt_buffer = deque(maxlen=2048)
+        # dwt - 5 levels at 100hz
+        self.dwt_buffer = deque(maxlen=512)
         SPEC_W = 50
         self.band_energy = [deque(maxlen=SPEC_W) for _ in range(5)]
-        self.band_labels = ["400Hz", "200Hz", "100Hz", "50Hz", "25Hz"]
+        self.band_labels = ["50Hz", "25Hz", "12Hz", " 6Hz", " 3Hz"]
         self._dwt_ok = False
         try:
             import pywt
@@ -530,12 +530,12 @@ class VibrationDetector:
         self.cusum_val = 0.0
 
         # kurtosis (1s window)
-        self.kurt_buf = deque(maxlen=fs)
+        self.kurt_buf = deque(maxlen=100)
         self.kurtosis = 3.0
         self._kurt_dec = 0
 
         # crest factor + mad peak (2s window)
-        self.peak_buf = deque(maxlen=fs * 2)
+        self.peak_buf = deque(maxlen=200)
         self.crest = 1.0
         self.rms = 0.0
         self.peak = 0.0
@@ -561,8 +561,8 @@ class VibrationDetector:
 
         # Mahony AHRS — quaternion orientation (no gimbal lock)
         self._q = [1.0, 0.0, 0.0, 0.0]
-        self._mahony_kp = 2.0
-        self._mahony_ki = 0.005
+        self._mahony_kp = 1.0
+        self._mahony_ki = 0.05
         self._mahony_err_int = [0.0, 0.0, 0.0]
         self._orient_init = False
 
@@ -1344,7 +1344,7 @@ class LocationTracker:
     Handles Dead Reckoning, CoreLocation integration, and Ecosystem Environment physics.
 
     CORE ASSUMPTIONS & CONSTANTS:
-    - Inertial: Standard Gravity G=9.80665 m/s^2; 800Hz sampling.
+    - Inertial: Standard Gravity G=9.80665 m/s^2; 100Hz sampling.
     - Geography: Spherical Earth; M_PER_DEG_LAT = 111111.0.
     - Atmosphere: Dynamic Cp, R, and Gamma adjusted for Moisture (Bolton Equation).
     - Mach: Speed of sound derived as sqrt(gamma * R * T_ambient).
@@ -1796,17 +1796,29 @@ class LocationTracker:
             r31 = 2 * qx * qz - 2 * qy * qw
             r32 = 2 * qy * qz + 2 * qx * qw
             r33 = 1 - 2 * qx * qx - 2 * qy * qy
-            wx = r11 * ax + r12 * ay + r13 * az
-            wy = r21 * ax + r22 * ay + r23 * az
-            wz = r31 * ax + r32 * ay + r33 * az
+            
+            # Subtract gravity using calibrated_g in body frame
+            # (Approximated UP vector in body frame is the same as Mahony internal)
+            vx_up = 2.0 * (qx * qz - qw * qy)
+            vy_up = 2.0 * (qw * qx + qy * qz)
+            vz_up = qw * qw - qx * qx - qy * qy + qz * qz
+            
+            ax_d = ax - vx_up * self.calibrated_g
+            ay_d = ay - vy_up * self.calibrated_g
+            az_d = az - vz_up * self.calibrated_g
 
-        # Convert g to m/s^2 (Standard Gravity)
-        G = 9.80665
+            wx = r11 * ax_d + r12 * ay_d + r13 * az_d
+            wy = r21 * ax_d + r22 * ay_d + r23 * az_d
+            wz = r31 * ax_d + r32 * ay_d + r33 * az_d
+
+        # Convert g to m/s^2 (Standard Gravity scaled by local calibration)
+        # We use the ratio to handle potential sensor scale drift
+        G = 9.80665 * self.calibrated_g
         wx *= G
         wy *= G
         wz *= G
 
-        KnobAmpVel = 0.3  # Calibrate
+        KnobAmpVel = 0.12478  # Calibrate
         # Integrate velocity
         self.vel[0] += wx * dt * KnobAmpVel
         self.vel[1] += wy * dt * KnobAmpVel
@@ -2898,7 +2910,7 @@ def main(stdscr=None):
     saved_dist = 0.0
     saved_fatigue = 0.0
 
-    det = VibrationDetector(fs=800)
+    det = VibrationDetector(fs=100)
 
     if os.path.exists("EARU_data.dat"):
         try:
@@ -3001,11 +3013,10 @@ def main(stdscr=None):
     lid_angle = None
     als_raw = None
     last_draw = 0.0
-    last_tui_draw = 0.0
     last_dwt = 0.0
     last_period = 0.0
     worker = None
-    MAX_BATCH = 1000
+    MAX_BATCH = 200
 
     try:
         while running[0]:
@@ -3030,7 +3041,7 @@ def main(stdscr=None):
                 )
                 worker.start()
 
-            time.sleep(0.001)
+            time.sleep(0.005)
             now = time.time()
 
             samples, last_total = shm_read_new(shm.buf, last_total)
@@ -3276,7 +3287,7 @@ def main(stdscr=None):
                         # Don't crash if task fails once
                         pass
 
-                if use_tui and (now - last_tui_draw >= 1.0):
+                if use_tui:
                     frame = render(
                         det,
                         t_start,
@@ -3293,7 +3304,6 @@ def main(stdscr=None):
                     else:
                         sys.stdout.write(CLEAR + frame)
                         sys.stdout.flush()
-                    last_tui_draw = now
                 last_draw = now
 
     finally:
