@@ -1679,25 +1679,33 @@ class LocationTracker:
         self.heading = (yaw_d + self.heading_offset) % 360.0
 
         # Integrate position using augmented velocity
-        dx = v_aug[0] * dt
-        dy = v_aug[1] * dt
-        dz = v_aug[2] * dt
-        self.pos[0] += dx
-        self.pos[1] += dy
-        self.pos[2] += dz
-        
-        dist_inc = math.sqrt(dx*dx + dy*dy + dz*dz)
-        self.total_distance_m += dist_inc
-        self.odometer_30m_history.append((t_now, dist_inc))
-        while self.odometer_30m_history and self.odometer_30m_history[0][0] < t_now - 1800:
-            self.odometer_30m_history.popleft()
+        if self.v_mag >= 0.01:
+            dx = v_aug[0] * dt
+            dy = v_aug[1] * dt
+            dz = v_aug[2] * dt
+            self.pos[0] += dx
+            self.pos[1] += dy
+            self.pos[2] += dz
+            
+            dist_inc = math.sqrt(dx*dx + dy*dy + dz*dz)
+            self.total_distance_m += dist_inc
+            self.odometer_30m_history.append((t_now, dist_inc))
+            while self.odometer_30m_history and self.odometer_30m_history[0][0] < t_now - 1800:
+                self.odometer_30m_history.popleft()
 
-        # Update lat/lon/alt
-        self.lat = self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT)
-        m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
-        self.lon = self.start_lon + (self.pos[0] / m_per_deg_lon)
-        self.alt = self.start_alt + self.pos[2]
-        self.altitude_rate_per_second = self.vel[2]
+            # Update lat/lon/alt
+            self.lat = self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT)
+            m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
+            self.lon = self.start_lon + (self.pos[0] / m_per_deg_lon)
+            self.alt = self.start_alt + self.pos[2]
+            self.altitude_rate_per_second = self.vel[2]
+        else:
+            # Noise filter: no delta for coordinates
+            self.altitude_rate_per_second = 0.0
+            # Optional: bleed velocity to absolute zero if it was already tiny
+            for i in range(3):
+                self.vel[i] = 0.0
+            self.v_mag = 0.0
 
         # Update Wind Map (100Hz)
         # Use SMC measured pressure vs. altitude-derived static pressure for dynamic pressure (q)
@@ -1931,7 +1939,8 @@ def render(det, t_start, restarts,
     a(_sep(' Ecosystem Environment Reading (ISO 80000-2) '))
     if location is not None:
         a(_line(f" {DIM}Polar (Lat):{RST} {BWHT}{location.lat:>11.7f}°{RST}  "
-                f"{DIM}Azimuth (Lon):{RST} {BWHT}{location.lon:>11.7f}°{RST}"))
+                f"{DIM}Azimuth (Lon):{RST} {BWHT}{location.lon:>11.7f}°{RST}  "
+                f"{DIM}Velocity:{RST} {BYEL}{location.v_mag:>5.2f} m/s{RST}"))
         
         pressures = [p for p in [location.pressure_hpa, location.smc_pressure_hpa, location.api_pressure_hpa] if p is not None]
         avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
