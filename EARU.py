@@ -25,6 +25,7 @@ import threading
 import time
 from collections import deque
 
+import numpy as np
 import psutil
 import requests
 from numba import njit
@@ -265,11 +266,11 @@ class WindMapper:
 
     def __init__(self, max_age_s=1800):
         self.lock = threading.Lock()
-        self.history = deque(maxlen=10000)  # (time, x, y, z, vx, vy, vz, v_air_mag)
+        self.history = deque()  # (time, x, y, z, vx, vy, vz, v_air_mag)
         self.max_age_s = max_age_s
         self.current_wind = (0.0, 0.0, 0.0)  # World frame (m/s)
         self.pressure_offset_hpa = 0.0
-        self.offset_samples = deque(maxlen=10000)
+        self.offset_samples = []
 
     def add_sample(self, t, pos, vel, pressure_hpa, static_pressure, density):
         # 1. Stationary Calibration (ZUPT-style)
@@ -279,10 +280,11 @@ class WindMapper:
         if vg_mag < 0.05:
             # Accumulate offset sample
             self.offset_samples.append(pressure_hpa - static_pressure)
-            if len(self.offset_samples) >= 100:  # 1s at 100Hz
-                # Use only the last 100 samples for the rolling average
-                recent_samples = list(self.offset_samples)[-100:]
-                self.pressure_offset_hpa = sum(recent_samples) / len(recent_samples)
+            if len(self.offset_samples) > 100:  # 1s at 100Hz
+                self.pressure_offset_hpa = sum(self.offset_samples) / len(
+                    self.offset_samples
+                )
+                self.offset_samples = self.offset_samples[-100:]
 
         # 2. Calculate Corrected Dynamic Pressure
         # q = P_total - (P_static + P_offset)
@@ -1353,9 +1355,9 @@ class LocationTracker:
     """
 
     def __init__(self, start_lat=-6.333012, start_lon=106.971199, start_alt=0.0):
-        self.lat = start_lat
-        self.lon = start_lon
-        self.alt = start_alt
+        self.lat = np.float64(start_lat)
+        self.lon = np.float64(start_lon)
+        self.alt = np.float64(start_alt)
         self.altitude_rate_per_second = 0.0
         self.pressure_hpa = 1013.25  # Default sea level
         self.smc_pressure_hpa = None
@@ -1363,9 +1365,9 @@ class LocationTracker:
         self.heading = 0.0
         self.heading_offset = 0.0
 
-        self.start_lat = start_lat
-        self.start_lon = start_lon
-        self.start_alt = start_alt
+        self.start_lat = np.float64(start_lat)
+        self.start_lon = np.float64(start_lon)
+        self.start_alt = np.float64(start_alt)
 
         # System metrics
         self.boot_time = psutil.boot_time()
@@ -1390,10 +1392,10 @@ class LocationTracker:
         self.thrust_n = 0.0
 
         # IMU state for dead reckoning
-        self.vel = [0.0, 0.0, 0.0]  # m/s
+        self.vel = np.array([0.0, 0.0, 0.0], dtype=np.float64)  # m/s
         self.v_mag = 0.0
         self.mach = 0.0
-        self.pos = [0.0, 0.0, 0.0]  # m (relative to start)
+        self.pos = np.array([0.0, 0.0, 0.0], dtype=np.float64)  # m (relative to start)
 
         self.last_t = None
         self.last_cl_check = 0.0
@@ -1412,7 +1414,7 @@ class LocationTracker:
         # Gravity calibration
         self.calibrated_g = 1.0  # magnitude in 'g' units
         self._load_g_cal()
-        self.g_samples = deque(maxlen=10000)  # for live calibration
+        self.g_samples = []  # for live calibration
         self.last_g_update = 0.0
 
         # Earth constants
@@ -1422,7 +1424,7 @@ class LocationTracker:
         self.total_distance_m = 0.0
         self.last_odometer_lat = start_lat
         self.last_odometer_lon = start_lon
-        self.odometer_30m_history = deque(maxlen=10000)  # (time, dist_inc)
+        self.odometer_30m_history = deque()  # (time, dist_inc)
         self.air_density = 1.225  # kg/m^3 (Standard Sea Level)
         self.wind_mapper = WindMapper(max_age_s=1800)
 
@@ -1706,7 +1708,7 @@ class LocationTracker:
             # Record for ~5 seconds (500 samples at 100Hz)
             if len(self.g_samples) >= 500:
                 avg_g = sum(self.g_samples) / len(self.g_samples)
-                self.g_samples.clear()
+                self.g_samples = []
 
                 # 50% safety check
                 diff_pct = abs(avg_g - self.calibrated_g) / (
@@ -1721,7 +1723,7 @@ class LocationTracker:
                     for i in range(3):
                         self.vel[i] = 0.0
         else:
-            self.g_samples.clear()  # reset if moved
+            self.g_samples = []  # reset if moved
 
     def fetch_api_pressure_async(self):
         """Fetch real-world surface pressure and humidity from Open-Meteo."""
@@ -1870,7 +1872,7 @@ class LocationTracker:
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
 
-            MovementAugAmpKnob = 0.3
+            MovementAugAmpKnob = 0.01  # (default 1m/s equal to 100cm? idk we just trial and error movementaugampknob for least drift too far)
             self.pos[0] += dx * MovementAugAmpKnob
             self.pos[1] += dy * MovementAugAmpKnob
             self.pos[2] += dz * MovementAugAmpKnob
@@ -1887,10 +1889,10 @@ class LocationTracker:
                 self.odometer_30m_history.popleft()
 
             # Update lat/lon/alt
-            self.lat = self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT)
+            self.lat = np.float64(self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT))
             m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
-            self.lon = self.start_lon + (self.pos[0] / m_per_deg_lon)
-            self.alt = self.start_alt + self.pos[2]
+            self.lon = np.float64(self.start_lon + (self.pos[0] / m_per_deg_lon))
+            self.alt = np.float64(self.start_alt + self.pos[2])
             self.altitude_rate_per_second = self.vel[2]
         else:
             # Noise filter: no delta for coordinates
@@ -1972,10 +1974,10 @@ class LocationTracker:
             if res.returncode == 0:
                 parts = res.stdout.strip().split()
                 if len(parts) >= 4:
-                    new_lat = float(parts[0])
-                    new_lon = float(parts[1])
-                    new_alt = float(parts[2])
-                    new_heading = float(parts[3])
+                    new_lat = np.float64(parts[0])
+                    new_lon = np.float64(parts[1])
+                    new_alt = np.float64(parts[2])
+                    new_heading = np.float64(parts[3])
 
                     with self.lock:
                         # Drift Correction for Odometer
@@ -1993,17 +1995,17 @@ class LocationTracker:
                             self.last_odometer_lat = new_lat
                             self.last_odometer_lon = new_lon
 
-                        self.seu_risk_multiplier = math.pow(2.0, new_alt / 1500.0)
-                        self.alt_stress_multiplier = 1.0 + (new_alt / 10000.0)
+                        self.seu_risk_multiplier = math.pow(2.0, float(new_alt) / 1500.0)
+                        self.alt_stress_multiplier = 1.0 + (float(new_alt) / 10000.0)
                         self.lat = new_lat
                         self.lon = new_lon
                         self.alt = new_alt
-                        self.pressure_hpa = self._calculate_pressure(new_alt)
+                        self.pressure_hpa = self._calculate_pressure(float(new_alt))
                         self.heading = new_heading
                         self.start_lat = new_lat
                         self.start_lon = new_lon
                         self.start_alt = new_alt
-                        self.pos = [0.0, 0.0, 0.0]
+                        self.pos = np.array([0.0, 0.0, 0.0], dtype=np.float64)
         except Exception:
             pass
         finally:
