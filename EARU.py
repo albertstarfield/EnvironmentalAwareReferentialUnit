@@ -1689,7 +1689,7 @@ class LocationTracker:
             
             dist_inc = math.sqrt(dx*dx + dy*dy + dz*dz)
             self.total_distance_m += dist_inc
-            self.odometer_30m_history.append((t_now, dist_inc))
+            self.odometer_30m_history.append((t_now, (self.pos[0], self.pos[1], self.pos[2])))
             while self.odometer_30m_history and self.odometer_30m_history[0][0] < t_now - 1800:
                 self.odometer_30m_history.popleft()
 
@@ -1950,9 +1950,16 @@ def render(det, t_start, restarts,
         
         # Odometer display
         dist_km = location.total_distance_m / 1000.0
-        odo_30m = sum(d for t, d in location.odometer_30m_history)
+        odo_30m = 0.0
+        if location.odometer_30m_history:
+            _, old_pos = location.odometer_30m_history[0]
+            curr_pos = location.pos
+            odo_30m = math.sqrt((curr_pos[0] - old_pos[0])**2 + 
+                                (curr_pos[1] - old_pos[1])**2 + 
+                                (curr_pos[2] - old_pos[2])**2)
+        
         a(_line(f" {DIM}Environmental Odometer:{RST} {BGRN}{dist_km:>8.3f} km{RST} ({location.total_distance_m:>10.1f} m)"))
-        a(_line(f" {DIM}Authority (30m Travel):{RST} {BYEL}{odo_30m:>8.2f} m{RST} {DIM}(Validated spatial wind resolution){RST}"))
+        a(_line(f" {DIM}Authority (30m Radial):{RST} {BYEL}{odo_30m:>8.2f} m{RST} {DIM}(Validated spatial wind resolution){RST}"))
 
         api_p_val = f"{location.api_pressure_hpa:>8.2f} hPa" if location.api_pressure_hpa is not None else "N/A (alt)"
         a(_line(f" {DIM}Public General Avg Pressure:{RST} {BYEL}{api_p_val}{RST}"))
@@ -2005,7 +2012,13 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Pressure Tendency:{RST} {ten_col}{tendency:>+6.2f} hPa{RST} {ten_col}{ten_dir}{RST}"))
 
         # Merged Wind Map Scales
-        odo_30m = sum(d for t, d in location.odometer_30m_history)
+        odo_30m = 0.0
+        if location.odometer_30m_history:
+            _, old_pos = location.odometer_30m_history[0]
+            curr_pos = location.pos
+            odo_30m = math.sqrt((curr_pos[0] - old_pos[0])**2 + 
+                                (curr_pos[1] - old_pos[1])**2 + 
+                                (curr_pos[2] - old_pos[2])**2)
         for r in [0.1, 1.0, 10.0, 100.0]:
             speed, w_dir, w_arrow, bearing = location.wind_mapper.get_stats_at_radius(location.pos, r)
             label = f"Wind @ {r:>5.1f}m:"
