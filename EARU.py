@@ -3945,7 +3945,7 @@ def main(stdscr=None):
             # Variable size tracking
             profiler.track_size("det.waveform", det.waveform)
             profiler.track_size("det.waveform_xyz", det.waveform_xyz)
-            profiler.track_size("det.hr_buf", det.hr_buf)
+            profiler.track_size("det.ent_buf", det.ent_buf)
             profiler.track_size("det.dwt_buffer", det.dwt_buffer)
             profiler.track_size("det.peak_buf", det.peak_buf)
             profiler.track_size("det.kurt_buf", det.kurt_buf)
