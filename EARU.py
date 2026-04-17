@@ -3669,7 +3669,8 @@ def main(stdscr=None):
             profiler.track_size("det.rms_window", det._rms_window)
             profiler.track_size("loc.pressure_history", location.pressure_history)
             profiler.track_size("loc.odometer_history", location.odometer_30m_history)
-            profiler.track_size("loc.wind_history", location.wind_mapper.history)
+            profiler.track_size("loc.wind_spatial", location.wind_mapper.spatial_map)
+            profiler.track_size("loc.wind_rolling", location.wind_mapper.rolling_history)
             profiler.track_size("det.events", det.events)
             
             profiler.report(interval=10.0)
