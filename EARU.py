@@ -10,6 +10,7 @@ import sys
 import os
 import re
 import json
+import hashlib
 import signal
 import math
 import datetime
@@ -174,6 +175,11 @@ class VibrationDetector:
         self.prob_solder_fatigue = 0.0
         self.prob_electromech_fatigue = 0.0
         self.prob_total_damage_fatigue = 0.0
+        
+        # SAC305 Solder Fatigue Constants
+        self.solder_k = 0.0012      # PCB stiffness proxy
+        self.solder_b = 6.4         # fatigue exponent
+        self.solder_eps_crit = 0.0005 # strain limit (0.05%)
 
         self._last_evt_t = 0.0
 
@@ -196,9 +202,35 @@ class VibrationDetector:
         m_type = "Stationary"
         cert = 0.0
 
-        # --- Electronic Damage Fatigue Logic ---
-        # 1. Physical Shock Component
-        solder_p = min(0.7, (peak / 6.0) + (high_freq_pwr * 5.0))
+        # --- Electronic Damage Fatigue Logic (Solder Microcrack - SAC305) ---
+        # 1. Physics Model Calculation
+        now = time.time()
+        dt = max(0.001, now - self._last_fatigue_update)
+        self._last_fatigue_update = now
+
+        # Derive dominant frequency f_dom
+        band_freqs = [50.0, 25.0, 12.5, 6.25, 3.125]
+        if self.period_freq and self.period_cv < 0.4:
+            f_dom = self.period_freq
+        else:
+            # Weighted average frequency from spectral bands
+            total_eng = sum(b_eng) + 1e-30
+            f_dom = sum(f * e for f, e in zip(band_freqs, b_eng)) / total_eng
+        
+        f_dom = max(1.0, f_dom) # Avoid div by zero, min 1Hz
+        
+        # Physical stress proxy
+        g_rms = max(1e-10, self.rms)
+        # Z_d = (G * G_rms) / (2*pi*f)^2
+        z_d = (9.80665 * g_rms) / ((2.0 * math.pi * f_dom) ** 2)
+        eps = self.solder_k * z_d
+        
+        # Miner's Rule: Damage Increment (Delta D)
+        # N_f = (eps_crit / eps)^b
+        # dD = cycles / N_f = (f * dt) / (eps_crit / eps)^b = f * dt * (eps / eps_crit)^b
+        d_damage = f_dom * dt * (eps / self.solder_eps_crit) ** self.solder_b
+        
+        # Electromech fatigue remains heuristic for now
         electromech_p = min(0.7, (self.crest / 40.0) + (self.kurtosis / 50.0))
         
         # 2. Environmental Multipliers (The "Mix")
@@ -233,25 +265,17 @@ class VibrationDetector:
             # Combined Environmental Fatigue (Atmospheric Aging)
             env_fatigue = (thermal_stress * humidity_stress * pressure_stress * seu_risk) - 1.0
             
-            solder_p = min(1.0, solder_p * thermal_stress + env_fatigue * 0.1)
+            # Apply multipliers to the physics-based damage increment
+            d_damage *= thermal_stress * humidity_stress * pressure_stress
             electromech_p = min(1.0, electromech_p * humidity_stress + env_fatigue * 0.1)
 
-        if peak < 0.2: 
-            solder_p *= 0.1
-            electromech_p *= 0.1
-
-        self.prob_solder_fatigue = solder_p
+        # 3. Cumulative Fatigue Accumulation (Palmgren-Miner Rule)
+        self.cumulative_fatigue += d_damage
+        self.prob_solder_fatigue = self.cumulative_fatigue
         self.prob_electromech_fatigue = electromech_p
-        self.prob_total_damage_fatigue = max(solder_p, electromech_p)
-        
-        # 3. Cumulative Fatigue Accumulation
-        now = time.time()
-        dt = now - self._last_fatigue_update
-        self._last_fatigue_update = now
-        # Accumulate fatigue (integral of risk over time)
-        # 1.0 risk for 1 hour = 1.0 fatigue unit
-        self.cumulative_fatigue += self.prob_total_damage_fatigue * (dt / 3600.0)
+        self.prob_total_damage_fatigue = max(min(1.0, self.prob_solder_fatigue), electromech_p)
 
+        # --- Motion Classification Logic ---
         # 0. Intentional Hardware Torture: Extreme RMS + Kurtosis (erratic/violent shaking)
         if rms > 0.15 and self.kurtosis > 12:
             m_type = "Intentional Hardware Torture"
@@ -1904,6 +1928,18 @@ def main():
         try:
             with open("EARU_data.dat", "r") as f:
                 saved_data = json.load(f)
+
+                # Verify data parity if available
+                if 'parity' in saved_data:
+                    actual_parity = saved_data.pop('parity')
+                    # Use sort_keys=True to ensure consistent JSON string for hashing
+                    payload = json.dumps(saved_data, default=str, sort_keys=True)
+                    expected_parity = hashlib.sha256(payload.encode()).hexdigest()
+                    if actual_parity != expected_parity:
+                        sys.stderr.write(f"{YEL}[!] Warning: EARU_data.dat parity check failed!{RST}\n")
+                    else:
+                        sys.stderr.write(f"{DIM}[*] EARU_data.dat parity check passed.{RST}\n")
+
                 loc = saved_data.get('location', {})
                 initial_lat = loc.get('lat', initial_lat)
                 initial_lon = loc.get('lon', initial_lon)
@@ -1923,7 +1959,8 @@ def main():
                     initial_q = saved_q
                     det._q = initial_q
                     det._orient_init = True
-        except Exception:
+        except Exception as e:
+            sys.stderr.write(f"{RED}[!] Error loading state: {e}{RST}\n")
             pass
 
     location = LocationTracker(start_lat=initial_lat, start_lon=initial_lon, start_alt=initial_alt)
@@ -2136,7 +2173,11 @@ def main():
                         json_data = data.copy()
                         if json_data['als']:
                             json_data['als'] = json_data['als'].hex()
-                        json.dump(json_data, f, default=str)
+                        # Calculate parity for data integrity
+                        # We use sort_keys=True to ensure consistent JSON string for hashing
+                        payload = json.dumps(json_data, default=str, sort_keys=True)
+                        json_data['parity'] = hashlib.sha256(payload.encode()).hexdigest()
+                        json.dump(json_data, f, default=str, sort_keys=True)
                 except Exception:
                     pass
 

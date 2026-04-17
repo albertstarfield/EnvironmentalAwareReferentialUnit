@@ -30,7 +30,18 @@ This document outlines the mathematical models and physical constants assumed wi
     *   Moving: $0.995$ (0.5% velocity bleed per sample).
 *   **Earth Model:** Spherical approximation. $111,111 \text{ meters per degree latitude}$.
 
-## 4. SMC Thermal Management Thresholds
+## 4. Solder Joint Microcrack Fatigue (SAC305)
+*   **Physics Model:** Combined Paris' Law (propagation) and Palmgren-Miner Rule (cumulative damage).
+*   **PCB Displacement ($Z_d$):** $Z_d = \frac{9.80665 \cdot G_{rms}}{(2 \pi f)^2}$ (meters).
+*   **Strain Proxy ($\varepsilon$):** $\varepsilon = k \cdot Z_d$.
+    *   $k \approx 0.0012$ (Empirical stiffness for M2 Pro logic board).
+*   **Cycles to Failure ($N_f$):** Basquin-style relation $N_f = (\frac{\varepsilon_{critical}}{\varepsilon})^b$.
+    *   $\varepsilon_{critical} = 0.0005$.
+    *   $b = 6.4$ (Fatigue exponent for SAC305 solder).
+*   **Cumulative Damage ($D$):** $D = \sum \frac{n_i}{N_{fi}}$, where $n_i = f \cdot dt$.
+*   **Probability of Failure:** $P_{fail} = D \cdot 100\%$.
+
+## 5. SMC Thermal Management Thresholds
 *   **High Performance Activation:** $93^\circ\text{C}$ (TCMz/GPU) or $40 \text{ J/s}$ (System Power).
 *   **Manual Fan Control Activation:** $86^\circ\text{C}$.
 *   **Fan Overdrive ($10,100 \text{ RPM}$):** $\ge 95^\circ\text{C}$ or Persistent Anomaly.
