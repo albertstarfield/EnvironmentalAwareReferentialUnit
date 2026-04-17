@@ -3448,7 +3448,7 @@ def main(stdscr=None):
                     last_impact_save = now
                 last_draw = now
                 
-                profiler.start_block("data_prep")
+                profiler.start_block("dp_orientation")
                 # Prepare complete data for potential task
                 qw, qx, qy, qz = det._q
                 sin_r = 2.0 * (qw * qx + qy * qz)
@@ -3461,6 +3461,7 @@ def main(stdscr=None):
                 cos_y = 1.0 - 2.0 * (qy * qy + qz * qz)
                 yaw_d = math.degrees(math.atan2(sin_y, cos_y))
 
+                profiler.start_block("dp_pressure")
                 # Calculate averaged pressure excluding None values
                 pressures = [
                     p
@@ -3473,10 +3474,21 @@ def main(stdscr=None):
                 ]
                 avg_pressure = sum(pressures) / len(pressures) if pressures else 1013.25
 
+                profiler.start_block("dp_loop_stats")
                 l_pct_90, l_low_1, l_low_01, l_avg, l_stutters, l_hz_history = (
                     loop_tracker.get_stats()
                 )
 
+                profiler.start_block("dp_wind_map")
+                # Extract wind map stats separately to profile its weight
+                wind_stats = {
+                    str(r): location.wind_mapper.get_stats_at_radius(
+                        location.pos, r
+                    )
+                    for r in [0.1, 1.0, 10.0, 100.0]
+                }
+
+                profiler.start_block("dp_dict_build")
                 data = {
                     "time": now,
                     "accel": {
@@ -3532,12 +3544,7 @@ def main(stdscr=None):
                         else 0.0,
                         "wind_map": {
                             "grid_7x7_10m": location.cached_wind_grid if location.cached_wind_grid is not None else [],
-                            "stats": {
-                                str(r): location.wind_mapper.get_stats_at_radius(
-                                    location.pos, r
-                                )
-                                for r in [0.1, 1.0, 10.0, 100.0]
-                            }
+                            "stats": wind_stats
                         },
                     },
                     "seismic_activity": {
