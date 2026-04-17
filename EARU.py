@@ -170,6 +170,149 @@ def njit_imu_rotate_and_subtract_gravity(q, accel, calibrated_g):
 
 
 @njit(cache=True)
+def njit_interpolate_wind(target_pos, data_arr, radius_m, global_wind):
+    """
+    Numba-optimized IDW interpolation for wind data.
+    data_arr indices: 1:x, 2:y, 3:z, 4:vx, 5:vy, 6:vz, 7:va, 8:phpa, 9:temp_k
+    Returns: (mag, (wx, wy, wz), avg_p, avg_t)
+    """
+    tx, ty, tz = target_pos
+    total_w = 0.0
+    total_p = 0.0
+    total_t = 0.0
+    loc_wx = 0.0
+    loc_wy = 0.0
+    loc_wz = 0.0
+    loc_v_sum = 0.0
+    
+    r2 = radius_m * radius_m
+
+    for i in range(data_arr.shape[0]):
+        sx = data_arr[i, 1]
+        sy = data_arr[i, 2]
+        sz = data_arr[i, 3]
+        
+        dx = sx - tx
+        dy = sy - ty
+        dz = sz - tz
+        dist_sq = dx*dx + dy*dy + dz*dz
+        
+        if dist_sq > r2:
+            continue
+
+        # Inverse distance weighting
+        w = 1.0 / (math.sqrt(dist_sq) + 0.5) ** 2
+        
+        svx = data_arr[i, 4]
+        svy = data_arr[i, 5]
+        svz = data_arr[i, 6]
+        sva = data_arr[i, 7]
+        phpa = data_arr[i, 8]
+        temp_k = data_arr[i, 9]
+
+        svg_mag = math.sqrt(svx*svx + svy*svy + svz*svz)
+        if svg_mag > 0.1:
+            ratio = sva / svg_mag
+            vw = svg_mag * w
+            loc_wx += svx * (1.0 - ratio) * vw
+            loc_wy += svy * (1.0 - ratio) * vw
+            loc_wz += svz * (1.0 - ratio) * vw
+            loc_v_sum += vw
+
+        total_p += phpa * w
+        total_t += temp_k * w
+        total_w += w
+
+    if total_w > 0:
+        avg_p = total_p / total_w
+        avg_t = total_t / total_w
+        if loc_v_sum > 0:
+            wx, wy, wz = loc_wx / loc_v_sum, loc_wy / loc_v_sum, loc_wz / loc_v_sum
+            mag = math.sqrt(wx*wx + wy*wy + wz*wz)
+            return mag, wx, wy, wz, avg_p, avg_t
+        
+        g_mag = math.sqrt(global_wind[0]**2 + global_wind[1]**2 + global_wind[2]**2)
+        return 0.0, global_wind[0], global_wind[1], global_wind[2], avg_p, avg_t
+        
+    return 0.0, global_wind[0], global_wind[1], global_wind[2], 1013.25, 293.15
+
+
+@njit(cache=True)
+def njit_generate_wind_grid(center_pos, data_arr, global_wind, heading, size, step):
+    """
+    Generates the entire Head-Up wind grid in one Numba pass.
+    """
+    # Result array: (size, size, 6) where 6 is [mag, wx, wy, wz, p, t]
+    grid = np.zeros((size, size, 6))
+    cx, cy, cz = center_pos
+    theta = heading * 0.017453292519943295 # rad
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    
+    radius_m = step * 1.5
+
+    for j in range(size):
+        for i in range(size):
+            lx = (i - size // 2) * step
+            ly = (size // 2 - j) * step
+            tx = cx + lx * cos_t + ly * sin_t
+            ty = cy - lx * sin_t + ly * cos_t
+            
+            res = njit_interpolate_wind((tx, ty, cz), data_arr, radius_m, global_wind)
+            grid[j, i, 0] = res[0]
+            grid[j, i, 1] = res[1]
+            grid[j, i, 2] = res[2]
+            grid[j, i, 3] = res[3]
+            grid[j, i, 4] = res[4]
+            grid[j, i, 5] = res[5]
+            
+    return grid
+
+
+@njit(cache=True)
+def njit_calculate_rms(arr):
+    if arr.size == 0:
+        return 0.0
+    s = 0.0
+    for i in range(arr.size):
+        s += arr[i] * arr[i]
+    return math.sqrt(s / arr.size)
+
+
+@njit(cache=True)
+def njit_calculate_stats(arr):
+    """Returns (kurtosis, crest_factor)"""
+    n = arr.size
+    if n < 2:
+        return 0.0, 0.0
+    
+    mu = 0.0
+    for i in range(n):
+        mu += arr[i]
+    mu /= n
+    
+    m2 = 0.0
+    m4 = 0.0
+    peak = 0.0
+    for i in range(n):
+        val = arr[i]
+        if val > peak: peak = val
+        diff = val - mu
+        d2 = diff * diff
+        m2 += d2
+        m4 += d2 * d2
+    
+    m2 /= n
+    m4 /= n
+    
+    kurt = m4 / (m2 * m2 + 1e-30)
+    rms = math.sqrt(m2 + 1e-30) # Approx RMS of centered signal
+    crest = peak / rms if rms > 0 else 0.0
+    
+    return kurt, crest
+
+
+@njit(cache=True)
 def njit_solder_fatigue_increment(f_dom, dt, rms, peak, k, eps_crit, b, current_damage):
     """
     Habibie Microcrack Propagation Model:
@@ -366,94 +509,81 @@ class WindMapper:
             return (vw[0] + vrx * scale, vw[1] + vry * scale, vw[2] + vrz * scale)
         return vel
 
+    def _get_data_arr(self):
+        """Internal helper to convert spatial dict to numpy for Numba."""
+        if not self.spatial_map:
+            return np.zeros((0, 10))
+        return np.array(list(self.spatial_map.values()), dtype=np.float64)
+
     def get_stats_at_radius(self, current_pos, radius_m):
         with self.lock:
             if not self.spatial_map:
                 return 0.0, 0.0, "", 0.0
+            
+            data_arr = self._get_data_arr()
+            # We call the interpolate logic to get local conditions
+            res = njit_interpolate_wind(
+                tuple(current_pos), 
+                data_arr, 
+                radius_m, 
+                tuple(self.current_wind)
+            )
+            
+            wind_speed = res[0]
+            # If no local data found, wind_speed is 0.0, we use current_wind magnitude
+            if wind_speed <= 0.0:
+                wind_speed = math.sqrt(sum(c*c for c in self.current_wind))
 
-            relevant = []
-            cx, cy, cz = current_pos
-            # Iterating over spatial tiles is much faster than total history
-            for s in self.spatial_map.values():
-                _, x, y, z, vx, vy, vz, va, _, _ = s
-                dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2)
-                if dist <= radius_m:
-                    relevant.append(s)
-
-            if not relevant:
-                return None, None, None, None
-
-            v_sum, vg_sum = 0.0, 0.0
-            for s in relevant:
-                v_sum += s[7] # va
-                vg_sum += math.sqrt(s[4]**2 + s[5]**2 + s[6]**2) # vg
-
-            avg_mag = v_sum / len(relevant)
-            avg_vg = vg_sum / len(relevant)
-            vw_mag = math.sqrt(sum(c * c for c in self.current_wind))
-            wind_speed = (vw_mag * 0.7) + (abs(avg_mag - avg_vg) * 0.3)
-            bearing = _math_to_bearing(self.current_wind)
-            return (wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing), bearing)
+            bearing = _math_to_bearing((res[1], res[2], res[3]))
+            return (
+                wind_speed,
+                _degrees_to_compass(bearing),
+                _degrees_to_arrow(bearing),
+                bearing,
+            )
 
     def get_interpolated_wind_data(self, target_pos, radius_m=30.0):
         with self.lock:
             if not self.spatial_map:
                 return 0.0, self.current_wind, 1013.25, 293.15
-
-            tx, ty, tz = target_pos
-            total_w = total_p = total_t = 0.0
-            loc_wx = loc_wy = loc_wz = loc_v_sum = 0.0
-
-            for s in self.spatial_map.values():
-                _, sx, sy, sz, svx, svy, svz, sva, phpa, temp_k = s
-                d = math.sqrt((sx - tx) ** 2 + (sy - ty) ** 2 + (sz - tz) ** 2)
-                if d > radius_m:
-                    continue
-
-                w = 1.0 / (d + 0.5) ** 2
-                svg_mag = math.sqrt(svx**2 + svy**2 + svz**2)
-                if svg_mag > 0.1:
-                    ratio = sva / svg_mag
-                    vw = svg_mag * w
-                    loc_wx += svx * (1.0 - ratio) * vw
-                    loc_wy += svy * (1.0 - ratio) * vw
-                    loc_wz += svz * (1.0 - ratio) * vw
-                    loc_v_sum += vw
-
-                total_p += phpa * w
-                total_t += temp_k * w
-                total_w += w
-
-            if total_w > 0:
-                avg_p, avg_t = total_p / total_w, total_t / total_w
-                if loc_v_sum > 0:
-                    tile_wind = (loc_wx / loc_v_sum, loc_wy / loc_v_sum, loc_wz / loc_v_sum)
-                    tile_mag = math.sqrt(tile_wind[0]**2 + tile_wind[1]**2 + tile_wind[2]**2)
-                    return tile_mag, tile_wind, avg_p, avg_t
-                return 0.0, self.current_wind, avg_p, avg_t
-                
-            return 0.0, self.current_wind, 1013.25, 293.15
+            
+            data_arr = self._get_data_arr()
+            res = njit_interpolate_wind(
+                tuple(target_pos), 
+                data_arr, 
+                radius_m, 
+                tuple(self.current_wind)
+            )
+            # res: (mag, wx, wy, wz, p, t)
+            return res[0], (res[1], res[2], res[3]), res[4], res[5]
 
     def get_wind_grid(self, center_pos, heading=0.0, size=7, step=10.0):
-        """Generates a rotated 2D grid of wind data (Head-Up)."""
-        grid = []
-        cx, cy, cz = center_pos
-        theta = math.radians(heading)
-        cos_t = math.cos(theta)
-        sin_t = math.sin(theta)
-
-        for j in range(size):
-            row = []
-            for i in range(size):
-                lx = (i - size // 2) * step
-                ly = (size // 2 - j) * step
-                tx = cx + lx * cos_t + ly * sin_t
-                ty = cy - lx * sin_t + ly * cos_t
-                row.append(
-                    self.get_interpolated_wind_data((tx, ty, cz), radius_m=step * 1.5)
-                )
-            grid.append(row)
-        return grid
+        """Generates a rotated 2D grid of wind data (Head-Up) using Numba pass."""
+        with self.lock:
+            if not self.spatial_map:
+                return []
+            
+            data_arr = self._get_data_arr()
+            # generate_wind_grid returns (size, size, 6)
+            grid_arr = njit_generate_wind_grid(
+                tuple(center_pos),
+                data_arr,
+                tuple(self.current_wind),
+                heading,
+                size,
+                step
+            )
+            
+            # Convert back to list of lists of tuples for the existing UI logic
+            final_grid = []
+            for j in range(size):
+                row = []
+                for i in range(size):
+                    res = grid_arr[j, i]
+                    # Format: (mag, (wx, wy, wz), p, t)
+                    row.append((res[0], (res[1], res[2], res[3]), res[4], res[5]))
+                final_grid.append(row)
+            return final_grid
 
 
 def _math_to_bearing(vec):
@@ -849,14 +979,13 @@ class VibrationDetector:
         if self._rms_dec >= max(1, self.fs // 10):
             self._rms_dec = 0
             if self._rms_window:
-                rv = math.sqrt(
-                    sum(x * x for x in self._rms_window) / len(self._rms_window)
-                )
+                buf_rms = np.array(list(self._rms_window), dtype=np.float32)
+                rv = njit_calculate_rms(buf_rms)
                 self.rms_trend.append(rv)
 
         evts = []
 
-        # sta/lta
+        # ... (sta/lta and cusum logic)
         e = mag * mag
         for i in range(3):
             self.sta[i] += (e - self.sta[i]) / self.sta_n[i]
@@ -876,7 +1005,6 @@ class VibrationDetector:
             for i in range(3):
                 self.sta_lta_ring[i].append(self.sta_lta_latest[i])
 
-        # cusum
         self.cusum_mu += 0.0001 * (mag - self.cusum_mu)
         self.cusum_pos = max(0.0, self.cusum_pos + mag - self.cusum_mu - self.cusum_k)
         self.cusum_neg = max(0.0, self.cusum_neg - mag + self.cusum_mu - self.cusum_k)
@@ -893,12 +1021,8 @@ class VibrationDetector:
         self._kurt_dec += 1
         if self._kurt_dec >= max(1, self.fs // 10) and len(self.kurt_buf) >= 50:
             self._kurt_dec = 0
-            buf = np.array(list(self.kurt_buf), dtype=np.float32)
-            mu = np.mean(buf)
-            centered = buf - mu
-            m2 = np.mean(centered ** 2)
-            m4 = np.mean(centered ** 4)
-            k = m4 / (m2 * m2 + 1e-30)
+            buf_k = np.array(list(self.kurt_buf), dtype=np.float32)
+            k, _ = njit_calculate_stats(buf_k)
             self.kurtosis = float(k)
             if k > 6:
                 evts.append(("KURTOSIS", float(k), mag))
@@ -911,14 +1035,17 @@ class VibrationDetector:
         
         if len(self.peak_buf) >= 50 and self._peak_dec >= max(1, self.fs // 10):
             self._peak_dec = 0
-            buf = np.array(list(self.peak_buf), dtype=np.float32)
-            median = np.median(buf)
-            mad = np.median(np.abs(buf - median))
+            buf_p = np.array(list(self.peak_buf), dtype=np.float32)
+            median = np.median(buf_p)
+            mad = np.median(np.abs(buf_p - median))
             sigma = 1.4826 * mad + 1e-30
             self.mad_sigma = float(sigma)
-            self.rms = float(np.sqrt(np.mean(buf * buf)))
-            self.peak = float(np.max(np.abs(buf)))
-            self.crest = self.peak / (self.rms + 1e-30)
+            
+            k, crest = njit_calculate_stats(buf_p)
+            self.rms = float(njit_calculate_rms(buf_p))
+            self.peak = float(np.max(np.abs(buf_p)))
+            self.crest = float(crest)
+            
             dev = abs(mag - median) / sigma
             if dev > 8.0:
                 evts.append(("PEAK", "majeur", float(dev), mag))
