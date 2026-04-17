@@ -27,6 +27,7 @@ from collections import deque
 import struct
 import requests
 import psutil
+import curses
 
 from earu._spu import (
     sensor_worker, shm_read_new, shm_read_new_gyro, shm_snap_read,
@@ -156,7 +157,66 @@ def njit_solder_fatigue_increment(f_dom, dt, rms, k, eps_crit, b):
     # Miner's Rule
     return f_dom * dt * (eps / eps_crit) ** b
 
-_ANSI_RE = re.compile(r'\033\[[^m]*m')
+_ANSI_RE = re.compile(r'\033\[([^m]*)m')
+
+def _init_curses_colors():
+    """Initialize curses color pairs for 256-color support."""
+    curses.start_color()
+    curses.use_default_colors()
+    # Basic ANSI colors (0-15)
+    for i in range(16):
+        curses.init_pair(i + 1, i, -1)
+    # 256 colors: map ANSI code directly to pair
+    for i in range(16, 256):
+        try:
+            curses.init_pair(i + 1, i, -1)
+        except Exception:
+            pass
+
+def _add_ansi_to_curses(win, s):
+    """Parses a string with ANSI escape codes and draws it with clipping."""
+    max_y, max_x = win.getmaxyx()
+    parts = _ANSI_RE.split(s)
+    attr = curses.A_NORMAL
+    y, x = 0, 0
+    
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            # ANSI code
+            if not part or part == '0':
+                attr = curses.A_NORMAL
+            elif part == '1':
+                attr |= curses.A_BOLD
+            elif part == '2':
+                attr |= curses.A_DIM
+            elif part.startswith('38;5;'):
+                try:
+                    c = int(part.split(';')[-1])
+                    attr = (attr & ~(0xff << 8)) | curses.color_pair(c + 1)
+                except Exception: pass
+            elif part.startswith('3') or part.startswith('9'):
+                try:
+                    c = int(part)
+                    base = [0, 4, 2, 6, 1, 5, 3, 7]
+                    if 30 <= c <= 37:
+                        attr = (attr & ~(0xff << 8)) | curses.color_pair(base[c-30] + 1)
+                    elif 90 <= c <= 97:
+                        attr = (attr & ~(0xff << 8)) | curses.color_pair(base[c-90] + 9)
+                except Exception: pass
+        else:
+            # Regular text - handle newlines and clipping
+            for char in part:
+                if char == '\n':
+                    y += 1
+                    x = 0
+                    if y >= max_y: break
+                else:
+                    if y < max_y and x < max_x:
+                        try:
+                            win.addch(y, x, char, attr)
+                        except curses.error: pass
+                    x += 1
+            if y >= max_y: break
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -2165,11 +2225,17 @@ def load_task(path):
         print(f"{RED}[!] Error loading task {path}: {e}{RST}")
         return None
 
-def main():
+def main(stdscr=None):
     # Ensure working directory is the script's directory
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    # (Called outside wrapper to avoid issues with current working dir changes)
     
-    use_tui = sys.stdout.isatty()
+    use_tui = stdscr is not None or (sys.stdout.isatty() and '--no-tui' not in sys.argv)
+    
+    if stdscr:
+        _init_curses_colors()
+        curses.curs_set(0)
+        stdscr.nodelay(True)
+        stdscr.timeout(0)
     save_log = False
     task_path = None
     daemon_mode = False
@@ -2615,23 +2681,13 @@ def main():
                                   lid_angle=lid_angle,
                                   als_raw=als_raw, location=location,
                                   loop_stats=(l_pct_90, l_low_1, l_low_01, l_avg, l_stutters))
-                    sys.stdout.write(CLEAR + frame)
-                else:
-                    # Simple text output
-                    ax, ay, az = det.latest_raw
-                    el = now - t_start
-                    rate = det.sample_count / el if el > 1 else 0
-                    p_str = f"{location.pressure_hpa:.1f}hPa" if location.pressure_hpa is not None else "N/A"
-                    api_p_str = f"API:{location.api_pressure_hpa:.1f}hPa" if location.api_pressure_hpa is not None else ""
-                    st_warn = "STUTTER!" if l_stutters > 0 else "smooth"
-                    msg = (f"\r[{now - t_start:7.1f}s] {rate:4.0f}Hz "
-                           f"Lat:{location.lat:10.6f} Lon:{location.lon:10.6f} Alt:{location.alt:6.1f}m ({location.altitude_rate_per_second:+5.2f}m/s) {p_str} {api_p_str} "
-                           f"M:{location.mach:.3f} "
-                           f"Mag:{det.latest_mag:7.5f}g "
-                           f"Ev:{len(det.events)} "
-                           f"Loop90%:{l_pct_90:.1f}% 1%Low:{l_low_1:.1f}ms 0.1%Low:{l_low_01:.1f}ms ({st_warn}) ")
-                    sys.stdout.write(msg)
-                sys.stdout.flush()
+                    if stdscr:
+                        stdscr.erase()
+                        _add_ansi_to_curses(stdscr, frame)
+                        stdscr.refresh()
+                    else:
+                        sys.stdout.write(CLEAR + frame)
+                        sys.stdout.flush()
                 last_draw = now
 
     finally:
@@ -2680,4 +2736,13 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # Set working directory once
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    
+    if '--no-tui' in sys.argv or '--daemon' in sys.argv or not sys.stdout.isatty():
+        main(None)
+    else:
+        try:
+            curses.wrapper(main)
+        except KeyboardInterrupt:
+            pass
