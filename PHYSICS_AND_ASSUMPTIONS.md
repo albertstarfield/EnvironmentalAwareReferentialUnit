@@ -22,7 +22,7 @@ This document outlines the mathematical models and physical constants assumed wi
 *   **Heatflux Calculation:** $\dot{Q} = \dot{m} \cdot C_p \cdot (T_{outlet} - T_{inlet})$.
 
 ## 3. Inertial Navigation & Motion
-*   **Sampling Frequency ($f_s$):** $100 \text{ Hz}$.
+*   **Sampling Frequency ($f_s$):** $800 \text{ Hz}$.
 *   **Standard Gravity ($g$):** $9.80665 \text{ m/s}^2$.
 *   **Mahony Filter Gains:** $K_p = 2.0$, $K_i = 0.005$.
 *   **Dead Reckoning Damping (ZUPT):** 

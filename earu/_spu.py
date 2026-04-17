@@ -19,7 +19,7 @@ USAGE_LID = 138                 # lid angle sensor
 
 # report format (bmi286 imu)
 IMU_REPORT_LEN = 22             # accel/gyro report
-IMU_DECIMATION = 8              # keep 1 in N
+IMU_DECIMATION = 1              # keep 1 in N (1 = 800Hz)
 IMU_DATA_OFF = 6                # xyz payload start
 ALS_REPORT_LEN = 122            # als report bytes
 LID_REPORT_LEN = 3              # lid angle report bytes
