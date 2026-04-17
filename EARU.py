@@ -1389,6 +1389,97 @@ def _downsample(data, width):
     return out
 
 
+class ProfilerDebug:
+    """
+    Tracks memory usage, CPU usage, and object sizes to identify resource leaks
+    or bottlenecks. Only active if --profilerDebug is used.
+    """
+
+    def __init__(self, enabled=False):
+        self.enabled = enabled
+        if not self.enabled:
+            return
+        self.process = psutil.Process(os.getpid())
+        self.monitored_vars = {}
+        self.start_time = time.time()
+        self.last_report = time.time()
+        self.block_times = {}
+        self._current_block = None
+        self._block_start = 0
+
+    def start_block(self, name):
+        if not self.enabled:
+            return
+        self._current_block = name
+        self._block_start = time.perf_counter()
+
+    def end_block(self):
+        if not self.enabled or self._current_block is None:
+            return
+        dt = (time.perf_counter() - self._block_start) * 1000.0  # ms
+        if self._current_block not in self.block_times:
+            self.block_times[self._current_block] = deque(maxlen=100)
+        self.block_times[self._current_block].append(dt)
+        self._current_block = None
+
+    def track_size(self, name, obj):
+        if not self.enabled:
+            return
+        size = 0
+        try:
+            if hasattr(obj, "__len__"):
+                size = len(obj)
+            else:
+                size = sys.getsizeof(obj)
+        except Exception:
+            pass
+
+        if name not in self.monitored_vars:
+            self.monitored_vars[name] = deque(maxlen=100)
+        self.monitored_vars[name].append(size)
+
+    def report(self, interval=5.0):
+        if not self.enabled:
+            return
+        now = time.time()
+        if now - self.last_report < interval:
+            return
+        self.last_report = now
+
+        mem = self.process.memory_info().rss / (1024 * 1024)  # MB
+        cpu = self.process.cpu_percent()
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            f"--- {timestamp} ---",
+            f"[PROFILER] Mem: {mem:.2f}MB | CPU: {cpu:.1f}%",
+            "Variable Sizes (length/bytes):",
+        ]
+
+        for name, history in self.monitored_vars.items():
+            if not history:
+                continue
+            avg_size = sum(history) / len(history)
+            growth = history[-1] - history[0] if len(history) > 1 else 0
+            lines.append(f"  - {name:20}: {history[-1]:8} (avg: {avg_size:8.1f}, Δ: {growth:+d})")
+
+        lines.append("Block Timings (ms):")
+        for name, history in self.block_times.items():
+            if not history:
+                continue
+            avg_t = sum(history) / len(history)
+            max_t = max(history)
+            lines.append(f"  - {name:20}: avg {avg_t:6.2f}ms | max {max_t:6.2f}ms")
+        
+        lines.append("-" * 40 + "\n")
+
+        try:
+            with open("profiler.log", "a") as f:
+                f.write("\n".join(lines))
+        except Exception:
+            pass
+
+
 class LoopConsistencyTracker:
     def __init__(self, target_ms=10.0, window_size=1000):
         self.target_ms = target_ms
@@ -2909,6 +3000,7 @@ def main(stdscr=None):
     daemon_mode = False
     kys_mode = False
     low_power_mode = False
+    profiler_debug = False
 
     i = 1
     while i < len(sys.argv):
@@ -2923,12 +3015,14 @@ def main(stdscr=None):
             kys_mode = True
         elif arg in ("-lp", "--low-power"):
             low_power_mode = True
+        elif arg == "--profilerDebug":
+            profiler_debug = True
         elif arg == "--task" and i + 1 < len(sys.argv):
             task_path = sys.argv[i + 1]
             i += 1
         elif arg in ("-h", "--help"):
             print(
-                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--low-power] [--task path/to/script.py]"
+                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--low-power] [--profilerDebug] [--task path/to/script.py]"
             )
             return
         i += 1
@@ -3156,6 +3250,7 @@ def main(stdscr=None):
 
     target_ms = 33.3 if low_power_mode else 10.0
     loop_tracker = LoopConsistencyTracker(target_ms=target_ms)
+    profiler = ProfilerDebug(enabled=profiler_debug)
     t_start = time.time()
     last_total = 0
     last_gyro_total = 0
@@ -3231,6 +3326,7 @@ def main(stdscr=None):
     try:
         while running[0]:
             loop_start = time.time()
+            profiler.start_block("loop_init")
             if os.path.exists("kys"):
                 os.remove("kys")
                 running[0] = False
@@ -3254,7 +3350,9 @@ def main(stdscr=None):
 
             time.sleep(0.033 if low_power_mode else 0.005)
             now = time.time()
+            profiler.end_block()
 
+            profiler.start_block("shm_read")
             samples, last_total = shm_read_new(shm.buf, last_total)
             if len(samples) > MAX_BATCH:
                 samples = samples[-MAX_BATCH:]
@@ -3262,7 +3360,9 @@ def main(stdscr=None):
 
             # Get latest gyro magnitude for ZUPT
             gyro_mag = math.sqrt(sum(g * g for g in det.gyro_latest))
+            profiler.end_block()
 
+            profiler.start_block("process_accel")
             for idx, (sx, sy, sz) in enumerate(samples):
                 t_sample = now - (n_samples - idx - 1) / det.fs
                 dyn_mag = det.process(sx, sy, sz, t_sample)
@@ -3280,7 +3380,9 @@ def main(stdscr=None):
                     raw_accel=(sx, sy, sz),
                     gyro_mag=gyro_mag,
                 )
+            profiler.end_block()
 
+            profiler.start_block("process_gyro")
             gyro_samples, last_gyro_total = shm_read_new_gyro(
                 shm_gyro.buf, last_gyro_total
             )
@@ -3288,7 +3390,9 @@ def main(stdscr=None):
                 gyro_samples = gyro_samples[-MAX_BATCH:]
             for gx, gy, gz in gyro_samples:
                 det.process_gyro(gx, gy, gz)
+            profiler.end_block()
 
+            profiler.start_block("process_als_lid")
             als_data, last_als_count = shm_snap_read(
                 shm_als.buf, last_als_count, ALS_REPORT_LEN
             )
@@ -3311,6 +3415,7 @@ def main(stdscr=None):
                 lid_speed *= 0.95
             
             det.lid_speed = lid_speed
+            profiler.end_block()
 
             # Loop tracking record
             loop_duration = (time.time() - loop_start) * 1000.0
@@ -3320,6 +3425,7 @@ def main(stdscr=None):
             is_impact = (det.peak > 3.0)
             draw_period = 0.5
             
+            profiler.start_block("render_save")
             if (now - last_draw >= draw_period) or (is_impact and now - last_impact_save > 0.5):
                 if is_impact:
                     # Emergency Classification to capture impact damage immediately
@@ -3544,6 +3650,23 @@ def main(stdscr=None):
                         sys.stdout.write(CLEAR + frame)
                         sys.stdout.flush()
                 last_draw = now
+            profiler.end_block()
+
+            profiler.start_block("profiler_track")
+            # Variable size tracking
+            profiler.track_size("det.waveform", det.waveform)
+            profiler.track_size("det.waveform_xyz", det.waveform_xyz)
+            profiler.track_size("det.hr_buf", det.hr_buf)
+            profiler.track_size("det.dwt_buffer", det.dwt_buffer)
+            profiler.track_size("det.peak_buf", det.peak_buf)
+            profiler.track_size("det.kurt_buf", det.kurt_buf)
+            profiler.track_size("det.rms_window", det._rms_window)
+            profiler.track_size("loc.pressure_history", location.pressure_history)
+            profiler.track_size("loc.odometer_history", location.odometer_30m_history)
+            profiler.track_size("det.events", det.events)
+            
+            profiler.report(interval=10.0)
+            profiler.end_block()
 
     finally:
         if worker and worker.is_alive():
