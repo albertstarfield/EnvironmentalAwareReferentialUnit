@@ -284,119 +284,97 @@ class WindMapper:
     """
     Estimates and maps environmental wind by comparing ground velocity (IMU/GPS)
     and apparent airspeed (derived from dynamic pressure hPa).
-    Uses a spatial-temporal buffer for averaging at various scales.
+    Uses spatial tiling to prevent data buildup and CPU exhaustion.
     """
 
     def __init__(self, max_age_s=1800):
         self.lock = threading.Lock()
-        self.history = deque()  # (time, x, y, z, vx, vy, vz, v_air_mag, pressure_hpa, temp_k)
+        self.spatial_map = {}  # (tx, ty, tz) -> (time, x, y, z, vx, vy, vz, va, phpa, temp_k)
+        self.rolling_history = deque(maxlen=6000) # Last 60s for responsive global wind
         self.max_age_s = max_age_s
         self.current_wind = (0.0, 0.0, 0.0)  # World frame (m/s)
         self.pressure_offset_hpa = 0.0
         self.offset_samples = []
+        self.tile_size = 1.0 # 1 meter resolution
 
     def add_sample(self, t, pos, vel, pressure_hpa, static_pressure, density, temp_k=293.15):
-        # 1. Stationary Calibration (ZUPT-style)
-        # If ground speed < 0.05 m/s, we assume any pressure delta is sensor offset
+        # 1. Stationary Calibration
         vg_mag = math.sqrt(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
-
         if vg_mag < 0.05:
-            # Accumulate offset sample
             self.offset_samples.append(pressure_hpa - static_pressure)
-            if len(self.offset_samples) > 100:  # 1s at 100Hz
-                self.pressure_offset_hpa = sum(self.offset_samples) / len(
-                    self.offset_samples
-                )
+            if len(self.offset_samples) > 100:
+                self.pressure_offset_hpa = sum(self.offset_samples) / len(self.offset_samples)
                 self.offset_samples = self.offset_samples[-100:]
 
-        # 2. Calculate Corrected Dynamic Pressure
-        # q = P_total - (P_static + P_offset)
+        # 2. Calculate Corrected Airspeed
         corrected_delta = pressure_hpa - (static_pressure + self.pressure_offset_hpa)
         q = max(0.0, corrected_delta) * 100.0
         v_air_mag = math.sqrt(2 * q / max(density, 0.1))
-
-        # Cap unreasonable values (e.g. 50m/s ≈ 100 knots) unless actually moving fast
         if vg_mag < 1.0:
-            v_air_mag = min(v_air_mag, 15.0)  # Cap at ~30 knots if not in vehicle
+            v_air_mag = min(v_air_mag, 15.0)
+
+        sample = (t, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], v_air_mag, pressure_hpa, temp_k)
 
         with self.lock:
-            self.history.append(
-                (
-                    t,
-                    pos[0],
-                    pos[1],
-                    pos[2],
-                    vel[0],
-                    vel[1],
-                    vel[2],
-                    v_air_mag,
-                    pressure_hpa,
-                    temp_k,
-                )
-            )
-            # Expire old data
-            cutoff = t - self.max_age_s
-            while self.history and self.history[0][0] < cutoff:
-                self.history.popleft()
+            # Update spatial map (Overwrite tile with latest data)
+            tx, ty, tz = int(pos[0]/self.tile_size), int(pos[1]/self.tile_size), int(pos[2]/self.tile_size)
+            self.spatial_map[(tx, ty, tz)] = sample
+            
+            # Update responsive rolling history
+            self.rolling_history.append(sample)
+            
+            # Periodic Cleanup (Every 1000 samples ≈ 10s at 100Hz)
+            if len(self.rolling_history) % 1000 == 0:
+                cutoff = t - self.max_age_s
+                # Remove expired tiles
+                expired_keys = [k for k, v in self.spatial_map.items() if v[0] < cutoff]
+                for k in expired_keys:
+                    del self.spatial_map[k]
 
     def update_estimation(self):
         """Perform the heavy vector calculation (called at lower rate)."""
         with self.lock:
-            if len(self.history) > 100:
+            if len(self.rolling_history) > 100:
                 self._estimate_wind_vector()
 
     def _estimate_wind_vector(self):
-        # Weighted Vector Mean
-        # We look at last 6000 samples (60s at 100Hz)
-        samples = list(self.history)[-6000:]
+        samples = list(self.rolling_history)
         wx, wy, wz = 0.0, 0.0, 0.0
         total_w = 0.0
 
         for s in samples:
-            # t, x, y, z, vx, vy, vz, va, phpa, temp_k
             _, _, _, _, vx, vy, vz, va, _, _ = s
             vg_mag = math.sqrt(vx * vx + vy * vy + vz * vz)
-
             if vg_mag > 0.2:
-                # Relationship: V_air_vector = V_wind - V_ground
-                # |V_wind - V_ground| = va
-                # Simplified projection: V_wind = V_ground * (1.0 - ratio)
-                # If ratio > 1 (headwind), wind vector is opposite to motion.
                 weight = vg_mag
                 ratio = va / vg_mag
-                # Fix sign: Headwind (ratio > 1) -> wind is opposite to motion
                 wx += vx * (1.0 - ratio) * weight
                 wy += vy * (1.0 - ratio) * weight
                 wz += vz * (1.0 - ratio) * weight
                 total_w += weight
 
         if total_w > 0:
-            # We average the "wind blowing to" vector
             self.current_wind = (wx / total_w, wy / total_w, wz / total_w)
 
     def get_augmented_velocity(self, vel, va):
-        """Returns velocity corrected by wind-pressure correlation."""
         vw = self.current_wind
-        # Relative velocity vector (v_ground - v_wind)
         vrx, vry, vrz = vel[0] - vw[0], vel[1] - vw[1], vel[2] - vw[2]
         vr_mag = math.sqrt(vrx**2 + vry**2 + vrz**2)
-
         if vr_mag > 0.1:
-            # Scale ground speed such that airspeed magnitude matches pitot
             scale = va / vr_mag
-            scale = max(0.5, min(2.0, scale))  # Safety cap
+            scale = max(0.5, min(2.0, scale))
             return (vw[0] + vrx * scale, vw[1] + vry * scale, vw[2] + vrz * scale)
         return vel
 
     def get_stats_at_radius(self, current_pos, radius_m):
         with self.lock:
-            if not self.history:
+            if not self.spatial_map:
                 return 0.0, 0.0, "", 0.0
 
             relevant = []
             cx, cy, cz = current_pos
-            for s in self.history:
-                # t, x, y, z, vx, vy, vz, va, phpa, temp_k
+            # Iterating over spatial tiles is much faster than total history
+            for s in self.spatial_map.values():
                 _, x, y, z, vx, vy, vz, va, _, _ = s
                 dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2)
                 if dist <= radius_m:
@@ -405,65 +383,37 @@ class WindMapper:
             if not relevant:
                 return None, None, None, None
 
-            # Weighted average wind speed
-            v_sum = 0.0
-            vg_sum = 0.0
+            v_sum, vg_sum = 0.0, 0.0
             for s in relevant:
-                # t, x, y, z, vx, vy, vz, va, phpa
-                va_s = s[7]
-                vx, vy, vz = s[4], s[5], s[6]
-                v_sum += va_s
-                vg_sum += math.sqrt(vx * vx + vy * vy + vz * vz)
+                v_sum += s[7] # va
+                vg_sum += math.sqrt(s[4]**2 + s[5]**2 + s[6]**2) # vg
 
             avg_mag = v_sum / len(relevant)
             avg_vg = vg_sum / len(relevant)
-
-            # The wind speed is the delta that isn't explained by motion
-            # but we also factor in our vector estimate
             vw_mag = math.sqrt(sum(c * c for c in self.current_wind))
-
-            # Combined estimate: 70% current vector, 30% local scalar delta
             wind_speed = (vw_mag * 0.7) + (abs(avg_mag - avg_vg) * 0.3)
-
             bearing = _math_to_bearing(self.current_wind)
-            return (
-                wind_speed,
-                _degrees_to_compass(bearing),
-                _degrees_to_arrow(bearing),
-                bearing,
-            )
+            return (wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing), bearing)
 
     def get_interpolated_wind_data(self, target_pos, radius_m=30.0):
-        """Interpolates wind speed, direction, pressure, and temperature at world coordinate."""
         with self.lock:
-            if not self.history:
+            if not self.spatial_map:
                 return 0.0, self.current_wind, 1013.25, 293.15
 
             tx, ty, tz = target_pos
-            total_w = 0.0
-            total_p = 0.0
-            total_t = 0.0
-            
-            # Localized Vector Estimation variables
-            loc_wx, loc_wy, loc_wz = 0.0, 0.0, 0.0
-            loc_v_sum = 0.0
+            total_w = total_p = total_t = 0.0
+            loc_wx = loc_wy = loc_wz = loc_v_sum = 0.0
 
-            for s in self.history:
-                # t, x, y, z, vx, vy, vz, va, phpa, temp_k
+            for s in self.spatial_map.values():
                 _, sx, sy, sz, svx, svy, svz, sva, phpa, temp_k = s
                 d = math.sqrt((sx - tx) ** 2 + (sy - ty) ** 2 + (sz - tz) ** 2)
                 if d > radius_m:
                     continue
 
-                # Inverse distance weighting
                 w = 1.0 / (d + 0.5) ** 2
-                
-                # Local Wind Vector Evidence
-                # Relationship: V_wind = V_ground * (1.0 - ratio) where ratio = V_air / V_ground
                 svg_mag = math.sqrt(svx**2 + svy**2 + svz**2)
                 if svg_mag > 0.1:
                     ratio = sva / svg_mag
-                    # Weight by confidence (ground speed)
                     vw = svg_mag * w
                     loc_wx += svx * (1.0 - ratio) * vw
                     loc_wy += svy * (1.0 - ratio) * vw
@@ -475,16 +425,11 @@ class WindMapper:
                 total_w += w
 
             if total_w > 0:
-                avg_p = total_p / total_w
-                avg_t = total_t / total_w
-                
+                avg_p, avg_t = total_p / total_w, total_t / total_w
                 if loc_v_sum > 0:
-                    # Specific local wind vector for THIS tile
                     tile_wind = (loc_wx / loc_v_sum, loc_wy / loc_v_sum, loc_wz / loc_v_sum)
                     tile_mag = math.sqrt(tile_wind[0]**2 + tile_wind[1]**2 + tile_wind[2]**2)
                     return tile_mag, tile_wind, avg_p, avg_t
-                
-                # Fallback to global if no local motion data
                 return 0.0, self.current_wind, avg_p, avg_t
                 
             return 0.0, self.current_wind, 1013.25, 293.15
