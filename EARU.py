@@ -1405,10 +1405,15 @@ class ProfilerDebug:
         self.block_times = {}
         self.block_max_deltas = {}  # Path -> max observed abs(delta)
         self.hz_history = deque(maxlen=10)
+        self.hz_max_delta = 0.0
         self.stack = []
 
     def record_hz(self, hz):
         if self.enabled:
+            if len(self.hz_history) > 0:
+                delta = abs(hz - self.hz_history[-1])
+                if delta > self.hz_max_delta:
+                    self.hz_max_delta = delta
             self.hz_history.append(hz)
 
     def start_block(self, name):
@@ -1468,12 +1473,15 @@ class ProfilerDebug:
 
         mem = self.process.memory_info().rss / (1024 * 1024)  # MB
         cpu = self.process.cpu_percent()
+        
         avg_hz = sum(self.hz_history) / len(self.hz_history) if self.hz_history else 0.0
+        curr_hz = self.hz_history[-1] if self.hz_history else 0.0
+        hz_delta = curr_hz - self.hz_history[-2] if len(self.hz_history) > 1 else 0.0
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lines = [
             f"--- {timestamp} ---",
-            f"[PROFILER] Mem: {mem:.2f}MB | CPU: {cpu:.1f}% | Loop: {avg_hz:.1f}Hz",
+            f"[PROFILER] Mem: {mem:.2f}MB | CPU: {cpu:.1f}% | Loop: {avg_hz:.1f}Hz (Δ {hz_delta:+.1f}, maxΔ {self.hz_max_delta:.1f})",
             "Variable Sizes (length/bytes):",
         ]
 
