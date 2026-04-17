@@ -210,32 +210,51 @@ class WindMapper:
 
     def _estimate_wind_vector(self):
         # Weighted Vector Mean
-        samples = list(self.history)[-1000:] # Last 10s
+        # We look at last 1000 samples (10s at 100Hz)
+        samples = list(self.history)[-1000:]
         wx, wy, wz = 0.0, 0.0, 0.0
         total_w = 0.0
         
         for s in samples:
-            _, x, y, z, vx, vy, vz, va = s
+            # t, x, y, z, vx, vy, vz, va
+            _, _, _, _, vx, vy, vz, va = s
             vg_mag = math.sqrt(vx*vx + vy*vy + vz*vz)
             
             if vg_mag > 0.2:
-                # Relationship: Va = |Vg + Vw|
-                # We use a simple projection: if Va > Vg, wind is partially aligned with Vg
-                # weight by velocity - more motion = better data
+                # Relationship: V_air_vector = V_wind - V_ground
+                # |V_wind - V_ground| = va
+                # Simplified projection: V_wind = V_ground * (1.0 - ratio)
+                # If ratio > 1 (headwind), wind vector is opposite to motion.
                 weight = vg_mag
                 ratio = va / vg_mag
-                wx += vx * (ratio - 1.0) * weight
-                wy += vy * (ratio - 1.0) * weight
-                wz += vz * (ratio - 1.0) * weight
+                # Fix sign: Headwind (ratio > 1) -> wind is opposite to motion
+                wx += vx * (1.0 - ratio) * weight
+                wy += vy * (1.0 - ratio) * weight
+                wz += vz * (1.0 - ratio) * weight
                 total_w += weight
         
         if total_w > 0:
+            # We average the "wind blowing to" vector
             self.current_wind = (wx/total_w, wy/total_w, wz/total_w)
+
+    def get_augmented_velocity(self, vel, va):
+        """Returns velocity corrected by wind-pressure correlation."""
+        vw = self.current_wind
+        # Relative velocity vector (v_ground - v_wind)
+        vrx, vry, vrz = vel[0] - vw[0], vel[1] - vw[1], vel[2] - vw[2]
+        vr_mag = math.sqrt(vrx**2 + vry**2 + vrz**2)
+        
+        if vr_mag > 0.1:
+            # Scale ground speed such that airspeed magnitude matches pitot
+            scale = va / vr_mag
+            scale = max(0.5, min(2.0, scale)) # Safety cap
+            return (vw[0] + vrx * scale, vw[1] + vry * scale, vw[2] + vrz * scale)
+        return vel
 
     def get_stats_at_radius(self, current_pos, radius_m):
         with self.lock:
             if not self.history:
-                return 0.0, 0.0, ""
+                return 0.0, 0.0, "", 0.0
             
             relevant = []
             cx, cy, cz = current_pos
@@ -246,7 +265,7 @@ class WindMapper:
                     relevant.append(s)
             
             if not relevant:
-                return None, None, None
+                return None, None, None, None
             
             # Weighted average wind speed
             v_sum = 0.0
@@ -266,7 +285,7 @@ class WindMapper:
             wind_speed = (vw_mag * 0.7) + (abs(avg_mag - avg_vg) * 0.3)
             
             bearing = _math_to_bearing(self.current_wind)
-            return wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing)
+            return wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing), bearing
 
 def _math_to_bearing(vec):
     vx, vy, vz = vec
@@ -1119,6 +1138,7 @@ class LocationTracker:
         self.total_distance_m = 0.0
         self.last_odometer_lat = start_lat
         self.last_odometer_lon = start_lon
+        self.odometer_30m_history = deque() # (time, dist_inc)
         self.air_density = 1.225  # kg/m^3 (Standard Sea Level)
         self.wind_mapper = WindMapper(max_age_s=1800)
 
@@ -1484,6 +1504,15 @@ class LocationTracker:
 
         self.v_mag = math.sqrt(self.vel[0]**2 + self.vel[1]**2 + self.vel[2]**2)
 
+        # Augmented Velocity logic
+        meas_p = self.smc_pressure_hpa if self.smc_pressure_hpa is not None else self.pressure_hpa
+        # Recalculate airspeed with latest density
+        corrected_delta = meas_p - (self.pressure_hpa + self.wind_mapper.pressure_offset_hpa)
+        q_dyn = max(0.0, corrected_delta) * 100.0
+        va_val = math.sqrt(2 * q_dyn / max(self.air_density, 0.1))
+        
+        v_aug = self.wind_mapper.get_augmented_velocity(self.vel, va_val)
+        
         # Calculate Mach number using dynamic gamma, R, and ambient temperature
         if self.ambient_temp_k > 0:
             # a = sqrt(gamma * R * T)
@@ -1498,10 +1527,18 @@ class LocationTracker:
         yaw_d = math.degrees(math.atan2(sin_y, cos_y))
         self.heading = (yaw_d + self.heading_offset) % 360.0
 
-        # Integrate position
-        self.pos[0] += self.vel[0] * dt
-        self.pos[1] += self.vel[1] * dt
-        self.pos[2] += self.vel[2] * dt
+        # Integrate position using augmented velocity
+        dx = v_aug[0] * dt
+        dy = v_aug[1] * dt
+        dz = v_aug[2] * dt
+        self.pos[0] += dx
+        self.pos[1] += dy
+        self.pos[2] += dz
+        
+        dist_inc = math.sqrt(dx*dx + dy*dy + dz*dz)
+        self.odometer_30m_history.append((t_now, dist_inc))
+        while self.odometer_30m_history and self.odometer_30m_history[0][0] < t_now - 1800:
+            self.odometer_30m_history.popleft()
 
         # Update lat/lon/alt
         self.lat = self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT)
@@ -1747,7 +1784,9 @@ def render(det, t_start, restarts,
         
         # Odometer display
         dist_km = location.total_distance_m / 1000.0
+        odo_30m = sum(d for t, d in location.odometer_30m_history)
         a(_line(f" {DIM}Environmental Odometer:{RST} {BGRN}{dist_km:>8.3f} km{RST} ({location.total_distance_m:>10.1f} m)"))
+        a(_line(f" {DIM}Authority (30m Travel):{RST} {BYEL}{odo_30m:>8.2f} m{RST} {DIM}(Validated spatial wind resolution){RST}"))
 
         api_p_val = f"{location.api_pressure_hpa:>8.2f} hPa" if location.api_pressure_hpa is not None else "N/A (alt)"
         a(_line(f" {DIM}Public General Avg Pressure:{RST} {BYEL}{api_p_val}{RST}"))
@@ -1800,12 +1839,15 @@ def render(det, t_start, restarts,
         a(_line(f" {DIM}Pressure Tendency:{RST} {ten_col}{tendency:>+6.2f} hPa{RST} {ten_col}{ten_dir}{RST}"))
 
         # Merged Wind Map Scales
+        odo_30m = sum(d for t, d in location.odometer_30m_history)
         for r in [0.1, 1.0, 10.0, 100.0]:
-            speed, w_dir, w_arrow = location.wind_mapper.get_stats_at_radius(location.pos, r)
+            speed, w_dir, w_arrow, bearing = location.wind_mapper.get_stats_at_radius(location.pos, r)
             label = f"Wind @ {r:>5.1f}m:"
-            if speed is not None:
+            if speed is not None and odo_30m >= r:
                 knots = speed * 1.94384
-                a(_line(f" {DIM}{label}{RST} {BWHT}{speed:>6.2f} m/s{RST} ({BCYN}{knots:>6.2f} kt{RST}) {BYEL}{w_dir:<4}{RST} {BGRN}{w_arrow}{RST}"))
+                a(_line(f" {DIM}{label}{RST} {BWHT}{speed:>6.2f} m/s{RST} ({BCYN}{knots:>6.2f} kt{RST}) {BYEL}{w_dir:<4}{RST} {BGRN}{w_arrow}{RST} {DIM}{bearing:>5.1f}°{RST}"))
+            elif speed is not None:
+                a(_line(f" {DIM}{label}{RST} {DIM}Low Authority ({odo_30m:.1f}m < {r}m travel){RST}"))
             else:
                 a(_line(f" {DIM}{label}{RST} {DIM}N/A (waiting for travel){RST}"))
 
@@ -2343,7 +2385,8 @@ def main():
                         'mach': location.mach,
                         'calibrated_g': location.calibrated_g,
                         'pos': location.pos,
-                        'total_distance_m': location.total_distance_m
+                        'total_distance_m': location.total_distance_m,
+                        'odometer_30m': sum(d for t, d in location.odometer_30m_history)
                     },
                     'ecosystem_weather': {
                         'category': location.weather_category,
