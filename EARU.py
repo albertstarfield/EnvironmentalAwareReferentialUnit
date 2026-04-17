@@ -1807,18 +1807,20 @@ def render(det, t_start, restarts,
 
     a(_sep(' Axes X / Y / Z (5s) '))
     xyz = list(det.waveform_xyz)
-    AW = GW - 4
+    ax_raw = det.latest_raw
+    # Width for sparkline: total minus label (4) and value (12)
+    AW = GW - 16
     if xyz:
         xs = [t[0] for t in xyz]
         ys = [t[1] for t in xyz]
         zs = [t[2] for t in xyz]
         amx = max(max(abs(v) for v in xs + ys + zs), 0.0001)
-        a(_line(f"  {RED}X{RST} {_sparkline(_downsample(xs, AW), AW, amx)}{RST}"))
-        a(_line(f"  {GRN}Y{RST} {_sparkline(_downsample(ys, AW), AW, amx)}{RST}"))
-        a(_line(f"  {CYN}Z{RST} {_sparkline(_downsample(zs, AW), AW, amx)}{RST}"))
+        a(_line(f"  {RED}X{RST} {_sparkline(_downsample(xs, AW), AW, amx)}{RST} {ax_raw[0]:>+9.6f}g"))
+        a(_line(f"  {GRN}Y{RST} {_sparkline(_downsample(ys, AW), AW, amx)}{RST} {ax_raw[1]:>+9.6f}g"))
+        a(_line(f"  {CYN}Z{RST} {_sparkline(_downsample(zs, AW), AW, amx)}{RST} {ax_raw[2]:>+9.6f}g"))
     else:
-        for ax_l in ('X', 'Y', 'Z'):
-            a(_line(f"  {DIM}{ax_l}{RST}"))
+        for i, ax_l in enumerate(('X', 'Y', 'Z')):
+            a(_line(f"  {DIM}{ax_l}{RST} {' ' * AW} {ax_raw[i]:>+9.6f}g"))
 
     a(_sep(' Spectrogram DWT 5s '))
     SW = W - 10
