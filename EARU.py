@@ -3278,6 +3278,7 @@ def main(stdscr=None):
 
     def _stop(sig, frame):
         running[0] = False
+        raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
