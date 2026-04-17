@@ -287,6 +287,63 @@ class WindMapper:
             bearing = _math_to_bearing(self.current_wind)
             return wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing), bearing
 
+    def get_interpolated_wind_speed(self, target_pos, radius_m=30.0):
+        """Interpolates wind speed at a specific world coordinate using history."""
+        with self.lock:
+            if not self.history:
+                return 0.0
+            
+            tx, ty, tz = target_pos
+            total_w = 0.0
+            total_s = 0.0
+            
+            # Simple Inverse Distance Weighting
+            for s in self.history:
+                # t, x, y, z, vx, vy, vz, va
+                _, sx, sy, sz, svx, svy, svz, sva = s
+                d = math.sqrt((sx-tx)**2 + (sy-ty)**2 + (sz-tz)**2)
+                
+                if d > radius_m:
+                    continue
+                
+                # Weight = 1 / d^2
+                w = 1.0 / (d + 0.5)**2
+                
+                # Wind proxy: delta between ground and air speed
+                vg_mag = math.sqrt(svx**2 + svy**2 + svz**2)
+                s_local = abs(sva - vg_mag)
+                
+                total_s += s_local * w
+                total_w += w
+            
+            if total_w > 0:
+                return total_s / total_w
+            return 0.0
+
+    def get_wind_grid(self, center_pos, heading=0.0, size=7, step=10.0):
+        """Generates a rotated 2D grid of wind speeds (Head-Up display)."""
+        grid = []
+        cx, cy, cz = center_pos
+        theta = math.radians(heading)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+        
+        for j in range(size):
+            row = []
+            for i in range(size):
+                # Screen-space offsets (lx=Right, ly=Up/Forward)
+                lx = (i - size//2) * step
+                ly = (size//2 - j) * step
+                
+                # Rotate screen-space to world-frame (North-East-Down)
+                # World-Y is North, World-X is East
+                tx = cx + lx * cos_t + ly * sin_t
+                ty = cy - lx * sin_t + ly * cos_t
+                
+                row.append(self.get_interpolated_wind_speed((tx, ty, cz), radius_m=step*1.5))
+            grid.append(row)
+        return grid
+
 def _math_to_bearing(vec):
     vx, vy, vz = vec
     # Math atan2 is (y, x), bearing is from North (y-axis)
@@ -876,6 +933,23 @@ def _degrees_to_arrow(d):
     arrows = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
     ix = int((d + 22.5) / 45.0)
     return arrows[ix % 8]
+
+
+def _get_speed_ansi(speed):
+    """Returns a 256-color ANSI code based on wind speed (0-15 m/s scale)."""
+    # 0 -> Green (22), 5 -> Yellow (190), 10 -> Orange (208), 15+ -> Red (196)
+    if speed < 1.0: return "\033[38;5;22m"  # Dark green
+    if speed < 2.5: return "\033[38;5;28m"  # Green
+    if speed < 5.0: return "\033[38;5;148m" # Lime
+    if speed < 7.5: return "\033[38;5;184m" # Yellow
+    if speed < 10.0: return "\033[38;5;208m" # Orange
+    if speed < 12.5: return "\033[38;5;202m" # Orange-Red
+    return "\033[38;5;196m" # Bright Red
+
+
+def _speed_to_color_block(speed):
+    """Returns a colored block character representing intensity."""
+    return f"{_get_speed_ansi(speed)}■{RST}"
 
 
 _ALS_SPEC_OFFSETS = [20, 24, 28, 32]
@@ -1850,6 +1924,24 @@ def render(det, t_start, restarts,
                 a(_line(f" {DIM}{label}{RST} {DIM}Low Authority ({odo_30m:.1f}m < {r}m travel){RST}"))
             else:
                 a(_line(f" {DIM}{label}{RST} {DIM}N/A (waiting for travel){RST}"))
+
+        # Spatial Wind Intensity Map (Grid)
+        a(_line(f" {DIM}Spatial Wind Intensity Map (Grid Resolution: 10m/cell):{RST}"))
+        if odo_30m > 10.0:
+            grid = location.wind_mapper.get_wind_grid(location.pos, heading=location.heading, size=7, step=10.0)
+            a(_line(f"      {DIM}▲ [Ahead: {_degrees_to_compass(location.heading)}]{RST}"))
+            for j, row in enumerate(grid):
+                grid_str = ""
+                for i, speed in enumerate(row):
+                    # Center marker
+                    if i == 3 and j == 3:
+                        grid_str += f"{_get_speed_ansi(speed)}┼{RST} "
+                    else:
+                        grid_str += f"{_speed_to_color_block(speed)} "
+                a(_line(f"   {grid_str}"))
+            a(_line(f"   {DIM}Green: < 2m/s  Yellow: 5m/s  Red: > 10m/s  (┼ = Current Pos){RST}"))
+        else:
+            a(_line(f"   {DIM}[Map requires > 10m travel to interpolate local field]{RST}"))
 
     a(_sep(' System & SMC Thermal '))
     if location is not None:
