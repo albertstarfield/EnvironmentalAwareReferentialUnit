@@ -794,7 +794,8 @@ class VibrationDetector:
         self._mahony_err_int = list(new_err_int)
 
     def process(self, ax, ay, az, t_now):
-        self.sample_count += 1
+        if self.sample_count < 10000:
+            self.sample_count += 1
         self.latest_raw = (ax, ay, az)
         self.latest_mag = math.sqrt(ax * ax + ay * ay + az * az)
         self._update_orientation(ax, ay, az)
@@ -2045,8 +2046,12 @@ def render(
     top_bar = "─" * (W - len(title) - 1)
     a(f"{DIM}┌─{RST}{BWHT}{title}{RST}{DIM}{top_bar}┐{RST}")
 
+    smp_str = f"{det.sample_count:>10,} smp"
+    if det.sample_count >= 10000:
+        smp_str = f"{'MAX':>10} smp"
+
     hdr = (
-        f" {DIM}{el:>7.1f}s{RST}  {det.sample_count:>10,} smp  "
+        f" {DIM}{el:>7.1f}s{RST}  {smp_str}  "
         f"{BWHT}{rate:>.0f}{RST} Hz  "
         f"R:{restarts}  Ev:{len(det.events)}"
     )
@@ -3330,7 +3335,10 @@ def main(stdscr=None):
             with open(logpath, "w") as f:
                 json.dump(obj, f, indent=1, default=str)
 
-        print(f"{DIM}[ok] {det.sample_count} samples, {restart_count[0]} restarts{RST}")
+        final_smp = det.sample_count
+        if final_smp >= 10000:
+            final_smp = "MAX"
+        print(f"{DIM}[ok] {final_smp} samples, {restart_count[0]} restarts{RST}")
 
         if os.path.exists(PID_FILE):
             try:
