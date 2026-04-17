@@ -1747,7 +1747,7 @@ def render(det, t_start, restarts,
         last_g = f"{now - location.last_g_update:.1f}s ago" if location.last_g_update > 0 else "never"
         a(_line(f" {DIM}Gravity Cal: {RST} {BWHT}{g_status}{RST} {DIM} (Updated: {last_g}){RST}"))
 
-    a(_sep(' Ecosystem Weather '))
+    a(_sep(' Ecosystem Weather & Wind Map '))
     if location is not None:
         cat = location.weather_category
         # Color categorization
@@ -1778,18 +1778,15 @@ def render(det, t_start, restarts,
         ten_dir = "↓↓" if tendency < -0.5 else ("↑↑" if tendency > 0.5 else "→")
         a(_line(f" {DIM}Pressure Tendency:{RST} {ten_col}{tendency:>+6.2f} hPa{RST} {ten_col}{ten_dir}{RST}"))
 
-    a(_sep(' Environmental Wind Map (Scale-Averaged) '))
-    if location is not None:
+        # Merged Wind Map Scales
         for r in [0.1, 1.0, 10.0, 100.0]:
             speed, w_dir = location.wind_mapper.get_stats_at_radius(location.pos, r)
+            label = f"Wind @ {r:>5.1f}m:"
             if speed is not None:
-                # 1 m/s = 1.94384 knots
                 knots = speed * 1.94384
-                label = f"Radius {r:>5.1f}m:"
                 a(_line(f" {DIM}{label}{RST} {BWHT}{speed:>6.2f} m/s{RST} ({BCYN}{knots:>6.2f} kt{RST}) {BYEL}{w_dir:<4}{RST}"))
             else:
-                label = f"Radius {r:>5.1f}m:"
-                a(_line(f" {DIM}{label}{RST} {DIM}waiting for travel...{RST}"))
+                a(_line(f" {DIM}{label}{RST} {DIM}N/A (waiting for travel){RST}"))
 
     a(_sep(' System & SMC Thermal '))
     if location is not None:
