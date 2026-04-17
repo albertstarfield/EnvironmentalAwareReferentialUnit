@@ -1732,8 +1732,18 @@ class LocationTracker:
 
     def _check_core_location_bg(self):
         try:
-            res = subprocess.run([self.cl_path, '-format', '%latitude %longitude %altitude %direction', '-once'],
-                               capture_output=True, text=True, timeout=10.0)
+            # Determine the currently logged-in user to bypass root location restrictions
+            user_res = subprocess.run(['stat', '-f%Su', '/dev/console'], capture_output=True, text=True)
+            current_user = user_res.stdout.strip() if user_res.returncode == 0 else 'root'
+
+            if current_user and current_user != 'root':
+                # Execute via sudo -u to the logged-in user
+                cmd = ['sudo', '-u', current_user, self.cl_path, 
+                       '-format', '%latitude %longitude %altitude %direction', '-once']
+            else:
+                cmd = [self.cl_path, '-format', '%latitude %longitude %altitude %direction', '-once']
+
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10.0)
             if res.returncode == 0:
                 parts = res.stdout.strip().split()
                 if len(parts) >= 4:
