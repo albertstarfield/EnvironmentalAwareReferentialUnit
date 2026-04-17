@@ -1687,6 +1687,7 @@ class LocationTracker:
         self.pos[2] += dz
         
         dist_inc = math.sqrt(dx*dx + dy*dy + dz*dz)
+        self.total_distance_m += dist_inc
         self.odometer_30m_history.append((t_now, dist_inc))
         while self.odometer_30m_history and self.odometer_30m_history[0][0] < t_now - 1800:
             self.odometer_30m_history.popleft()
@@ -1733,10 +1734,13 @@ class LocationTracker:
                     new_heading = float(parts[3])
 
                     with self.lock:
-                        # Update Odometer (ignore jitter < 5m)
+                        # Drift Correction for Odometer
+                        # Since update_imu now integrates velocity (dist_inc) at 100Hz,
+                        # CoreLocation acts as a ground-truth anchor.
                         dist = haversine(self.last_odometer_lat, self.last_odometer_lon, new_lat, new_lon)
-                        if dist > 5.0:
-                            self.total_distance_m += dist
+                        if dist > 50.0:
+                            # If dead reckoning drifted > 50m from GPS, we accept the GPS delta
+                            # but we don't double count the integrated IMU distance.
                             self.last_odometer_lat = new_lat
                             self.last_odometer_lon = new_lon
 
