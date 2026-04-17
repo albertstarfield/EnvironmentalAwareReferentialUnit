@@ -2991,13 +2991,19 @@ def render(
 
     status = (
         "CRITICAL"
-        if prob_total > 0.7
-        else ("WARNING" if prob_total > 0.3 else "STABLE")
+        if prob_total > 0.7 or det.anomaly_event_upsets > 50
+        else ("WARNING" if prob_total > 0.3 or det.anomaly_event_upsets > 0 else "STABLE")
     )
+    upset_col = BRED if det.anomaly_event_upsets > 50 else (BYEL if det.anomaly_event_upsets > 0 else DIM)
     a(
         _line(
             f" {DIM}Fatigue Status:{RST} {col_total}{status:<10}{RST}  "
-            f"{DIM}Aggregated Risk:{RST} {col_total}{int(prob_total * 100):>3}%{RST}"
+            f"{DIM}Anomaly Event Upset:{RST} {upset_col}{det.anomaly_event_upsets:>4}{RST}"
+        )
+    )
+    a(
+        _line(
+            f" {DIM}Aggregated Risk:{RST} {col_total}{int(prob_total * 100):>3}%{RST}"
         )
     )
 
