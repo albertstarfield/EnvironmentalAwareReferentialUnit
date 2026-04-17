@@ -265,11 +265,11 @@ class WindMapper:
 
     def __init__(self, max_age_s=1800):
         self.lock = threading.Lock()
-        self.history = deque()  # (time, x, y, z, vx, vy, vz, v_air_mag)
+        self.history = deque(maxlen=10000)  # (time, x, y, z, vx, vy, vz, v_air_mag)
         self.max_age_s = max_age_s
         self.current_wind = (0.0, 0.0, 0.0)  # World frame (m/s)
         self.pressure_offset_hpa = 0.0
-        self.offset_samples = []
+        self.offset_samples = deque(maxlen=10000)
 
     def add_sample(self, t, pos, vel, pressure_hpa, static_pressure, density):
         # 1. Stationary Calibration (ZUPT-style)
@@ -279,11 +279,10 @@ class WindMapper:
         if vg_mag < 0.05:
             # Accumulate offset sample
             self.offset_samples.append(pressure_hpa - static_pressure)
-            if len(self.offset_samples) > 100:  # 1s at 100Hz
-                self.pressure_offset_hpa = sum(self.offset_samples) / len(
-                    self.offset_samples
-                )
-                self.offset_samples = self.offset_samples[-100:]
+            if len(self.offset_samples) >= 100:  # 1s at 100Hz
+                # Use only the last 100 samples for the rolling average
+                recent_samples = list(self.offset_samples)[-100:]
+                self.pressure_offset_hpa = sum(recent_samples) / len(recent_samples)
 
         # 2. Calculate Corrected Dynamic Pressure
         # q = P_total - (P_static + P_offset)
@@ -1413,7 +1412,7 @@ class LocationTracker:
         # Gravity calibration
         self.calibrated_g = 1.0  # magnitude in 'g' units
         self._load_g_cal()
-        self.g_samples = []  # for live calibration
+        self.g_samples = deque(maxlen=10000)  # for live calibration
         self.last_g_update = 0.0
 
         # Earth constants
@@ -1423,7 +1422,7 @@ class LocationTracker:
         self.total_distance_m = 0.0
         self.last_odometer_lat = start_lat
         self.last_odometer_lon = start_lon
-        self.odometer_30m_history = deque()  # (time, dist_inc)
+        self.odometer_30m_history = deque(maxlen=10000)  # (time, dist_inc)
         self.air_density = 1.225  # kg/m^3 (Standard Sea Level)
         self.wind_mapper = WindMapper(max_age_s=1800)
 
@@ -1707,7 +1706,7 @@ class LocationTracker:
             # Record for ~5 seconds (500 samples at 100Hz)
             if len(self.g_samples) >= 500:
                 avg_g = sum(self.g_samples) / len(self.g_samples)
-                self.g_samples = []
+                self.g_samples.clear()
 
                 # 50% safety check
                 diff_pct = abs(avg_g - self.calibrated_g) / (
@@ -1722,7 +1721,7 @@ class LocationTracker:
                     for i in range(3):
                         self.vel[i] = 0.0
         else:
-            self.g_samples = []  # reset if moved
+            self.g_samples.clear()  # reset if moved
 
     def fetch_api_pressure_async(self):
         """Fetch real-world surface pressure and humidity from Open-Meteo."""
