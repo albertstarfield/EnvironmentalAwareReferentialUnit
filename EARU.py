@@ -3471,11 +3471,20 @@ def main(stdscr=None):
 
                 # 3. Wind Map Estimation and Grid Generation (Every 60.0s)
                 if now - location.last_wind_grid_update >= 60.0:
+                    profiler.start_block("wind_map_update")
+                    
+                    profiler.start_block("estimation")
                     location.wind_mapper.update_estimation()
+                    profiler.end_block() # estimation
+                    
+                    profiler.start_block("grid_gen")
                     location.cached_wind_grid = location.wind_mapper.get_wind_grid(
                         location.pos, heading=location.heading, size=7, step=10.0
                     )
+                    profiler.end_block() # grid_gen
+                    
                     location.last_wind_grid_update = now
+                    profiler.end_block() # wind_map_update
                 
                 time.sleep(0.1)
             except Exception:
@@ -3636,12 +3645,13 @@ def main(stdscr=None):
 
                 profiler.start_block("dp_wind_map")
                 # Extract wind map stats separately to profile its weight
-                wind_stats = {
-                    str(r): location.wind_mapper.get_stats_at_radius(
+                wind_stats = {}
+                for r in [0.1, 1.0, 10.0, 100.0]:
+                    profiler.start_block(f"radius_{r}m")
+                    wind_stats[str(r)] = location.wind_mapper.get_stats_at_radius(
                         location.pos, r
                     )
-                    for r in [0.1, 1.0, 10.0, 100.0]
-                }
+                    profiler.end_block() # radius_Xm
                 profiler.end_block() # dp_wind_map
 
                 profiler.start_block("dp_dict_build")
