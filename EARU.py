@@ -324,8 +324,8 @@ class WindMapper:
 
     def _estimate_wind_vector(self):
         # Weighted Vector Mean
-        # We look at last 1000 samples (10s at 100Hz)
-        samples = list(self.history)[-1000:]
+        # We look at last 6000 samples (60s at 100Hz)
+        samples = list(self.history)[-6000:]
         wx, wy, wz = 0.0, 0.0, 0.0
         total_w = 0.0
 
@@ -418,10 +418,12 @@ class WindMapper:
 
             tx, ty, tz = target_pos
             total_w = 0.0
-            total_s = 0.0
             total_p = 0.0
             total_t = 0.0
-            vx, vy, vz = 0.0, 0.0, 0.0
+            
+            # Localized Vector Estimation variables
+            loc_wx, loc_wy, loc_wz = 0.0, 0.0, 0.0
+            loc_v_sum = 0.0
 
             for s in self.history:
                 # t, x, y, z, vx, vy, vz, va, phpa, temp_k
@@ -430,25 +432,38 @@ class WindMapper:
                 if d > radius_m:
                     continue
 
+                # Inverse distance weighting
                 w = 1.0 / (d + 0.5) ** 2
-                vg_mag = math.sqrt(svx**2 + svy**2 + svz**2)
-                s_local = abs(sva - vg_mag)
+                
+                # Local Wind Vector Evidence
+                # Relationship: V_wind = V_ground * (1.0 - ratio) where ratio = V_air / V_ground
+                svg_mag = math.sqrt(svx**2 + svy**2 + svz**2)
+                if svg_mag > 0.1:
+                    ratio = sva / svg_mag
+                    # Weight by confidence (ground speed)
+                    vw = svg_mag * w
+                    loc_wx += svx * (1.0 - ratio) * vw
+                    loc_wy += svy * (1.0 - ratio) * vw
+                    loc_wz += svz * (1.0 - ratio) * vw
+                    loc_v_sum += vw
 
-                total_s += s_local * w
                 total_p += phpa * w
                 total_t += temp_k * w
-                vx += self.current_wind[0] * w
-                vy += self.current_wind[1] * w
-                vz += self.current_wind[2] * w
                 total_w += w
 
             if total_w > 0:
-                return (
-                    total_s / total_w,
-                    (vx / total_w, vy / total_w, vz / total_w),
-                    total_p / total_w,
-                    total_t / total_w,
-                )
+                avg_p = total_p / total_w
+                avg_t = total_t / total_w
+                
+                if loc_v_sum > 0:
+                    # Specific local wind vector for THIS tile
+                    tile_wind = (loc_wx / loc_v_sum, loc_wy / loc_v_sum, loc_wz / loc_v_sum)
+                    tile_mag = math.sqrt(tile_wind[0]**2 + tile_wind[1]**2 + tile_wind[2]**2)
+                    return tile_mag, tile_wind, avg_p, avg_t
+                
+                # Fallback to global if no local motion data
+                return 0.0, self.current_wind, avg_p, avg_t
+                
             return 0.0, self.current_wind, 1013.25, 293.15
 
     def get_wind_grid(self, center_pos, heading=0.0, size=7, step=10.0):
@@ -517,7 +532,7 @@ class VibrationDetector:
 
         # dwt - 5 levels scaled to fs
         self.dwt_buffer = deque(maxlen=512)
-        SPEC_W = 50
+        SPEC_W = 500
         self.band_energy = [deque(maxlen=SPEC_W) for _ in range(5)]
         
         # Band frequencies: Half of Nyquist per level
@@ -578,6 +593,8 @@ class VibrationDetector:
         self._mahony_ki = 0.05
         self._mahony_err_int = [0.0, 0.0, 0.0]
         self._orient_init = False
+        self.last_heartbeat_update = 0.0
+        self.last_seismic_update = 0.0
 
         # heartbeat bcg - bandpass 0.8-3hz via cascaded 1st order iir
         self.hr_hp_alpha = fs / (fs + 2.0 * math.pi * 0.8)
@@ -585,7 +602,7 @@ class VibrationDetector:
         self.hr_hp_prev_in = 0.0
         self.hr_hp_prev_out = 0.0
         self.hr_lp_prev = 0.0
-        self.hr_buf = deque(maxlen=fs * 10)
+        self.hr_buf = deque(maxlen=fs * 20)
         self.hr_bpm = None
         self.hr_confidence = 0.0
 
@@ -1017,7 +1034,7 @@ class VibrationDetector:
             self.hr_bpm = None
             self.hr_confidence = 0.0
             return
-        buf = np.array(list(self.hr_buf)[-self.fs * 10 :], dtype=np.float32)
+        buf = np.array(list(self.hr_buf)[-self.fs * 20 :], dtype=np.float32)
         n = len(buf)
         mean = np.mean(buf)
         centered = buf - mean
@@ -1485,6 +1502,7 @@ class LocationTracker:
         self.wind_mapper = WindMapper(max_age_s=1800)
         self.cached_wind_grid = None
         self.last_wind_grid_update = 0.0
+        self.last_weather_update = 0.0
 
         # Async Threading State
         self.lock = threading.Lock()
@@ -3148,21 +3166,33 @@ def main(stdscr=None):
                     det.compute_dwt()
                     last_dwt = now
                 
-                # 2. Heavy Periodicity and Ecosystem Analysis (Every 1.0s)
+                # 2. Ecosystem Analysis (Every 1.0s)
                 if now - last_period >= 1.0:
                     det.detect_periodicity()
-                    det.detect_heartbeat()
                     location.check_core_location(now)
+                    location.check_system_metrics()
+                    last_period = now
+
+                # 2b. Heartbeat Analysis (Every 20.0s)
+                if now - det.last_heartbeat_update >= 20.0:
+                    det.detect_heartbeat()
+                    det.last_heartbeat_update = now
+
+                # 2c. Seismic Classification (Every 48.0s)
+                if now - det.last_seismic_update >= 48.0:
+                    det.classify_seismic(location)
+                    det.last_seismic_update = now
+
+                # 2d. Weather & Thermodynamics Analysis (Every 60.0s)
+                if now - location.last_weather_update >= 60.0:
                     location.check_smc_pressure()
                     location.fetch_api_pressure()
                     location.check_smc_sensors()
-                    location.check_system_metrics()
                     location.update_weather_thermodynamics()
-                    det.classify_seismic(location)
-                    last_period = now
+                    location.last_weather_update = now
 
-                # 3. Wind Map Estimation and Grid Generation (Every 10.0s)
-                if now - location.last_wind_grid_update >= 10.0:
+                # 3. Wind Map Estimation and Grid Generation (Every 60.0s)
+                if now - location.last_wind_grid_update >= 60.0:
                     location.wind_mapper.update_estimation()
                     location.cached_wind_grid = location.wind_mapper.get_wind_grid(
                         location.pos, heading=location.heading, size=7, step=10.0
