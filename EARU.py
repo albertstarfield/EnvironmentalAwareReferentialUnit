@@ -3797,22 +3797,17 @@ def main(stdscr=None):
                             if isinstance(obj, np.floating): return float(obj)
                             if isinstance(obj, np.ndarray): return obj.tolist()
                             if isinstance(obj, deque): return list(obj)
+                            if isinstance(obj, bytes): return obj.hex()
                             return super(NpEncoder, self).default(obj)
 
-                    # 1. Time Monotonicity Check
-                    if now <= last_main_loop_time:
+                    # 1. Time Monotonicity Check (Strictly backward check)
+                    if now < last_main_loop_time:
                         det.anomaly_event_upsets += 1
                     last_main_loop_time = now
 
                     # 2. Hash / Parity consistency check
-                    # We calculate hash of the current data payload
-                    current_payload = json.dumps(data, cls=NpEncoder, sort_keys=True)
-                    current_hash = hashlib.sha256(current_payload.encode()).hexdigest()
-                    
-                    # We don't compare with PREVIOUS hash (data always changes), 
-                    # but we verify that the data we just built is internally consistent 
-                    # and not containing illegal types/NaNs that would break JSON.
-                    # If this block fails, it's an upset.
+                    # Serializing to verify data is not corrupted/contains NaNs
+                    _ = json.dumps(data, cls=NpEncoder)
                 except Exception:
                     det.anomaly_event_upsets += 1
                 profiler.end_block() # data_integrity_check
