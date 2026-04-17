@@ -705,6 +705,7 @@ class VibrationDetector:
         self.ent_buf = deque(maxlen=fs * 20)
         self.ent_detected = []  # List of (bpm, confidence) tuples
         self.ent_count = 0
+        self.mood_probs = {"Calm": 0.0, "Excited": 0.0, "Tired": 0.0, "Anxious": 0.0}
 
         # Seismic / Motion classification
         self.motion_type = "Stationary"
@@ -1143,7 +1144,7 @@ class VibrationDetector:
 
     def detect_entities(self):
         """
-        Decomposes BCG signal to detect multiple User/Entity heartbeats.
+        Decomposes BCG signal to detect multiple User/Entity heartbeats using successive pattern subtraction.
         """
         min_n = self.fs * 5
         if len(self.ent_buf) < min_n:
@@ -1155,8 +1156,8 @@ class VibrationDetector:
         n = len(buf)
         mean = np.mean(buf)
         centered = buf - mean
-        var = np.var(buf) * n
-        if var < 1e-20:
+        var_orig = np.var(centered) * n
+        if var_orig < 1e-20:
             self.ent_detected = []
             self.ent_count = 0
             return
@@ -1168,37 +1169,119 @@ class VibrationDetector:
             self.ent_count = 0
             return
 
-        acorr_full = np.correlate(centered, centered, mode='full')
-        acorr = acorr_full[n-1+lag_lo : n-1+lag_hi] / var
-
-        if len(acorr) < 3:
-            self.ent_detected = []
-            self.ent_count = 0
-            return
-
-        # Multi-peak detection in autocorrelation
         found = []
-        for i in range(1, len(acorr) - 1):
-            val = acorr[i]
-            # Significant local peak
-            if val > acorr[i-1] and val > acorr[i+1] and val > 0.15:
-                lag = lag_lo + i
-                bpm = 60.0 / (lag / self.fs)
+        residual = centered.copy()
+        
+        # Iteratively find up to 3 entities
+        for _ in range(3):
+            var = np.sum(residual * residual)
+            if var < 1e-20:
+                break
                 
-                # Check if this BPM is already covered by a higher confidence one (harmonics)
-                is_duplicate = False
-                for existing_bpm, _ in found:
-                    if abs(existing_bpm - bpm) < 10 or abs(existing_bpm*2 - bpm) < 10 or abs(existing_bpm/2 - bpm) < 10:
-                        is_duplicate = True
-                        break
+            acorr_full = np.correlate(residual, residual, mode='full')
+            acorr = acorr_full[n-1+lag_lo : n-1+lag_hi] / var
+
+            if len(acorr) == 0:
+                break
+
+            best_i = np.argmax(acorr)
+            best_val = acorr[best_i]
+            best_lag = lag_lo + best_i
+
+            if best_val > 0.15:
+                bpm = 60.0 / (best_lag / self.fs)
+                found.append((bpm, min(1.0, float(best_val))))
                 
-                if not is_duplicate:
-                    found.append((bpm, min(1.0, float(val))))
+                # Extract the average pulse shape for this lag
+                num_pulses = n // best_lag
+                if num_pulses > 0:
+                    pulse_template = np.zeros(best_lag, dtype=np.float32)
+                    for p in range(num_pulses):
+                        pulse_template += residual[p * best_lag : (p + 1) * best_lag]
+                    pulse_template /= num_pulses
+                    
+                    # Subtract the repeating pulse pattern from the residual signal
+                    for p in range(num_pulses):
+                        residual[p * best_lag : (p + 1) * best_lag] -= pulse_template
+                    
+                    # Handle the tail end
+                    tail_len = n - (num_pulses * best_lag)
+                    if tail_len > 0:
+                        residual[num_pulses * best_lag : n] -= pulse_template[:tail_len]
+            else:
+                break # No more significant periodic patterns found
 
         # Sort by confidence
         found.sort(key=lambda x: x[1], reverse=True)
-        self.ent_detected = found[:3] # Cap at 3 entities
+        self.ent_detected = found
         self.ent_count = len(self.ent_detected)
+        
+        self.infer_mood()
+
+    def infer_mood(self):
+        """
+        Infers mood probability based on the Russell Circumplex Model of Affect.
+        Arousal = f(BPM, RMS, Kurtosis)
+        Valence = f(Fatigue, Shocks, Lid Speed, Spectral Balance)
+        """
+        # Arousal calculation (Low/High Energy)
+        arousal = 0.0
+        
+        # 1. BPM Contribution
+        if self.ent_detected:
+            # Average BPM of top entities
+            avg_bpm = sum(bpm for bpm, _ in self.ent_detected) / len(self.ent_detected)
+            # Baseline ~75. Lower = negative arousal, Higher = positive arousal
+            bpm_arousal = min(1.0, max(-1.0, (avg_bpm - 75.0) / 30.0)) 
+            arousal += bpm_arousal * 0.6
+        
+        # 2. Activity Contribution
+        # High RMS -> active/shaking -> high arousal
+        activity_arousal = min(1.0, self.rms * 10.0) 
+        arousal += activity_arousal * 0.4
+        
+        # Valence calculation (Positive/Negative)
+        valence = 0.0
+        
+        # 1. Negative factors: Shocks, erratic movements, high lid speed
+        stress_penalty = 0.0
+        if self.peak > 0.5: stress_penalty -= 0.3
+        if self.kurtosis > 6.0: stress_penalty -= 0.3
+        if hasattr(self, 'lid_speed') and abs(self.lid_speed) > 50.0: stress_penalty -= 0.2
+        if self.prob_total_damage_fatigue > 0.3: stress_penalty -= 0.2
+        
+        # 2. Positive factors: smooth periodic motion, lower spectral balance (less HF noise)
+        smooth_bonus = 0.0
+        if self.period_cv is not None and self.period_cv < 0.2: smooth_bonus += 0.4
+        if self.spectral_balance < 0.0: smooth_bonus += 0.3 # LF dominant -> calm
+        
+        # If there are entities but no significant negative events, trend positive
+        if self.ent_detected and stress_penalty == 0.0:
+            smooth_bonus += 0.3
+            
+        valence = min(1.0, max(-1.0, smooth_bonus + stress_penalty))
+        
+        # Map to Quadrants (Softmax-style probabilities)
+        # Calm (Pos/Low): Valence > 0, Arousal < 0
+        # Excited (Pos/High): Valence > 0, Arousal > 0
+        # Tired (Neg/Low): Valence < 0, Arousal < 0
+        # Anxious (Neg/High): Valence < 0, Arousal > 0
+        
+        v_calm = max(0.0, valence) * max(0.0, -arousal)
+        v_excited = max(0.0, valence) * max(0.0, arousal)
+        v_tired = max(0.0, -valence) * max(0.0, -arousal)
+        v_anxious = max(0.0, -valence) * max(0.0, arousal)
+        
+        # Add small baseline epsilon
+        eps = 0.1
+        total = v_calm + v_excited + v_tired + v_anxious + (eps * 4)
+        
+        self.mood_probs = {
+            "Calm/Relaxed": (v_calm + eps) / total,
+            "Excited/Joyful": (v_excited + eps) / total,
+            "Tired/Bored": (v_tired + eps) / total,
+            "Anxious/Frustrated": (v_anxious + eps) / total
+        }
 
     def _classify(self, detections, t, amp):
         sources = set(d[0] for d in detections)
@@ -2581,8 +2664,21 @@ def render(
             beat_line += f"{BRED}♥{RST}─" if bp else f"{DIM}♡{RST}─"
         a(_line(f" {beat_line}"))
     else:
-        a(_line(f" {DIM}no entity detected (rest wrists on laptop){RST}"))
-        a(_line(""))
+        a(_line(f" {DIM}no entity detected{RST}"))
+
+    a(_sep(" Inferred Mood Probability "))
+    moods = det.mood_probs
+    if sum(moods.values()) > 0:
+        c_calm = int(moods.get("Calm/Relaxed", 0.0) * 100)
+        c_exc = int(moods.get("Excited/Joyful", 0.0) * 100)
+        c_tir = int(moods.get("Tired/Bored", 0.0) * 100)
+        c_anx = int(moods.get("Anxious/Frustrated", 0.0) * 100)
+        
+        a(_line(f" {BCYN}Calm/Relaxed:{RST} {c_calm:>3}%  {BGRN}Excited/Joyful:{RST} {c_exc:>3}%"))
+        a(_line(f" {DIM}Tired/Bored:{RST}  {c_tir:>3}%  {BRED}Anxious/Frustr:{RST} {c_anx:>3}%"))
+    else:
+        a(_line(f" {DIM}calculating...{RST}"))
+    a(_line(""))
 
     a(_sep(" Orientation "))
     qw, qx, qy, qz = det._q
@@ -3828,6 +3924,7 @@ def main(stdscr=None):
                     "user_entity_detection": {
                         "detected": det.ent_detected,
                         "count": det.ent_count,
+                        "inferred_mood": det.mood_probs,
                     },
                     "events": list(det.events)[-1:] if det.events else [],
                 }
