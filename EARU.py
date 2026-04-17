@@ -12,6 +12,7 @@ import re
 import json
 import hashlib
 import base64
+from numba import njit
 import signal
 import math
 import datetime
@@ -52,17 +53,113 @@ ENTER_ALT = "\033[?1049h"
 EXIT_ALT  = "\033[?1049l"
 CLEAR     = "\033[2J\033[H"
 
+@njit(cache=True)
+def njit_haversine(lat1, lon1, lat2, lon2):
+    """Calculate the great circle distance between two points in meters."""
+    R = 6371000.0
+    p1, p2 = lat1 * 0.017453292519943295, lat2 * 0.017453292519943295
+    dphi = (lat2 - lat1) * 0.017453292519943295
+    dlambda = (lon2 - lon1) * 0.017453292519943295
+    a = (math.sin(dphi/2.0)**2.0 + 
+         math.cos(p1) * math.cos(p2) * math.sin(dlambda/2.0)**2.0)
+    return 2.0 * R * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+@njit(cache=True)
+def njit_mahony_update(q, gyro, accel, dt, kp, ki, err_int):
+    ax, ay, az = accel
+    gx, gy, gz = gyro
+    ex_int, ey_int, ez_int = err_int
+    
+    a_norm = math.sqrt(ax*ax + ay*ay + az*az)
+    if a_norm < 0.1:
+        return q, err_int
+        
+    ax_n, ay_n, az_n = ax/a_norm, ay/a_norm, az/a_norm
+    
+    qw, qx, qy, qz = q
+    vx = 2.0 * (qx * qz - qw * qy)
+    vy = 2.0 * (qw * qx + qy * qz)
+    vz = qw * qw - qx * qx - qy * qy + qz * qz
+    
+    ex = (ay_n * vz - az_n * vy)
+    ey = (az_n * vx - ax_n * vz)
+    ez = (ax_n * vy - ay_n * vx)
+    
+    ex_int += ki * ex * dt
+    ey_int += ki * ey * dt
+    ez_int += ki * ez * dt
+    
+    gx += kp * ex + ex_int
+    gy += kp * ey + ey_int
+    gz += kp * ez + ez_int
+    
+    hdt = 0.5 * dt
+    dw = (-qx * gx - qy * gy - qz * gz) * hdt
+    dx = ( qw * gx + qy * gz - qz * gy) * hdt
+    dy = ( qw * gy - qx * gz + qz * gx) * hdt
+    dz = ( qw * gz + qx * gy - qy * gx) * hdt
+    
+    qw += dw; qx += dx; qy += dy; qz += dz
+    
+    n = math.sqrt(qw*qw + qx*qx + qy*qy + qz*qz)
+    if n > 0:
+        inv_n = 1.0 / n
+        qw *= inv_n; qx *= inv_n; qy *= inv_n; qz *= inv_n
+        
+    return (qw, qx, qy, qz), (ex_int, ey_int, ez_int)
+
+@njit(cache=True)
+def njit_iir_highpass(val, prev_val, prev_out, alpha):
+    out = alpha * (prev_out + val - prev_val)
+    return out
+
+@njit(cache=True)
+def njit_imu_rotate_and_subtract_gravity(q, accel, calibrated_g):
+    qw, qx, qy, qz = q
+    ax, ay, az = accel
+    
+    # Body-frame UP vector from quaternion
+    vx = 2.0 * (qx * qz - qw * qy)
+    vy = 2.0 * (qw * qx + qy * qz)
+    vz = qw * qw - qx * qx - qy * qy + qz * qz
+    
+    # Dynamic acceleration in body frame
+    ax_d = ax - vx * calibrated_g
+    ay_d = ay - vy * calibrated_g
+    az_d = az - vz * calibrated_g
+    
+    # Rotation matrix R: body -> world
+    r11 = 1.0 - 2.0*qy*qy - 2.0*qz*qz
+    r12 = 2.0*qx*qy - 2.0*qz*qw
+    r13 = 2.0*qx*qz + 2.0*qy*qw
+    r21 = 2.0*qx*qy + 2.0*qz*qw
+    r22 = 1.0 - 2.0*qx*qx - 2.0*qz*qz
+    r23 = 2.0*qy*qz - 2.0*qx*qw
+    r31 = 2.0*qx*qz - 2.0*qy*qw
+    r32 = 2.0*qy*qz + 2.0*qx*qw
+    r33 = 1.0 - 2.0*qx*qx - 2.0*qy*qy
+
+    wx = r11*ax_d + r12*ay_d + r13*az_d
+    wy = r21*ax_d + r22*ay_d + r23*az_d
+    wz = r31*ax_d + r32*ay_d + r33*az_d
+    
+    return wx, wy, wz
+
+@njit(cache=True)
+def njit_solder_fatigue_increment(f_dom, dt, rms, k, eps_crit, b):
+    # Physical stress proxy
+    g_rms = max(1e-10, rms)
+    # Z_d = (G * G_rms) / (2*pi*f)^2
+    z_d = (9.80665 * g_rms) / ((2.0 * 3.141592653589793 * f_dom) ** 2)
+    eps = k * z_d
+    # Miner's Rule
+    return f_dom * dt * (eps / eps_crit) ** b
+
 _ANSI_RE = re.compile(r'\033\[[^m]*m')
 
 
 def haversine(lat1, lon1, lat2, lon2):
-    """Calculate the great circle distance between two points in meters."""
-    R = 6371000.0  # Earth radius in meters
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
-    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return njit_haversine(lat1, lon1, lat2, lon2)
 
 class VibrationDetector:
     def __init__(self, fs=100):
@@ -220,16 +317,10 @@ class VibrationDetector:
         
         f_dom = max(1.0, f_dom) # Avoid div by zero, min 1Hz
         
-        # Physical stress proxy
-        g_rms = max(1e-10, self.rms)
-        # Z_d = (G * G_rms) / (2*pi*f)^2
-        z_d = (9.80665 * g_rms) / ((2.0 * math.pi * f_dom) ** 2)
-        eps = self.solder_k * z_d
-        
-        # Miner's Rule: Damage Increment (Delta D)
-        # N_f = (eps_crit / eps)^b
-        # dD = cycles / N_f = (f * dt) / (eps_crit / eps)^b = f * dt * (eps / eps_crit)^b
-        d_damage = f_dom * dt * (eps / self.solder_eps_crit) ** self.solder_b
+        # Physics-based damage increment (Miner's Rule) via NJIT
+        d_damage = njit_solder_fatigue_increment(
+            f_dom, dt, self.rms, self.solder_k, self.solder_eps_crit, self.solder_b
+        )
         
         # Electromech fatigue remains heuristic for now
         electromech_p = min(0.7, (self.crest / 40.0) + (self.kurtosis / 50.0))
@@ -355,47 +446,16 @@ class VibrationDetector:
             return
 
         q = self._q
-        inv_norm = 1.0 / a_norm
-        ax_n, ay_n, az_n = ax * inv_norm, ay * inv_norm, az * inv_norm
-
-        # estimated UP direction (World-Z) from current quaternion
-        # (third column of rotation matrix transposed = R^T * [0,0,1])
-        qw, qx, qy, qz = q
-        vx = 2.0 * (qx * qz - qw * qy)
-        vy = 2.0 * (qw * qx + qy * qz)
-        vz = qw * qw - qx * qx - qy * qy + qz * qz
-
-        # cross product: measured_accel × estimated_UP → error
-        # measured_accel is the reaction force (UP) when stationary.
-        ex = (ay_n * vz - az_n * vy)
-        ey = (az_n * vx - ax_n * vz)
-        ez = (ax_n * vy - ay_n * vx)
-
-        # PI correction
-        self._mahony_err_int[0] += self._mahony_ki * ex * dt
-        self._mahony_err_int[1] += self._mahony_ki * ey * dt
-        self._mahony_err_int[2] += self._mahony_ki * ez * dt
-
-        gx += self._mahony_kp * ex + self._mahony_err_int[0]
-        gy += self._mahony_kp * ey + self._mahony_err_int[1]
-        gz += self._mahony_kp * ez + self._mahony_err_int[2]
-
-        # integrate quaternion derivative: q_dot = 0.5 * q ⊗ [0, gx, gy, gz]
-        hdt = 0.5 * dt
-        dw = (-qx * gx - qy * gy - qz * gz) * hdt
-        dx = ( qw * gx + qy * gz - qz * gy) * hdt
-        dy = ( qw * gy - qx * gz + qz * gx) * hdt
-        dz = ( qw * gz + qx * gy - qy * gx) * hdt
-
-        qw += dw; qx += dx; qy += dy; qz += dz
-
-        # normalize
-        n = math.sqrt(qw*qw + qx*qx + qy*qy + qz*qz)
-        if n > 0:
-            inv_n = 1.0 / n
-            qw *= inv_n; qx *= inv_n; qy *= inv_n; qz *= inv_n
-
-        self._q = [qw, qx, qy, qz]
+        gyro = (math.radians(self.gyro_latest[0]), math.radians(self.gyro_latest[1]), math.radians(self.gyro_latest[2]))
+        accel = (ax, ay, az)
+        
+        new_q, new_err_int = njit_mahony_update(
+            tuple(q), gyro, accel, dt, 
+            self._mahony_kp, self._mahony_ki, tuple(self._mahony_err_int)
+        )
+        
+        self._q = list(new_q)
+        self._mahony_err_int = list(new_err_int)
 
     def process(self, ax, ay, az, t_now):
         self.sample_count += 1
@@ -1233,37 +1293,24 @@ class LocationTracker:
         dt = t_now - self.last_t
         self.last_t = t_now
 
-        # If raw_accel is provided, use quaternion-rotated gravity subtraction
-        # for better stability (less drift than high-pass filter)
-        rax, ray, raz = (0.0, 0.0, 0.0)
+        # Gravity subtraction and World Frame transformation
         if raw_accel is not None:
-            rax, ray, raz = raw_accel
+            wx, wy, wz = njit_imu_rotate_and_subtract_gravity(tuple(q), raw_accel, self.calibrated_g)
+        else:
+            # Fallback to high-pass if raw_accel is missing (less accurate)
             qw, qx, qy, qz = q
-            # Gravity unit vector in body frame
-            vx = 2.0 * (qx * qz - qw * qy)
-            vy = 2.0 * (qw * qx + qy * qz)
-            vz = qw * qw - qx * qx - qy * qy + qz * qz
-            
-            # Subtract calibrated gravity
-            ax = rax - vx * self.calibrated_g
-            ay = ray - vy * self.calibrated_g
-            az = raz - vz * self.calibrated_g
-
-        # Convert dynamic accel from body frame to world frame using quaternion q
-        qw, qx, qy, qz = q
-        r11 = 1 - 2*qy*qy - 2*qz*qz
-        r12 = 2*qx*qy - 2*qz*qw
-        r13 = 2*qx*qz + 2*qy*qw
-        r21 = 2*qx*qy + 2*qz*qw
-        r22 = 1 - 2*qx*qx - 2*qz*qz
-        r23 = 2*qy*qz - 2*qx*qw
-        r31 = 2*qx*qz - 2*qy*qw
-        r32 = 2*qy*qz + 2*qx*qw
-        r33 = 1 - 2*qx*qx - 2*qy*qy
-
-        wx = r11*ax + r12*ay + r13*az
-        wy = r21*ax + r22*ay + r23*az
-        wz = r31*ax + r32*ay + r33*az
+            r11 = 1 - 2*qy*qy - 2*qz*qz
+            r12 = 2*qx*qy - 2*qz*qw
+            r13 = 2*qx*qz + 2*qy*qw
+            r21 = 2*qx*qy + 2*qz*qw
+            r22 = 1 - 2*qx*qx - 2*qz*qz
+            r23 = 2*qy*qz - 2*qx*qw
+            r31 = 2*qx*qz - 2*qy*qw
+            r32 = 2*qy*qz + 2*qx*qw
+            r33 = 1 - 2*qx*qx - 2*qy*qy
+            wx = r11*ax + r12*ay + r13*az
+            wy = r21*ax + r22*ay + r23*az
+            wz = r31*ax + r32*ay + r33*az
 
         # Convert g to m/s^2 (Standard Gravity)
         G = 9.80665
