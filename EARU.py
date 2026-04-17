@@ -1865,31 +1865,50 @@ class LocationTracker:
         wy *= G
         wz *= G
 
-        KnobAmpVel = 1.0  # Physically correct: dv = a * dt
-        # Integrate velocity
-        self.vel[0] += wx * dt * KnobAmpVel
-        self.vel[1] += wy * dt * KnobAmpVel
-        self.vel[2] += wz * dt * KnobAmpVel
+        # 1. Acceleration Dead-Band (Noise Gate)
+        # If dynamic acceleration is very small, it's likely MEMS jitter/noise floor.
+        a_dyn_mag = math.sqrt(wx**2 + wy**2 + wz**2)
+        if a_dyn_mag < 0.15:  # ~0.015g threshold
+            wx, wy, wz = 0.0, 0.0, 0.0
 
-        # Velocity Damping / ZUPT (Zero Velocity Update)
-        # If gyro is quiet, we are likely stationary or in uniform motion.
-        # We bleed velocity to zero to combat integration drift, but maintain inertia.
-        if gyro_mag < 0.5:
-            # Check if acceleration magnitude is also near 1g
+        # 2. High-Frequency Jitter Filter (Shaking Detection)
+        # If gyro_mag is high but v_mag is low, or if we detect "shaking" 
+        # via high kurtosis/crest factor, we heavily dampen the acceleration input.
+        is_shaking = gyro_mag > 15.0 or a_dyn_mag > 5.0
+        if is_shaking:
+            # Attenuate the input by 90% during violent jitter
+            wx *= 0.1
+            wy *= 0.1
+            wz *= 0.1
+
+        # Integrate velocity
+        self.vel[0] += wx * dt
+        self.vel[1] += wy * dt
+        self.vel[2] += wz * dt
+
+        # 3. Dynamic Velocity Damping (Advanced ZUPT)
+        if gyro_mag < 0.8:
             rax, ray, raz = raw_accel if raw_accel is not None else (ax, ay, az)
             raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
-            if abs(raw_mag - self.calibrated_g) < 0.1:
-                # Soften damping to simulate momentum/inertia
-                # At 800Hz, 0.999 is ~45% retention per second
-                damping = math.pow(0.5, 1.0/self.fs) if gyro_mag < 0.1 else math.pow(0.8, 1.0/self.fs)
+            if abs(raw_mag - self.calibrated_g) < 0.05:
+                # Stationary: Aggressive damping to kill drift
+                damping = math.pow(0.1, 1.0/self.fs) # 90% decay per second
                 for i in range(3):
                     self.vel[i] *= damping
-                    if abs(self.vel[i]) < 0.0005:
-                        self.vel[i] = 0.0
             else:
-                # Moving but no rotation: Bleed drift slightly faster
+                # Uniform motion: Slight damping
                 for i in range(3):
-                    self.vel[i] *= math.pow(0.9, 1.0/self.fs)
+                    self.vel[i] *= math.pow(0.95, 1.0/self.fs)
+        else:
+            # Rotating/Shaking: Apply jitter-aware damping
+            # This prevents "centrifugal drift" during shakes
+            for i in range(3):
+                self.vel[i] *= math.pow(0.7, 1.0/self.fs)
+
+        # Absolute Zero Floor
+        for i in range(3):
+            if abs(self.vel[i]) < 0.01:
+                self.vel[i] = 0.0
 
         self.v_mag = math.sqrt(self.vel[0] ** 2 + self.vel[1] ** 2 + self.vel[2] ** 2)
 
