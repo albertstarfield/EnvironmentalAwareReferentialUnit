@@ -711,7 +711,7 @@ class VibrationDetector:
         self.motion_certainty = 0.0
         self.spectral_balance = 0.0  # <0 low freq, >0 high freq
 
-        # Electronic Damage Fatigue metrics
+        # Electronic Unreliability Risk metrics
         self.prob_solder_fatigue = 0.0
         self.prob_electromech_fatigue = 0.0
         self.prob_total_damage_fatigue = 0.0
@@ -745,7 +745,7 @@ class VibrationDetector:
             m_type = "Stationary"
             cert = 0.0
 
-            # --- Electronic Damage Fatigue Logic (Solder Microcrack - SAC305) ---
+            # --- Electronic Unreliability Risk Logic (Solder Microcrack - SAC305) ---
             # 1. Physics Model Calculation
             now = time.time()
             dt = max(0.001, now - self._last_fatigue_update)
@@ -2973,7 +2973,7 @@ def render(
     for _ in range(max(0, 3 - len(recent))):
         a(_line(""))
 
-    a(_sep(" Electronic Damage Fatigue "))
+    a(_sep(" Electronic Unreliability Risk "))
     prob_solder = det.prob_solder_fatigue
     prob_electro = det.prob_electromech_fatigue
     prob_total = det.prob_total_damage_fatigue
