@@ -1732,18 +1732,22 @@ class LocationTracker:
 
     def _check_core_location_bg(self):
         try:
-            # Determine the currently logged-in user to bypass root location restrictions
+            # Determine the currently logged-in user and their UID to bypass root location restrictions
             user_res = subprocess.run(['stat', '-f%Su', '/dev/console'], capture_output=True, text=True)
             current_user = user_res.stdout.strip() if user_res.returncode == 0 else 'root'
+            
+            uid_res = subprocess.run(['id', '-u', current_user], capture_output=True, text=True)
+            uid = uid_res.stdout.strip() if uid_res.returncode == 0 else '0'
 
-            if current_user and current_user != 'root':
-                # Execute via sudo -u to the logged-in user
-                cmd = ['sudo', '-u', current_user, self.cl_path, 
-                       '-format', '%latitude %longitude %altitude %direction', '-once']
+            if current_user and current_user != 'root' and uid != '0':
+                # Execute via launchctl asuser + osascript to proxy the user's location permissions
+                # We use 'do shell script' via osascript to trigger the TCC-aware execution path
+                cl_cmd = f"{self.cl_path} -format '%latitude %longitude %altitude %direction' -once"
+                cmd = ['launchctl', 'asuser', uid, 'osascript', '-e', f'do shell script "{cl_cmd}"']
             else:
                 cmd = [self.cl_path, '-format', '%latitude %longitude %altitude %direction', '-once']
 
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10.0)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
             if res.returncode == 0:
                 parts = res.stdout.strip().split()
                 if len(parts) >= 4:
