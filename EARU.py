@@ -223,7 +223,7 @@ class WindMapper:
     def get_stats_at_radius(self, current_pos, radius_m):
         with self.lock:
             if not self.history:
-                return 0.0, 0.0
+                return 0.0, 0.0, ""
             
             relevant = []
             cx, cy, cz = current_pos
@@ -234,7 +234,7 @@ class WindMapper:
                     relevant.append(s)
             
             if not relevant:
-                return None, None
+                return None, None, None
             
             # Average magnitude and direction from samples
             v_sum = 0.0
@@ -252,7 +252,8 @@ class WindMapper:
             avg_vg = vg_sum / len(relevant)
             
             wind_speed = abs(avg_mag - avg_vg)
-            return wind_speed, _degrees_to_compass(_math_to_bearing(self.current_wind))
+            bearing = _math_to_bearing(self.current_wind)
+            return wind_speed, _degrees_to_compass(bearing), _degrees_to_arrow(bearing)
 
 def _math_to_bearing(vec):
     vx, vy, vz = vec
@@ -836,6 +837,13 @@ def _degrees_to_compass(d):
             "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
     ix = int((d + 11.25) / 22.5)
     return dirs[ix % 16]
+
+
+def _degrees_to_arrow(d):
+    """Convert degrees (0-360) to a Unicode arrow icon."""
+    arrows = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
+    ix = int((d + 22.5) / 45.0)
+    return arrows[ix % 8]
 
 
 _ALS_SPEC_OFFSETS = [20, 24, 28, 32]
@@ -1780,11 +1788,11 @@ def render(det, t_start, restarts,
 
         # Merged Wind Map Scales
         for r in [0.1, 1.0, 10.0, 100.0]:
-            speed, w_dir = location.wind_mapper.get_stats_at_radius(location.pos, r)
+            speed, w_dir, w_arrow = location.wind_mapper.get_stats_at_radius(location.pos, r)
             label = f"Wind @ {r:>5.1f}m:"
             if speed is not None:
                 knots = speed * 1.94384
-                a(_line(f" {DIM}{label}{RST} {BWHT}{speed:>6.2f} m/s{RST} ({BCYN}{knots:>6.2f} kt{RST}) {BYEL}{w_dir:<4}{RST}"))
+                a(_line(f" {DIM}{label}{RST} {BWHT}{speed:>6.2f} m/s{RST} ({BCYN}{knots:>6.2f} kt{RST}) {BYEL}{w_dir:<4}{RST} {BGRN}{w_arrow}{RST}"))
             else:
                 a(_line(f" {DIM}{label}{RST} {DIM}N/A (waiting for travel){RST}"))
 
