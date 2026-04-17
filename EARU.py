@@ -1404,8 +1404,13 @@ class ProfilerDebug:
         self.start_time = time.time()
         self.last_report = time.time()
         self.block_times = {}
+        self.hz_history = deque(maxlen=10)
         self._current_block = None
         self._block_start = 0
+
+    def record_hz(self, hz):
+        if self.enabled:
+            self.hz_history.append(hz)
 
     def start_block(self, name):
         if not self.enabled:
@@ -1448,11 +1453,12 @@ class ProfilerDebug:
 
         mem = self.process.memory_info().rss / (1024 * 1024)  # MB
         cpu = self.process.cpu_percent()
+        avg_hz = sum(self.hz_history) / len(self.hz_history) if self.hz_history else 0.0
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lines = [
             f"--- {timestamp} ---",
-            f"[PROFILER] Mem: {mem:.2f}MB | CPU: {cpu:.1f}%",
+            f"[PROFILER] Mem: {mem:.2f}MB | CPU: {cpu:.1f}% | Loop: {avg_hz:.1f}Hz",
             "Variable Sizes (length/bytes):",
         ]
 
@@ -3420,6 +3426,10 @@ def main(stdscr=None):
             # Loop tracking record
             loop_duration = (time.time() - loop_start) * 1000.0
             loop_tracker.record_loop(loop_duration)
+            
+            # Feed Hz to profiler
+            if profiler.enabled and loop_tracker.hz_history:
+                profiler.record_hz(loop_tracker.hz_history[-1])
 
             # 4. Emergency Impact Save Trigger
             is_impact = (det.peak > 3.0)
