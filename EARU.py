@@ -1679,7 +1679,7 @@ class LocationTracker:
         self.heading = (yaw_d + self.heading_offset) % 360.0
 
         # Integrate position using augmented velocity
-        if self.v_mag >= 0.5:
+        if self.v_mag >= 0.1:
             dx = v_aug[0] * dt
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
