@@ -1796,24 +1796,12 @@ class LocationTracker:
             r31 = 2 * qx * qz - 2 * qy * qw
             r32 = 2 * qy * qz + 2 * qx * qw
             r33 = 1 - 2 * qx * qx - 2 * qy * qy
-            
-            # Subtract gravity using calibrated_g in body frame
-            # (Approximated UP vector in body frame is the same as Mahony internal)
-            vx_up = 2.0 * (qx * qz - qw * qy)
-            vy_up = 2.0 * (qw * qx + qy * qz)
-            vz_up = qw * qw - qx * qx - qy * qy + qz * qz
-            
-            ax_d = ax - vx_up * self.calibrated_g
-            ay_d = ay - vy_up * self.calibrated_g
-            az_d = az - vz_up * self.calibrated_g
+            wx = r11 * ax + r12 * ay + r13 * az
+            wy = r21 * ax + r22 * ay + r23 * az
+            wz = r31 * ax + r32 * ay + r33 * az
 
-            wx = r11 * ax_d + r12 * ay_d + r13 * az_d
-            wy = r21 * ax_d + r22 * ay_d + r23 * az_d
-            wz = r31 * ax_d + r32 * ay_d + r33 * az_d
-
-        # Convert g to m/s^2 (Standard Gravity scaled by local calibration)
-        # We use the ratio to handle potential sensor scale drift
-        G = 9.80665 * self.calibrated_g
+        # Convert g to m/s^2 (Standard Gravity)
+        G = 9.80665
         wx *= G
         wy *= G
         wz *= G
@@ -1878,13 +1866,15 @@ class LocationTracker:
         self.heading = (yaw_d + self.heading_offset) % 360.0
 
         # Integrate position using augmented velocity
-        if self.v_mag >= 0.001:
+        if self.v_mag >= 0.01:
             dx = v_aug[0] * dt
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
-            self.pos[0] += dx
-            self.pos[1] += dy
-            self.pos[2] += dz
+
+            MovementAugAmpKnob = 0.3
+            self.pos[0] += dx * MovementAugAmpKnob
+            self.pos[1] += dy * MovementAugAmpKnob
+            self.pos[2] += dz * MovementAugAmpKnob
 
             dist_inc = math.sqrt(dx * dx + dy * dy + dz * dz)
             self.total_distance_m += dist_inc
