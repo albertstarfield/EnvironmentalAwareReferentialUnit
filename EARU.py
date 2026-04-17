@@ -3776,6 +3776,44 @@ def main(stdscr=None):
                 }
                 profiler.end_block() # dp_dict_build
 
+                # Write to EARU_data.dat asynchronously to avoid blocking
+                def _write_data_bg(json_data_copy):
+                    try:
+                        class NpEncoder(json.JSONEncoder):
+                            def default(self, obj):
+                                if isinstance(obj, np.integer):
+                                    return int(obj)
+                                if isinstance(obj, np.floating):
+                                    return float(obj)
+                                if isinstance(obj, np.ndarray):
+                                    return obj.tolist()
+                                if isinstance(obj, deque):
+                                    return list(obj)
+                                return super(NpEncoder, self).default(obj)
+
+                        with open("EARU_data.dat", "w") as f:
+                            if json_data_copy["als"]:
+                                json_data_copy["als"] = json_data_copy["als"].hex()
+
+                            # Calculate primary parity for data integrity
+                            payload = json.dumps(json_data_copy, cls=NpEncoder, sort_keys=True)
+                            json_data_copy["parity"] = hashlib.sha256(
+                                payload.encode()
+                            ).hexdigest()
+
+                            # Write main JSON block
+                            full_json_str = json.dumps(
+                                json_data_copy, cls=NpEncoder, sort_keys=True
+                            )
+                            f.write(full_json_str)
+
+                            # Append redundant recovery footer
+                            recovery_b64 = base64.b64encode(payload.encode()).decode()
+                            recovery_hash = hashlib.sha256(payload.encode()).hexdigest()
+                            f.write(f"\n[RECOVERY_V1:{recovery_b64}:{recovery_hash}]")
+                    except Exception:
+                        pass
+
                 if not no_writing_dat:
                     profiler.start_block("bg_write_spawn")
                     threading.Thread(target=_write_data_bg, args=(data.copy(),), daemon=True).start()
