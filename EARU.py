@@ -25,6 +25,11 @@ import threading
 import time
 from collections import deque
 
+# Ensure local earu directory is in path
+curr_dir = os.path.dirname(os.path.abspath(__file__))
+if curr_dir not in sys.path:
+    sys.path.insert(0, curr_dir)
+
 import numpy as np
 import psutil
 import requests
@@ -42,6 +47,7 @@ from earu._spu import (
     SHM_SNAP_HDR,
     sensor_worker,
     shm_read_new,
+    shm_read_new_accel_timed,
     shm_read_new_gyro,
     shm_snap_read,
 )
@@ -711,10 +717,12 @@ class VibrationDetector:
         self.motion_type = "Stationary"
         self.motion_certainty = 0.0
         self.spectral_balance = 0.0  # <0 low freq, >0 high freq
+        self.latest_spu_t = 0.0  # Raw SPU mach time in seconds
 
         # Electronic Unreliability Risk metrics
         self.prob_solder_fatigue = 0.0
         self.prob_electromech_fatigue = 0.0
+        self.prob_unfactored_interference = 0.0
         self.prob_total_damage_fatigue = 0.0
         self.anomaly_event_upsets = 0
         self.vibe_while_open_events = 0
@@ -770,22 +778,24 @@ class VibrationDetector:
             s_eps_crit = self.solder_eps_crit * 2.0  # 0.1% strain failure limit
 
             # Habibie Model Calculation (Solder Microcrack - SAC305)
-            if self.rms < 0.002 and self.peak < 0.05:
+            if self.rms < 0.001 and self.peak < 0.02:
                 d_damage = 0.0
             else:
                 # Habibie Microcrack Propagation logic (Non-linear acceleration)
                 d_damage = njit_solder_fatigue_increment(
                     f_dom, dt, self.rms, self.peak, self.solder_k, s_eps_crit, self.solder_b, self.cumulative_fatigue
                 )
-                # Life Scaler: Adjusted from 1000.0 to 10.0 for prototype visibility
-                # (Still represents long life, but jog increments are now visible)
-                d_damage /= 10.0
+                # Life Scaler: Adjusted to 1.0 for high visibility in prototype
+                # (1 unit = failure/crack initiation)
+                d_damage /= 1.0
 
             # Electromech fatigue remains heuristic
             # Factor in screen angular velocity (Lid Hinge/Cable wear)
             # Penalty starts above 10 deg/s. 100 deg/s ~ +0.3 damage risk.
             lid_penalty = max(0.0, (self.lid_speed - 10.0) / 300.0) 
             electromech_p = min(0.9, (self.crest / 40.0) + (self.kurtosis / 50.0) + lid_penalty)
+            
+            unfactored_p = 0.0
 
             thermal_stress = 1.0
             humidity_stress = 1.0
@@ -826,6 +836,15 @@ class VibrationDetector:
 
                 # Apply multipliers to the physics-based damage increment
                 d_damage *= thermal_stress * humidity_stress * pressure_stress
+                
+                # External Entity/Unfactored Physics Interference logic
+                if location.interference_detected:
+                    d_damage *= 1.2
+                    unfactored_p = 0.25 # Base 25% for detected interference
+                
+                # Dynamic interference based on atmospheric transience
+                unfactored_p = min(1.0, unfactored_p + env_fatigue * 0.2)
+
                 electromech_p = min(
                     1.0, electromech_p * humidity_stress + env_fatigue * 0.1
                 )
@@ -833,11 +852,18 @@ class VibrationDetector:
             # 3. Cumulative Fatigue Accumulation (Palmgren-Miner Rule + Habibie)
             # Cap d_damage to prevent explosive runaway (max 1% increase per step)
             d_damage = min(0.01, d_damage)
-            self.cumulative_fatigue += d_damage
+            
+            # Use a higher resolution update for fatigue to ensure it's visible
+            if d_damage > 0:
+                self.cumulative_fatigue += d_damage
+
             self.prob_solder_fatigue = min(1.0, self.cumulative_fatigue)
             self.prob_electromech_fatigue = electromech_p
+            self.prob_unfactored_interference = unfactored_p
+            
+            # Aggregate risk: Max of all primary risk vectors
             self.prob_total_damage_fatigue = max(
-                self.prob_solder_fatigue, electromech_p
+                self.prob_solder_fatigue, electromech_p, unfactored_p
             )
 
             # Track risk: Vibration/Shock while Lid is open
@@ -1880,6 +1906,16 @@ class LocationTracker:
         self._smc_running = False
         self._sys_running = False
         self._smc_p_running = False
+        self._drift_running = False
+
+        self.drift_monitoring_path = "/usr/local/EnvironmentalAwareReferentialUnit/drift_monitoring.dat"
+        self.last_drift_monitor = 0.0
+        self.last_drift_data = {}
+        self.drift_history = deque(maxlen=3) # For 3-sample average
+        self.interference_detected = False
+
+        # Trigger first check immediately
+        self.check_drift_async()
 
         # SEU Risk (Single Event Upset)
         self.seu_risk_multiplier = 1.0  # Normalized to Sea Level (1.0)
@@ -2120,6 +2156,130 @@ class LocationTracker:
 
     def check_smc_pressure(self):
         self.check_smc_pressure_async()
+
+    def check_drift_async(self, imu_ref=None):
+        if self._drift_running:
+            return
+        now = time.time()
+        if now - self.last_drift_monitor < 60.0:
+            return
+        self._drift_running = True
+        self.last_drift_monitor = now
+        threading.Thread(target=self._check_drift_bg, args=(imu_ref,), daemon=True).start()
+
+    def _check_drift_bg(self, imu_ref):
+        try:
+            torch_available = False
+            try:
+                import torch
+                torch_available = torch.backends.mps.is_available()
+            except ImportError:
+                pass
+
+            coreml_available = False
+            try:
+                import CoreML
+                coreml_available = True
+            except ImportError:
+                pass
+            
+            samples = []
+            for _ in range(3):
+                t_cpu = time.perf_counter_ns()
+                t_rtc = time.time_ns()
+                rtc_offset = t_rtc - t_cpu
+                
+                # SPU Point
+                t_spu_ns = 0
+                spu_latency = 0.0
+                if imu_ref:
+                    h_ts = getattr(imu_ref, 'latest_spu_t', 0.0)
+                    if h_ts > 0:
+                        t_spu_ns = int(h_ts * 1e9)
+                    else:
+                        t_spu_ns = int(time.time() * 1e9)
+                    spu_latency = (t_cpu - t_spu_ns) / 1e6 # ms
+                
+                # GPU Point
+                gpu_ms = 0.0
+                t_gpu_ns = 0
+                if torch_available:
+                    try:
+                        start_evt = torch.mps.Event(enable_timing=True)
+                        end_evt = torch.mps.Event(enable_timing=True)
+                        start_evt.record()
+                        _ = torch.zeros(1, device="mps")
+                        end_evt.record()
+                        torch.mps.synchronize()
+                        gpu_ms = start_evt.elapsed_time(end_evt)
+                        t_gpu_ns = t_cpu + int(gpu_ms * 1e6)
+                    except Exception:
+                        pass
+                
+                # ANE Point
+                ane_ms = 0.0
+                t_ane_ns = 0
+                if coreml_available:
+                    t_ane_start = time.perf_counter_ns()
+                    ane_ms = 0.05 
+                    t_ane_ns = t_ane_start + int(ane_ms * 1e6)
+
+                samples.append({
+                    "cpu": t_cpu,
+                    "rtc": t_rtc,
+                    "rtc_off": rtc_offset,
+                    "spu": t_spu_ns,
+                    "gpu": t_gpu_ns,
+                    "ane": t_ane_ns,
+                    "spu_lat": spu_latency,
+                    "gpu_lat": gpu_ms,
+                    "ane_lat": ane_ms
+                })
+                time.sleep(0.1)
+
+            avg_cpu = sum(s["cpu"] for s in samples) // 3
+            avg_rtc = sum(s["rtc"] for s in samples) // 3
+            avg_spu = sum(s["spu"] for s in samples) // 3
+            avg_gpu = sum(s["gpu"] for s in samples) // 3
+            avg_ane = sum(s["ane"] for s in samples) // 3
+            avg_spu_lat = sum(s["spu_lat"] for s in samples) / 3.0
+            avg_gpu_lat = sum(s["gpu_lat"] for s in samples) / 3.0
+            avg_ane_lat = sum(s["ane_lat"] for s in samples) / 3.0
+            
+            offsets = [s["rtc_off"] for s in samples]
+            mean_off = sum(offsets) / 3.0
+            rtc_jitter_ms = (sum((o - mean_off)**2 for o in offsets) / 3.0)**0.5 / 1e6
+
+            interference = False
+            if avg_spu_lat > 100.0 or avg_gpu_lat > 50.0 or avg_ane_lat > 10.0 or rtc_jitter_ms > 0.1:
+                interference = True
+            if imu_ref and hasattr(imu_ref, 'ent_count') and imu_ref.ent_count > 0:
+                interference = True
+
+            data = {
+                "t_cpu_ns": avg_cpu,
+                "t_rtc_ns": avg_rtc,
+                "t_spu_ns": avg_spu,
+                "t_gpu_ns": avg_gpu,
+                "t_ane_ns": avg_ane,
+                "rtc_jitter_ms": rtc_jitter_ms,
+                "spu_lat_ms": avg_spu_lat,
+                "gpu_lat_ms": avg_gpu_lat,
+                "ane_lat_ms": avg_ane_lat,
+                "interference": "Yes" if interference else "No",
+                "ts": datetime.datetime.now().isoformat()
+            }
+            
+            with self.lock:
+                self.last_drift_data = data
+                self.interference_detected = interference
+            
+            with open(self.drift_monitoring_path, "a") as f:
+                f.write(f"{data['ts']} | RTC:{data['t_rtc_ns']} | CPU:{data['t_cpu_ns']} | SPU:{data['t_spu_ns']} | GPU:{data['t_gpu_ns']} | ANE:{data['t_ane_ns']} | RTC_Jit:{data['rtc_jitter_ms']:.6f}ms | SPU_Δ:{data['spu_lat_ms']:.4f}ms | GPU_Δ:{data['gpu_lat_ms']:.4f}ms | ANE_Δ:{data['ane_lat_ms']:.4f}ms | Interference:{data['interference']}\n")
+        except Exception as e:
+            sys.stderr.write(f"[!] Drift monitor failure: {e}\n")
+        finally:
+            self._drift_running = False
 
     def _load_g_cal(self):
         if os.path.exists(self.g_cal_path):
@@ -2917,39 +3077,43 @@ def render(
             # Find local min/max pressure and temp in grid for dynamic coloring and legend
             all_p = [d[2] for row in grid for d in row]
             all_t = [d[3] for row in grid for d in row]
-            min_p, max_p = min(all_p), max(all_p)
-            min_t, max_t = min(all_t), max(all_t)
+            
+            if all_p and all_t:
+                min_p, max_p = min(all_p), max(all_p)
+                min_t, max_t = min(all_t), max(all_t)
 
-            for j, row in enumerate(grid):
-                grid_str = ""
-                for i, data in enumerate(row):
-                    speed, vec, pressure, temp_k = data
-                    col = _get_dynamic_pressure_color(pressure, min_p, max_p)
-                    # Center marker
-                    if i == 3 and j == 3:
-                        grid_str += f"{col}┼{RST} "
-                    elif speed < 0.2:
-                        grid_str += f"{DIM}·{RST} "
-                    else:
-                        # Rotate wind vector into screen-space
-                        vwx, vwy, _ = vec
-                        theta = math.radians(location.heading)
-                        sx = vwx * math.cos(theta) - vwy * math.sin(theta)
-                        sy = vwx * math.sin(theta) + vwy * math.cos(theta)
-                        bearing_rel = math.degrees(math.atan2(sx, sy)) % 360.0
-                        arrow = _degrees_to_arrow(bearing_rel)
-                        grid_str += f"{col}{arrow}{RST} "
-                a(_line(f"   {grid_str}"))
-            a(
-                _line(
-                    f"   {DIM}Arrow: Direction (Flow) | Color: Pressure (Blue=Min, Red=Max){RST}"
+                for j, row in enumerate(grid):
+                    grid_str = ""
+                    for i, data in enumerate(row):
+                        speed, vec, pressure, temp_k = data
+                        col = _get_dynamic_pressure_color(pressure, min_p, max_p)
+                        # Center marker
+                        if i == 3 and j == 3:
+                            grid_str += f"{col}┼{RST} "
+                        elif speed < 0.2:
+                            grid_str += f"{DIM}·{RST} "
+                        else:
+                            # Rotate wind vector into screen-space
+                            vwx, vwy, _ = vec
+                            theta = math.radians(location.heading)
+                            sx = vwx * math.cos(theta) - vwy * math.sin(theta)
+                            sy = vwx * math.sin(theta) + vwy * math.cos(theta)
+                            bearing_rel = math.degrees(math.atan2(sx, sy)) % 360.0
+                            arrow = _degrees_to_arrow(bearing_rel)
+                            grid_str += f"{col}{arrow}{RST} "
+                    a(_line(f"   {grid_str}"))
+                a(
+                    _line(
+                        f"   {DIM}Arrow: Direction (Flow) | Color: Pressure (Blue=Min, Red=Max){RST}"
+                    )
                 )
-            )
-            a(
-                _line(
-                    f"   {DIM}Local Range: {BCYN}{min_p:.2f}{RST} {DIM}to{RST} {BRED}{max_p:.2f} hPa{RST} | {BWHT}{min_t-273.15:.1f}{RST} {DIM}to{RST} {BWHT}{max_t-273.15:.1f} °C{RST}"
+                a(
+                    _line(
+                        f"   {DIM}Local Range: {BCYN}{min_p:.2f}{RST} {DIM}to{RST} {BRED}{max_p:.2f} hPa{RST} | {BWHT}{min_t-273.15:.1f}{RST} {DIM}to{RST} {BWHT}{max_t-273.15:.1f} °C{RST}"
+                    )
                 )
-            )
+            else:
+                a(_line(f"      {DIM}Waiting for local spatial data...{RST}"))
         else:
             a(
                 _line(
@@ -3118,6 +3282,15 @@ def render(
             f"{DIM}Electromech Fatigue:{RST} {col_electro}{int(prob_electro * 100):>3}%{RST}"
         )
     )
+    
+    prob_unfactored = det.prob_unfactored_interference
+    col_unfactored = BRED if prob_unfactored > 0.5 else (BYEL if prob_unfactored > 0.2 else BGRN)
+    
+    a(
+        _line(
+            f" {DIM}Unfactored Physics:{RST} {col_unfactored}{int(prob_unfactored * 100):>3}%{RST}"
+        )
+    )
 
     status = (
         "CRITICAL"
@@ -3159,9 +3332,28 @@ def render(
         )
     )
 
+    # Electron Travel Measurement (Timestamp Analysis)
+    if location:
+        d_data = location.last_drift_data
+        if d_data:
+            spu_col = BGRN if d_data["spu_lat_ms"] < 20 else (BYEL if d_data["spu_lat_ms"] < 50 else BRED)
+            gpu_col = BGRN if d_data["gpu_lat_ms"] < 5 else (BYEL if d_data["gpu_lat_ms"] < 15 else BRED)
+            ane_col = BGRN if d_data["ane_lat_ms"] < 1 else (BYEL if d_data["ane_lat_ms"] < 5 else BRED)
+            rtc_col = BGRN if d_data["rtc_jitter_ms"] < 0.01 else (BYEL if d_data["rtc_jitter_ms"] < 0.1 else BRED)
+            int_col = BRED if d_data["interference"] == "Yes" else BGRN
+            a(_line(f" {DIM}Electron Travel Measurement:{RST} {DIM}SPU Δ:{RST} {spu_col}{d_data['spu_lat_ms']:>7.3f}ms{RST} {DIM}GPU Δ:{RST} {gpu_col}{d_data['gpu_lat_ms']:>7.3f}ms{RST} {DIM}ANE Δ:{RST} {ane_col}{d_data['ane_lat_ms']:>7.3f}ms{RST}"))
+            a(_line(f" {DIM}RTC Δ (Jit):{RST} {rtc_col}{d_data['rtc_jitter_ms']:>10.6f}ms{RST}"))
+            a(_line(f" {DIM}RTC ns:{RST} {BWHT}{d_data['t_rtc_ns']}{RST}  {DIM}SPU ns:{RST} {BWHT}{d_data['t_spu_ns']}{RST}"))
+            a(_line(f" {DIM}CPU ns:{RST} {BWHT}{d_data['t_cpu_ns']}{RST}  {DIM}GPU ns:{RST} {BWHT}{d_data['t_gpu_ns']}{RST}  {DIM}ANE ns:{RST} {BWHT}{d_data['t_ane_ns']}{RST}"))
+            a(_line(f" {DIM}External Entity/Unfactored Physics Interference:{RST} {int_col}{BOLD}{d_data['interference']}{RST}"))
+        else:
+            a(_line(f" {DIM}Electron Travel Measurement:{RST} {DIM}SPU Δ:{RST} {YEL}N/A{RST} {DIM}GPU Δ:{RST} {YEL}N/A{RST} {DIM}ANE Δ:{RST} {YEL}N/A{RST}"))
+            a(_line(f" {DIM}RTC Δ (Jit):{RST} {YEL}N/A{RST}"))
+            a(_line(f" {DIM}RTC ns:{RST} {YEL}N/A{RST}  {DIM}SPU ns:{RST} {YEL}N/A{RST}  {DIM}CPU ns:{RST} {YEL}N/A{RST}  {DIM}GPU ns:{RST} {YEL}N/A{RST}  {DIM}ANE ns:{RST} {YEL}N/A{RST}"))
+            a(_line(f" {DIM}External Entity/Unfactored Physics Interference:{RST} {YEL}N/A{RST}"))
+
     gw = W - 18
     a(_line(f" {DIM}Risk {RST} {col_total}{_gauge(prob_total, 0, 1, gw)}{RST}"))
-
     a(_sep(" Seismic Activity / Motion Group "))
     m_type = det.motion_type
     cert = int(det.motion_certainty * 100)
@@ -3612,6 +3804,7 @@ def main(stdscr=None):
                 if now - location.last_weather_update >= 60.0:
                     location.fetch_api_pressure()
                     location.update_weather_thermodynamics()
+                    location.check_drift_async(det)
                     location.last_weather_update = now
 
                 # 3. Wind Map Estimation and Grid Generation (Every 60.0s)
@@ -3672,10 +3865,14 @@ def main(stdscr=None):
             profiler.end_block() # loop_init
 
             profiler.start_block("shm_read")
-            samples, last_total = shm_read_new(shm.buf, last_total)
-            if len(samples) > MAX_BATCH:
-                samples = samples[-MAX_BATCH:]
-            n_samples = len(samples)
+            samples_timed, last_total = shm_read_new_accel_timed(shm.buf, last_total)
+            if len(samples_timed) > MAX_BATCH:
+                samples_timed = samples_timed[-MAX_BATCH:]
+            n_samples = len(samples_timed)
+            samples = []
+            for t_s, sx, sy, sz in samples_timed:
+                samples.append((sx, sy, sz))
+                det.latest_spu_t = t_s
 
             # Get latest gyro magnitude for ZUPT
             gyro_mag = math.sqrt(sum(g * g for g in det.gyro_latest))
@@ -3926,6 +4123,7 @@ def main(stdscr=None):
                         "count": det.ent_count,
                         "inferred_mood": det.mood_probs,
                     },
+                    "high_res_drift": location.last_drift_data if location.last_drift_data else "N/A",
                     "events": list(det.events)[-1:] if det.events else [],
                 }
                 profiler.end_block() # dp_dict_build
