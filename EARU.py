@@ -342,15 +342,17 @@ def njit_solder_fatigue_increment(f_dom, dt, rms, peak, k, eps_crit, b, current_
     
     # 3. Impact-Induced Plasticity / Micro-cleavage (Broadband Shock)
     # Impacts (Peak G) bypass the frequency-based displacement model.
-    # We use a lower exponent for shocks (e.g. 3.0 instead of 6.4) to reflect plasticity.
-    eps_peak = k * (9.80665 * peak) / ((2.0 * 3.141592653589793 * 100.0) ** 2) # Assume 100Hz impulsive peak
-    d_impact = (eps_peak / (eps_crit * 0.5)) ** 3.0 # Impact uses lower crit threshold and lower exponent
-    
-    # Combine increments
-    total_inc = (d_vibe + d_impact * 0.05) * habibie_accel
-    
-    return total_inc
+    eps_peak = k * (9.80665 * peak) / ((2.0 * 3.141592653589793 * 60.0) ** 2) # Assume 60Hz impulsive peak
+    d_impact = (eps_peak / (eps_crit * 0.4)) ** 3.0 
 
+    # Combine increments: Boost impact weight for prototype visibility
+    total_inc = (d_vibe + d_impact * 0.2) * habibie_accel
+
+    # Noise floor: Ensure extremely minor vibrations still add up slowly
+    if total_inc < 1e-12 and peak > 0.005:
+        total_inc = 1e-12
+
+    return total_inc
 
 _ANSI_RE = re.compile(r"\033\[([^m]*)m")
 
@@ -861,9 +863,12 @@ class VibrationDetector:
             self.prob_electromech_fatigue = electromech_p
             self.prob_unfactored_interference = unfactored_p
             
-            # Aggregate risk: Max of all primary risk vectors
+            # Aggregate risk: Max of all primary risk vectors.
+            # Per user request, electromech is weighted at 50% for the final unreliability index.
             self.prob_total_damage_fatigue = max(
-                self.prob_solder_fatigue, electromech_p, unfactored_p
+                self.prob_solder_fatigue, 
+                electromech_p * 0.5, 
+                unfactored_p
             )
 
             # Track risk: Vibration/Shock while Lid is open
@@ -3279,7 +3284,7 @@ def render(
     a(
         _line(
             f" {DIM}Solder Fatigue Prob:{RST} {col_solder}{int(prob_solder * 100):>3}%{RST}  "
-            f"{DIM}Electromech Fatigue:{RST} {col_electro}{int(prob_electro * 100):>3}%{RST}"
+            f"{DIM}Electromech (50%):{RST} {col_electro}{int(prob_electro * 100):>3}%{RST}"
         )
     )
     
