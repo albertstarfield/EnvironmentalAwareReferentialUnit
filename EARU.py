@@ -726,6 +726,8 @@ class VibrationDetector:
         self.prob_electromech_fatigue = 0.0
         self.prob_unfactored_interference = 0.0
         self.prob_total_damage_fatigue = 0.0
+        self.integrity_check_active = False
+        self.integrity_check_triggered_at = 0.0
         self.anomaly_event_upsets = 0
         self.vibe_while_open_events = 0
         self.last_data_hash = ""
@@ -870,6 +872,19 @@ class VibrationDetector:
                 electromech_p * 0.5, 
                 unfactored_p
             )
+
+            # Data Integrity Check Logic
+            # Trigger if aggregated risk is in 50-60% range (using 50% as threshold)
+            if self.prob_total_damage_fatigue >= 0.5:
+                if not self.integrity_check_active:
+                    self.integrity_check_active = True
+                    self.integrity_check_triggered_at = now
+            else:
+                # Survival check: if active and risk stays < 50% for 30 minutes, reset
+                if self.integrity_check_active:
+                    if now - self.integrity_check_triggered_at > 1800.0:
+                        self.integrity_check_active = False
+                        self.integrity_check_triggered_at = 0.0
 
             # Track risk: Vibration/Shock while Lid is open
             if hasattr(self, 'lid_speed'): # Check if lid info is available
@@ -3311,6 +3326,19 @@ def render(
             f"{DIM}Anomaly Event Upset:{RST} {upset_col}{det.anomaly_event_upsets:>4}{RST}"
         )
     )
+
+    integrity_col = BYEL if det.integrity_check_active else DIM
+    integrity_str = "ACTIVE" if det.integrity_check_active else "INACTIVE"
+    if det.integrity_check_active:
+        uptime_str = f"({(now - det.integrity_check_triggered_at)/60.0:.1f}m)"
+        integrity_str += f" {uptime_str}"
+
+    a(
+        _line(
+            f" {DIM}Data Integrity Check:{RST} {integrity_col}{integrity_str}{RST}"
+        )
+    )
+
     a(
         _line(
             f" {DIM}Aggregated Risk:{RST} {col_total}{int(prob_total * 100):>3}%{RST}  "
@@ -4083,6 +4111,10 @@ def main(stdscr=None):
                             "seu_risk_multiplier": location.seu_risk_multiplier,
                             "alt_stress_multiplier": location.alt_stress_multiplier,
                             "anomaly_event_upset": det.anomaly_event_upsets,
+                            "data_integrity_check": {
+                                "active": det.integrity_check_active,
+                                "triggered_at": det.integrity_check_triggered_at,
+                            }
                         },
                     },
                     "system": {
