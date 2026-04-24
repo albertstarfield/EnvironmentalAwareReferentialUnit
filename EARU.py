@@ -77,6 +77,87 @@ ENTER_ALT = "\033[?1049h"
 EXIT_ALT = "\033[?1049l"
 CLEAR = "\033[2J\033[H"
 
+def ensure_dependencies():
+    """Checks for and installs missing 3rd-party weather dependencies."""
+    required = {
+        "openmeteo_requests": "openmeteo-requests",
+        "pandas": "pandas",
+        "requests_cache": "requests-cache",
+        "retry_requests": "retry-requests"
+    }
+    missing = []
+    for module, package in required.items():
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(package)
+    
+    if missing:
+        print(f"{YEL}[*] Missing weather dependencies: {', '.join(missing)}{RST}")
+        print(f"{CYN}[*] Attempting automatic installation...{RST}")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
+            print(f"{BGRN}[ok] Dependencies installed successfully.{RST}")
+            return True
+        except Exception as e:
+            print(f"{BRED}[!] Failed to install dependencies: {e}{RST}")
+            return False
+    return True
+
+# Run dependency check
+ensure_dependencies()
+
+def setup_ramdisk():
+    """Creates a 1GB APFS RAM disk for high-frequency data IO if not already present."""
+    target_vol = "/Volumes/EARU_dataIO"
+    if os.path.exists(target_vol):
+        return target_vol
+
+    print(f"{CYN}[*] Initializing 1GB RAM disk (EARU_dataIO)...{RST}")
+    try:
+        # 1. Attach RAM device (2097152 sectors = 1024MB)
+        cmd_attach = ["hdiutil", "attach", "-nomount", "ram://2097152"]
+        dev_path = subprocess.check_output(cmd_attach).decode().strip()
+        
+        # 2. Format as APFS
+        subprocess.check_call(["diskutil", "apfs", "create", dev_path, "EARU_dataIO"])
+        print(f"{BGRN}[ok] RAM disk mounted at {target_vol}{RST}")
+        return target_vol
+    except Exception as e:
+        print(f"{BRED}[!] Failed to create RAM disk: {e}{RST}")
+        return None
+
+# Initialize RAM Disk and Symlink
+ram_path = setup_ramdisk()
+if ram_path:
+    dat_link = os.path.join(curr_dir, "EARU_data.dat")
+    target_file = os.path.join(ram_path, "EARU_data.dat")
+    
+    # If it exists and is a real file, move it to RAM first to preserve state
+    if os.path.exists(dat_link) and not os.path.islink(dat_link):
+        try:
+            shutil.move(dat_link, target_file)
+        except Exception: pass
+    
+    # Ensure symlink exists
+    if not os.path.islink(dat_link):
+        if os.path.exists(dat_link): os.remove(dat_link)
+        try:
+            os.symlink(target_file, dat_link)
+            print(f"{CYN}[*] EARU_data.dat symlinked to RAM disk.{RST}")
+        except Exception as e:
+            print(f"{BRED}[!] Symlink failed: {e}{RST}")
+
+# 3rd party meteo requirements
+try:
+    import openmeteo_requests
+    import pandas as pd
+    import requests_cache
+    from retry_requests import retry
+    HAS_OPENMETEO = True
+except ImportError:
+    HAS_OPENMETEO = False
+
 
 @njit(cache=True)
 def njit_haversine(lat1, lon1, lat2, lon2):
@@ -1968,6 +2049,23 @@ class LocationTracker:
         self.weather_category = "Stable / Dry"
         self._last_weather_update = 0.0
 
+        # 3rd Party Meteo Cache
+        self.external_meteo = {}
+        self.last_external_meteo_fetch = 0.0
+        self.meteo_cache_path = "/usr/local/EnvironmentalAwareReferentialUnit/3rdparty_meteo_data.json"
+        self._meteo_running = False
+        self._load_meteo_cache()
+
+    def _load_meteo_cache(self):
+        if os.path.exists(self.meteo_cache_path):
+            try:
+                with open(self.meteo_cache_path, "r") as f:
+                    data = json.load(f)
+                    self.external_meteo = data.get("meteo", {})
+                    self.last_external_meteo_fetch = data.get("timestamp", 0.0)
+            except Exception:
+                pass
+
     def update_weather_thermodynamics(self):
         """
         Option B: The Thermodynamic Model
@@ -2020,6 +2118,131 @@ class LocationTracker:
             self.weather_category = "Moist / Fog Risk"
         else:
             self.weather_category = "Stable / Dry"
+
+    def fetch_external_meteo_async(self):
+        """Triggers an async fetch of 3rd party weather data if more than 1 hour has passed."""
+        if not HAS_OPENMETEO:
+            return
+        
+        now = time.time()
+        if self._meteo_running or (now - self.last_external_meteo_fetch < 3600.0):
+            return
+
+        self._meteo_running = True
+        threading.Thread(target=self._fetch_external_meteo_bg, daemon=True).start()
+
+    def _fetch_external_meteo_bg(self):
+        try:
+            # Setup the Open-Meteo API client with cache and retry on error
+            cache_path = os.path.join(os.path.dirname(self.meteo_cache_path), ".meteo_cache")
+            cache_session = requests_cache.CachedSession(cache_path, expire_after = 3600)
+            retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
+            openmeteo = openmeteo_requests.Client(session = retry_session)
+
+            url = "https://api.open-meteo.com/v1/forecast"
+            params = {
+                "latitude": self.lat,
+                "longitude": self.lon,
+                "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "apparent_temperature_max", "apparent_temperature_min", "sunset", "daylight_duration", "sunrise", "sunshine_duration", "uv_index_max", "uv_index_clear_sky_max", "rain_sum", "showers_sum", "snowfall_sum", "precipitation_sum", "precipitation_hours", "precipitation_probability_max", "wind_speed_10m_max", "wind_direction_10m_dominant", "wind_gusts_10m_max", "shortwave_radiation_sum", "et0_fao_evapotranspiration"],
+                "hourly": ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "dew_point_2m", "precipitation_probability", "precipitation", "rain", "showers", "snow_depth", "snowfall", "weather_code", "pressure_msl", "surface_pressure", "cloud_cover", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high", "visibility", "evapotranspiration", "et0_fao_evapotranspiration", "vapour_pressure_deficit", "soil_temperature_0cm", "soil_temperature_6cm", "soil_temperature_54cm", "soil_temperature_18cm", "soil_moisture_0_to_1cm", "soil_moisture_1_to_3cm", "soil_moisture_3_to_9cm", "soil_moisture_9_to_27cm", "soil_moisture_27_to_81cm", "temperature_80m", "temperature_120m", "temperature_180m", "wind_gusts_10m", "wind_direction_180m", "wind_direction_120m", "lifted_index", "cape", "convective_inhibition", "freezing_level_height", "boundary_layer_height", "uv_index", "uv_index_clear_sky", "is_day", "sunshine_duration", "wet_bulb_temperature_2m", "total_column_integrated_water_vapour", "shortwave_radiation", "direct_radiation", "diffuse_radiation", "direct_normal_irradiance", "global_tilted_irradiance", "terrestrial_radiation", "shortwave_radiation_instant", "direct_radiation_instant", "diffuse_radiation_instant", "direct_normal_irradiance_instant", "terrestrial_radiation_instant", "global_tilted_irradiance_instant", "wind_direction_80m", "wind_direction_10m", "wind_speed_180m", "wind_speed_120m", "wind_speed_80m", "wind_speed_10m"],
+                "models": "best_match",
+                "current": ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "is_day", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m", "precipitation", "rain", "showers", "snowfall", "weather_code", "pressure_msl", "cloud_cover", "surface_pressure"],
+                "past_days": 92,
+                "forecast_days": 16,
+            }
+            responses = openmeteo.weather_api(url, params = params)
+            response = responses[0]
+
+            def _clean(val):
+                """Recursively replace NaN/Inf with None for JSON compatibility."""
+                if isinstance(val, list): return [_clean(x) for x in val]
+                if isinstance(val, dict): return {k: _clean(v) for k, v in val.items()}
+                if isinstance(val, (float, np.float32, np.float64)):
+                    if math.isnan(val) or math.isinf(val): return None
+                return val
+
+            # Current data
+            curr_obj = response.Current()
+            meteo_current = {
+                "time": curr_obj.Time(),
+                "temperature_2m": curr_obj.Variables(0).Value(),
+                "relative_humidity_2m": curr_obj.Variables(1).Value(),
+                "apparent_temperature": curr_obj.Variables(2).Value(),
+                "is_day": curr_obj.Variables(3).Value(),
+                "wind_speed_10m": curr_obj.Variables(4).Value(),
+                "wind_direction_10m": curr_obj.Variables(5).Value(),
+                "wind_gusts_10m": curr_obj.Variables(6).Value(),
+                "precipitation": curr_obj.Variables(7).Value(),
+                "rain": curr_obj.Variables(8).Value(),
+                "showers": curr_obj.Variables(9).Value(),
+                "snowfall": curr_obj.Variables(10).Value(),
+                "weather_code": curr_obj.Variables(11).Value(),
+                "pressure_msl": curr_obj.Variables(12).Value(),
+                "cloud_cover": curr_obj.Variables(13).Value(),
+                "surface_pressure": curr_obj.Variables(14).Value(),
+            }
+
+            # Hourly data
+            hourly = response.Hourly()
+            hourly_data = {"time": [t.timestamp() for t in pd.date_range(
+                start = pd.to_datetime(hourly.Time(), unit = "s", utc = True),
+                end =  pd.to_datetime(hourly.TimeEnd(), unit = "s", utc = True),
+                freq = pd.Timedelta(seconds = hourly.Interval()),
+                inclusive = "left"
+            )]}
+            
+            # Map hourly variables (must match order in params)
+            hourly_vars = ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "dew_point_2m", "precipitation_probability", "precipitation", "rain", "showers", "snow_depth", "snowfall", "weather_code", "pressure_msl", "surface_pressure", "cloud_cover", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high", "visibility", "evapotranspiration", "et0_fao_evapotranspiration", "vapour_pressure_deficit", "soil_temperature_0cm", "soil_temperature_6cm", "soil_temperature_54cm", "soil_temperature_18cm", "soil_moisture_0_to_1cm", "soil_moisture_1_to_3cm", "soil_moisture_3_to_9cm", "soil_moisture_9_to_27cm", "soil_moisture_27_to_81cm", "temperature_80m", "temperature_120m", "temperature_180m", "wind_gusts_10m", "wind_direction_180m", "wind_direction_120m", "lifted_index", "cape", "convective_inhibition", "freezing_level_height", "boundary_layer_height", "uv_index", "uv_index_clear_sky", "is_day", "sunshine_duration", "wet_bulb_temperature_2m", "total_column_integrated_water_vapour", "shortwave_radiation", "direct_radiation", "diffuse_radiation", "direct_normal_irradiance", "global_tilted_irradiance", "terrestrial_radiation", "shortwave_radiation_instant", "direct_radiation_instant", "diffuse_radiation_instant", "direct_normal_irradiance_instant", "terrestrial_radiation_instant", "global_tilted_irradiance_instant", "wind_direction_80m", "wind_direction_10m", "wind_speed_180m", "wind_speed_120m", "wind_speed_80m", "wind_speed_10m"]
+            for i, var_name in enumerate(hourly_vars):
+                hourly_data[var_name] = hourly.Variables(i).ValuesAsNumpy().tolist()
+
+            # Daily data
+            daily = response.Daily()
+            daily_data = {"time": [t.timestamp() for t in pd.date_range(
+                start = pd.to_datetime(daily.Time(), unit = "s", utc = True),
+                end =  pd.to_datetime(daily.TimeEnd(), unit = "s", utc = True),
+                freq = pd.Timedelta(seconds = daily.Interval()),
+                inclusive = "left"
+            )]}
+            
+            # Map daily variables
+            daily_vars = ["weather_code", "temperature_2m_max", "temperature_2m_min", "apparent_temperature_max", "apparent_temperature_min", "sunset", "daylight_duration", "sunrise", "sunshine_duration", "uv_index_max", "uv_index_clear_sky_max", "rain_sum", "showers_sum", "snowfall_sum", "precipitation_sum", "precipitation_hours", "precipitation_probability_max", "wind_speed_10m_max", "wind_direction_10m_dominant", "wind_gusts_10m_max", "shortwave_radiation_sum", "et0_fao_evapotranspiration"]
+            for i, var_name in enumerate(daily_vars):
+                val = daily.Variables(i).ValuesAsNumpy() if i != 5 and i != 7 else daily.Variables(i).ValuesInt64AsNumpy()
+                daily_data[var_name] = val.tolist()
+
+            # Summary for easy consumption
+            with self.lock:
+                self.external_meteo = _clean({
+                    "current": meteo_current,
+                    "hourly": hourly_data,
+                    "daily": daily_data,
+                    "location": {"lat": response.Latitude(), "lon": response.Longitude(), "elevation": response.Elevation()},
+                    "fetch_time": time.time()
+                })
+                self.last_external_meteo_fetch = time.time()
+                
+                # Save to persistent cache
+                try:
+                    cache_data = {
+                        "timestamp": self.last_external_meteo_fetch,
+                        "meteo": self.external_meteo
+                    }
+                    with open(self.meteo_cache_path, "w") as f:
+                        json.dump(cache_data, f)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            # Silently fail or log if needed
+            pass
+        finally:
+            self._meteo_running = False
+
+    def get_external_meteo(self):
+        """Returns the latest cached 3rd party meteo data."""
+        with self.lock:
+            return self.external_meteo
 
     def check_smc_sensors_async(self):
         if self._smc_running:
@@ -4094,6 +4317,7 @@ def main(stdscr=None):
                     location.fetch_api_pressure()
                     location.update_weather_thermodynamics()
                     location.check_drift_async(det)
+                    location.fetch_external_meteo_async()
                     location.last_weather_update = now
 
                 # 3. Wind Map Estimation and Grid Generation (Every 60.0s)
@@ -4358,6 +4582,7 @@ def main(stdscr=None):
                             "grid_7x7_10m": location.cached_wind_grid if location.cached_wind_grid is not None else [],
                             "stats": wind_stats
                         },
+                        "3rdparty_meteo": location.external_meteo,
                     },
                     "seismic_activity": {
                         "motion_type": det.motion_type,
