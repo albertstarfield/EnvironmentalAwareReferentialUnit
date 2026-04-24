@@ -158,6 +158,15 @@ try:
 except ImportError:
     HAS_OPENMETEO = False
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer): return int(obj)
+        if isinstance(obj, np.floating): return float(obj)
+        if isinstance(obj, np.ndarray): return obj.tolist()
+        if isinstance(obj, deque): return list(obj)
+        if isinstance(obj, bytes): return obj.hex()
+        return super(NpEncoder, self).default(obj)
+
 
 @njit(cache=True)
 def njit_haversine(lat1, lon1, lat2, lon2):
@@ -1713,6 +1722,7 @@ def _downsample(data, width):
 class ProfilerDebug:
     """
     Tracks memory usage, CPU usage, and object sizes with hierarchical block timing.
+    Thread-safe to allow background execution tracking.
     """
 
     def __init__(self, enabled=False):
@@ -1724,66 +1734,74 @@ class ProfilerDebug:
         self.start_time = time.time()
         self.last_report = time.time()
         self.block_times = {}
-        self.block_max_deltas = {}  # Path -> max observed abs(delta)
+        self.block_max_deltas = {}
         self.hz_history = deque(maxlen=10)
         self.hz_max_delta = 0.0
-        self.stack = []
+        # Use thread-local storage for stacks to prevent cross-thread interference
+        self._local = threading.local()
+        self.lock = threading.Lock()
+
+    def _get_stack(self):
+        if not hasattr(self._local, 'stack'):
+            self._local.stack = []
+        return self._local.stack
 
     def record_hz(self, hz):
         if self.enabled:
-            if len(self.hz_history) > 0:
-                delta = abs(hz - self.hz_history[-1])
-                if delta > self.hz_max_delta:
-                    self.hz_max_delta = delta
-            self.hz_history.append(hz)
+            with self.lock:
+                if len(self.hz_history) > 0:
+                    delta = abs(hz - self.hz_history[-1])
+                    if delta > self.hz_max_delta:
+                        self.hz_max_delta = delta
+                self.hz_history.append(hz)
 
     def start_block(self, name):
         if not self.enabled:
             return
-        self.stack.append((name, time.perf_counter()))
+        self._get_stack().append((name, time.perf_counter()))
 
     def end_block(self):
-        if not self.enabled or not self.stack:
+        stack = self._get_stack()
+        if not self.enabled or not stack:
             return
-        name, start = self.stack.pop()
-        dt = (time.perf_counter() - start) * 1_000_000.0  # microseconds (us)
-        
-        # Build hierarchical path
-        path = " > ".join([s[0] for s in self.stack] + [name])
-        if path not in self.block_times:
-            self.block_times[path] = deque(maxlen=100)
-            self.block_max_deltas[path] = 0.0
-        
-        if len(self.block_times[path]) > 0:
-            prev = self.block_times[path][-1]
-            delta = abs(dt - prev)
-            if delta > self.block_max_deltas[path]:
-                self.block_max_deltas[path] = delta
-        
-        self.block_times[path].append(dt)
+        name, start = stack.pop()
+        dt = (time.perf_counter() - start) * 1_000_000.0
+
+        path = " > ".join([s[0] for s in stack] + [name])
+        # Background thread indicator
+        if threading.current_thread() != threading.main_thread():
+            path = "[BG] " + path
+
+        with self.lock:
+            if path not in self.block_times:
+                self.block_times[path] = deque(maxlen=100)
+                self.block_max_deltas[path] = 0.0
+
+            if len(self.block_times[path]) > 0:
+                prev = self.block_times[path][-1]
+                delta = abs(dt - prev)
+                if delta > self.block_max_deltas[path]:
+                    self.block_max_deltas[path] = delta
+
+            self.block_times[path].append(dt)
 
     def clear_stack(self):
-        """Emergency cleanup to prevent nesting leaks across loop boundaries."""
         if not self.enabled:
             return
-        self.stack.clear()
+        self._get_stack().clear()
 
     def track_size(self, name, obj):
         if not self.enabled:
             return
         size = 0
         try:
-            if hasattr(obj, "__len__"):
-                size = len(obj)
-            else:
-                size = sys.getsizeof(obj)
-        except Exception:
-            pass
+            size = len(obj) if hasattr(obj, "__len__") else sys.getsizeof(obj)
+        except Exception: pass
 
-        if name not in self.monitored_vars:
-            self.monitored_vars[name] = deque(maxlen=100)
-        self.monitored_vars[name].append(size)
-
+        with self.lock:
+            if name not in self.monitored_vars:
+                self.monitored_vars[name] = deque(maxlen=100)
+            self.monitored_vars[name].append(size)
     def report(self, interval=5.0):
         if not self.enabled:
             return
@@ -1822,9 +1840,13 @@ class ProfilerDebug:
 
         lines.append(f"Block Timings (Total active loop: {total_active_us:.2f}us):")
         
-        # Build tree structure
+        # Build tree structure - thread-safe copy
+        with self.lock:
+            bt_copy = {k: list(v) for k, v in self.block_times.items()}
+            md_copy = dict(self.block_max_deltas)
+
         tree = {}
-        for path, history in self.block_times.items():
+        for path, history in bt_copy.items():
             parts = path.split(" > ")
             curr = tree
             for i, p in enumerate(parts):
@@ -1835,7 +1857,7 @@ class ProfilerDebug:
                     max_t = max(history)
                     latest_t = history[-1]
                     delta = latest_t - history[-2] if len(history) > 1 else 0.0
-                    max_delta = self.block_max_deltas[path]
+                    max_delta = md_copy[path]
                     curr[p]["stats"] = (avg_t, max_t, delta, max_delta)
                 curr = curr[p]["children"]
 
@@ -4246,6 +4268,12 @@ def main(stdscr=None):
     last_impact_save = 0.0
     last_dwt = 0.0
     last_period = 0.0
+    last_integrity_check = 0.0
+    last_write_t = 0.0
+    last_aug_parity_t = 0.0
+    last_ext_parity_t = 0.0
+    cached_aug_parity = ""
+    cached_ext_parity = ""
     worker = None
     MAX_BATCH = 4000 if not low_power_mode else 200
 
@@ -4653,83 +4681,112 @@ def main(stdscr=None):
                     "high_res_drift": location.last_drift_data if location.last_drift_data else "N/A",
                     "events": list(det.events)[-1:] if det.events else [],
                 }
+
+                data["p_augmented"] = cached_aug_parity
+                data["p_external"] = cached_ext_parity
                 profiler.end_block() # dp_dict_build
 
-                # Data Integrity / Anomaly Event Upset Detection
+                # Data Integrity / Anomaly Event Upset Detection (Lightweight part)
                 profiler.start_block("data_integrity_check")
-                try:
-                    class NpEncoder(json.JSONEncoder):
-                        def default(self, obj):
-                            if isinstance(obj, np.integer): return int(obj)
-                            if isinstance(obj, np.floating): return float(obj)
-                            if isinstance(obj, np.ndarray): return obj.tolist()
-                            if isinstance(obj, deque): return list(obj)
-                            if isinstance(obj, bytes): return obj.hex()
-                            return super(NpEncoder, self).default(obj)
-
-                    # 1. Time Monotonicity Check (Strictly backward check)
-                    if now < last_main_loop_time:
-                        det.anomaly_event_upsets += 1
-                    last_main_loop_time = now
-
-                    # 2. Hash / Parity consistency check
-                    # Serializing to verify data is not corrupted/contains NaNs
-                    _ = json.dumps(data, cls=NpEncoder)
-                except Exception:
+                # 1. Time Monotonicity Check (Strictly backward check - MUST BE REALTIME)
+                if now < last_main_loop_time:
                     det.anomaly_event_upsets += 1
+                last_main_loop_time = now
                 profiler.end_block() # data_integrity_check
 
                 # Write to EARU_data.dat asynchronously to avoid blocking
-                def _write_data_bg(json_data_copy):
+                def _write_data_bg(json_data_copy, now_val):
+                    nonlocal cached_aug_parity, cached_ext_parity, last_aug_parity_t, last_ext_parity_t, last_integrity_check
                     try:
-                        class NpEncoder(json.JSONEncoder):
-                            def default(self, obj):
-                                if isinstance(obj, np.integer):
-                                    return int(obj)
-                                if isinstance(obj, np.floating):
-                                    return float(obj)
-                                if isinstance(obj, np.ndarray):
-                                    return obj.tolist()
-                                if isinstance(obj, deque):
-                                    return list(obj)
-                                return super(NpEncoder, self).default(obj)
+                        profiler.start_block("bg_thread_exec")
+                        
+                        # 1. Augmented Parity (Every 4s)
+                        if now_val - last_aug_parity_t >= 4.0:
+                            profiler.start_block("parity_augmented")
+                            aug_subset = {
+                                "location": json_data_copy["location"],
+                                "seismic_activity": json_data_copy["seismic_activity"],
+                                "system": json_data_copy["system"],
+                                "loop_consistency": json_data_copy["loop_consistency"],
+                                "smc": json_data_copy["smc"],
+                                "user_entity_detection": json_data_copy["user_entity_detection"],
+                                "high_res_drift": json_data_copy["high_res_drift"],
+                                "events": json_data_copy["events"],
+                                "weather_local": {k:v for k,v in json_data_copy["ecosystem_weather"].items() if k != "3rdparty_meteo"}
+                            }
+                            p_aug_payload = json.dumps(aug_subset, default=str, sort_keys=True)
+                            cached_aug_parity = hashlib.sha256(p_aug_payload.encode()).hexdigest()
+                            last_aug_parity_t = now_val
+                            profiler.end_block() # parity_augmented
 
+                        # 2. External Weather Parity (Every 1800s)
+                        if now_val - last_ext_parity_t >= 1800.0 or not cached_ext_parity:
+                            profiler.start_block("parity_external")
+                            p_ext_payload = json.dumps(json_data_copy["ecosystem_weather"].get("3rdparty_meteo", {}), default=str, sort_keys=True)
+                            cached_ext_parity = hashlib.sha256(p_ext_payload.encode()).hexdigest()
+                            last_ext_parity_t = now_val
+                            profiler.end_block() # parity_external
+
+                        # Update parities in the copy before writing
+                        json_data_copy["p_augmented"] = cached_aug_parity
+                        json_data_copy["p_external"] = cached_ext_parity
+
+                        # 3. Internal Parity (Realtime for every write)
+                        profiler.start_block("parity_internal")
+                        int_subset = {
+                            "time": json_data_copy["time"],
+                            "accel": json_data_copy["accel"],
+                            "gyro": json_data_copy["gyro"],
+                            "orientation": json_data_copy["orientation"],
+                            "lid_angle": json_data_copy["lid_angle"],
+                            "lid_speed": json_data_copy["lid_speed"],
+                            "als": json_data_copy["als"].hex() if isinstance(json_data_copy["als"], bytes) else json_data_copy["als"]
+                        }
+                        p_int_payload = json.dumps(int_subset, default=str, sort_keys=True)
+                        json_data_copy["p_internal"] = hashlib.sha256(p_int_payload.encode()).hexdigest()
+                        profiler.end_block() # parity_internal
+
+                        # 4. Heavy Data Integrity Check (Variable frequency)
+                        i_interval = np.interp(location.v_mag, [0.0, 1.0, 7.0, 10.0], [60.0, 30.0, 2.0, 0.0])
+                        if now_val - last_integrity_check >= i_interval:
+                            profiler.start_block("slow_integrity_check")
+                            _ = json.dumps(json_data_copy, cls=NpEncoder)
+                            last_integrity_check = now_val
+                            profiler.end_block() # slow_integrity_check
+
+                        profiler.start_block("disk_io")
                         with open("EARU_data.dat", "w") as f:
-                            if json_data_copy["als"]:
+                            if json_data_copy["als"] and isinstance(json_data_copy["als"], bytes):
                                 json_data_copy["als"] = json_data_copy["als"].hex()
 
-                            # Calculate primary parity for data integrity
-                            payload = json.dumps(json_data_copy, cls=NpEncoder, sort_keys=True)
-                            json_data_copy["parity"] = hashlib.sha256(
-                                payload.encode()
-                            ).hexdigest()
-
-                            # Write main JSON block
-                            full_json_str = json.dumps(
-                                json_data_copy, cls=NpEncoder, sort_keys=True
-                            )
+                            full_json_str = json.dumps(json_data_copy, cls=NpEncoder, sort_keys=True)
                             f.write(full_json_str)
 
-                            # Append redundant recovery footer
-                            recovery_b64 = base64.b64encode(payload.encode()).decode()
-                            recovery_hash = hashlib.sha256(payload.encode()).hexdigest()
+                            recovery_hash = hashlib.sha256(full_json_str.encode()).hexdigest()
+                            recovery_b64 = base64.b64encode(full_json_str.encode()).decode()
                             f.write(f"\n[RECOVERY_V1:{recovery_b64}:{recovery_hash}]")
+                        profiler.end_block() # disk_io
+                        
+                        profiler.end_block() # bg_thread_exec
                     except Exception:
-                        pass
+                        det.anomaly_event_upsets += 1
 
                 if not no_writing_dat:
-                    profiler.start_block("bg_write_spawn")
-                    threading.Thread(target=_write_data_bg, args=(data.copy(),), daemon=True).start()
-                    profiler.end_block() # bg_write_spawn
+                    # Variable write interval: v=0: 1s (1Hz), v=0.5: 0.33s (3Hz), v=1: 0.16s (6Hz), v>1: 0.1s (10Hz)
+                    w_interval = np.interp(location.v_mag, [0.0, 0.5, 1.0], [1.0, 0.333, 0.1])
+                    if now - last_write_t >= w_interval:
+                        profiler.start_block("bg_write_spawn")
+                        threading.Thread(target=_write_data_bg, args=(data.copy(), now), daemon=True).start()
+                        last_write_t = now
+                        profiler.end_block() # bg_write_spawn
 
-                    if run_task_fn:
-                        profiler.start_block("task_exec")
-                        try:
-                            run_task_fn(data)
-                        except Exception as e:
-                            # Don't crash if task fails once
-                            pass
-                        profiler.end_block() # task_exec
+                        if run_task_fn:
+                            profiler.start_block("task_exec")
+                            try:
+                                run_task_fn(data)
+                            except Exception:
+                                pass
+                            profiler.end_block() # task_exec
 
                 if use_tui:
                     profiler.start_block("tui_render")
