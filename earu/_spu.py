@@ -385,7 +385,8 @@ def _sensor_worker_impl(shm_name, restart_count, gyro_shm_name=None,
                 x = struct.unpack('<i', data[o:o + 4])[0]
                 y = struct.unpack('<i', data[o + 4:o + 8])[0]
                 z = struct.unpack('<i', data[o + 8:o + 12])[0]
-                shm_write_sample(accel_buf, x, y, z, ts * mach_to_sec)
+                # Swap X and Y to match laptop frame, and flip Z to match AHRS expectations
+                shm_write_sample(accel_buf, y, x, -z, ts * mach_to_sec)
         except Exception:
             pass
 
@@ -409,7 +410,8 @@ def _sensor_worker_impl(shm_name, restart_count, gyro_shm_name=None,
                     x = struct.unpack('<i', data[o:o + 4])[0]
                     y = struct.unpack('<i', data[o + 4:o + 8])[0]
                     z = struct.unpack('<i', data[o + 8:o + 12])[0]
-                    shm_write_sample(gyro_buf, x, y, z, ts * mach_to_sec)
+                    # Swap X and Y to match laptop frame, and flip Z
+                    shm_write_sample(gyro_buf, y, x, -z, ts * mach_to_sec)
             except Exception:
                 pass
 

@@ -32,6 +32,7 @@ from ._spu import (
     IMU_DECIMATION,
 )
 from .orientation import MahonyAHRS
+from .pedometer import Pedometer
 
 _ALS_LUX_OFF = 40
 _ALS_CH_OFFSETS = [20, 24, 28, 32]
@@ -62,6 +63,8 @@ class IMU:
     orientation : bool
         Enable real-time orientation fusion via Mahony AHRS (default False).
         Requires both accel and gyro to be enabled.
+    pedometer : bool
+        Enable real-time step counting (default False).
     decimation : int or None
         Keep 1 in N raw HID reports. Lower = higher sample rate.
         Default 8 gives ~100 Hz from ~800 Hz native. Mutually exclusive
@@ -73,7 +76,8 @@ class IMU:
 
     def __init__(self, accel: bool = True, gyro: bool = True,
                  als: bool = False, lid: bool = False,
-                 orientation: bool = False, decimation: Optional[int] = None,
+                 orientation: bool = False, pedometer: bool = False,
+                 decimation: Optional[int] = None,
                  sample_rate: Optional[int] = None) -> None:
         if decimation is not None and sample_rate is not None:
             raise ValueError("specify decimation or sample_rate, not both")
@@ -87,6 +91,7 @@ class IMU:
         self._want_als = als
         self._want_lid = lid
         self._want_orient = orientation
+        self._want_pedometer = pedometer
         self._decimation = decimation
         self._started = False
         self._worker: Optional[threading.Thread] = None
@@ -109,6 +114,10 @@ class IMU:
         self._orient_lock = threading.Lock()
         self._last_orient: Optional[Orientation] = None
 
+        self._ped: Optional[Pedometer] = None
+        self._ped_thread: Optional[threading.Thread] = None
+        self._ped_stop = threading.Event()
+
         self._recording_file = None
         self._recording_writer = None
         self._mock = False
@@ -117,6 +126,8 @@ class IMU:
 
         if orientation and not (accel and gyro):
             raise ValueError("orientation=True requires both accel=True and gyro=True")
+        if pedometer and not accel:
+            raise ValueError("pedometer=True requires accel=True")
 
     @classmethod
     def available(cls) -> bool:
@@ -241,6 +252,14 @@ class IMU:
                 target=self._orientation_loop, daemon=True)
             self._orient_thread.start()
 
+        if self._want_pedometer:
+            effective_fs = _NATIVE_RATE_HZ / self._decimation
+            self._ped = Pedometer(sample_rate=effective_fs)
+            self._ped_stop.clear()
+            self._ped_thread = threading.Thread(
+                target=self._pedometer_loop, daemon=True)
+            self._ped_thread.start()
+
         atexit.register(self.stop)
 
     def stop(self) -> None:
@@ -251,6 +270,11 @@ class IMU:
         if self._orient_thread:
             self._orient_thread.join(timeout=2)
             self._orient_thread = None
+        
+        self._ped_stop.set()
+        if self._ped_thread:
+            self._ped_thread.join(timeout=2)
+            self._ped_thread = None
         self._shutdown.set()
         if self._worker:
             self._worker.join(timeout=3)
@@ -366,6 +390,15 @@ class IMU:
             raise RuntimeError("orientation not enabled -- use IMU(orientation=True)")
         with self._orient_lock:
             return self._last_orient
+
+    def steps(self) -> int:
+        """Return cumulative step count since start.
+
+        Requires pedometer=True in constructor.
+        """
+        if not self._want_pedometer:
+            raise RuntimeError("pedometer not enabled -- use IMU(pedometer=True)")
+        return self._ped.steps if self._ped else 0
 
     def read_lid(self) -> Optional[float]:
         """Return lid angle in degrees, or None if unavailable."""
@@ -540,6 +573,19 @@ class IMU:
                         self._last_orient = Orientation(r, p, y, qw, qx, qy, qz)
 
             self._orient_stop.wait(0.01)
+
+    def _pedometer_loop(self) -> None:
+        """Background thread: processes accelerometer for step counting."""
+        ped = self._ped
+        accel_total = 0
+        while not self._ped_stop.is_set():
+            if self._shm_accel:
+                accel_timed, accel_total = shm_read_new_accel_timed(
+                    self._shm_accel.buf, accel_total)
+                for t, ax, ay, az in accel_timed:
+                    ped.add_sample(ax, ay, az, t)
+
+            self._ped_stop.wait(0.01)
 
     def _start_callback_thread(self, read_fn, callback, interval):
         stop = threading.Event()

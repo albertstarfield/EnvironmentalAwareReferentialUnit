@@ -76,8 +76,9 @@ def main():
             raw_z = struct.unpack("<i", bytes(data[14:18]))[0]
 
             # Convert to Gs (scale factor 65536)
-            x = raw_x / 65536.0
-            y = raw_y / 65536.0
+            # Swap X and Y to match laptop frame (Roll <-> Pitch)
+            x = raw_y / 65536.0
+            y = raw_x / 65536.0
             z = raw_z / 65536.0
             mag = math.sqrt(x**2 + y**2 + z**2)
             # Optional: uncomment to see raw stream

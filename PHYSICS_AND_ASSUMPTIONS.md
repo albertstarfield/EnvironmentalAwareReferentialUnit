@@ -1,5 +1,8 @@
 # EARU & SMC: Physics, Constants, and System Assumptions
 
+> [!WARNING]
+> **THIS is NOT an Accurate, it will drift eventually!. If you want an exact measurement purchase/use the actual sensors!**
+
 This document outlines the mathematical models and physical constants assumed within the EnvironmentalAwareReferentialUnit (EARU) and the SMC Demand Catcher Engine.
 
 ## 1. Atmospheric Physics (EcosystemEnvironmentReading)
@@ -13,7 +16,7 @@ This document outlines the mathematical models and physical constants assumed wi
 *   **Standard Sea Level Pressure:** $1013.25 \text{ hPa}$.
 *   **Lapse Rate (ISA):** $0.0065 \text{ K/m}$ (used for pressure-altitude conversions up to 11km).
 
-## 2. Hardware Proxies (MacBook Pro 14" M2 Pro - Amaryllis)
+## 2. Hardware Proxies (A2779 - MacBook Pro 14" M2 Pro)
 *   **Fan Volumetric Flow:** Assumed linear. $\dot{V} \approx (\text{RPM} / 6000) \cdot 0.007 \text{ m}^3/\text{s}$ per fan.
 *   **Ambient Temperature Proxy:** Derived as $\min(TS0P, TS1P)$ (Palm Rest sensors).
 *   **Inlet Temperature Proxy:** Derived as $\min(TaLW, TaRW)$ (Wrist Airflow sensors).

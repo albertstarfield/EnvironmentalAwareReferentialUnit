@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """
+A2779 Sensors and Augmented Sensors (EARU)
+Original Program by Olivier Bourbonnais.
+Modified and Forked by Albert Starfield Wahyu Suryo Samudro <albertstarfield2001@gmail.com>
+
+THIS is NOT an Accurate, it will drift eventually!. If you want an exact measurement purchase/use the actual sensors!
+
 demo app for spu_sensor.py - vibration detection, orientation gauges,
 experimental heartbeat (bcg), lid angle & ambient light in a terminal dashboard
 requires: sudo python3 motion_live.py
@@ -35,6 +41,7 @@ import psutil
 import requests
 from numba import njit
 
+from earu.pedometer import Pedometer
 from earu._spu import (
     ALS_REPORT_LEN,
     SHM_ALS_SIZE,
@@ -701,6 +708,7 @@ class VibrationDetector:
         self._mahony_ki = 0.05
         self._mahony_err_int = [0.0, 0.0, 0.0]
         self._orient_init = False
+        self.pedometer = Pedometer(fs)
         self.last_entity_update = 0.0
         self.last_seismic_update = 0.0
 
@@ -961,9 +969,9 @@ class VibrationDetector:
         if not self._orient_init:
             # bootstrap: align quaternion so that World-Z (UP) matches measured accel
             ax_n, ay_n, az_n = ax / a_norm, ay / a_norm, az / a_norm
-            # Pitch: angle around Y to align Z with accel
+            # Pitch: angle around Y
             pitch0 = math.atan2(ax_n, az_n)
-            # Roll: angle around X to align Z with accel
+            # Roll: angle around X
             roll0 = math.atan2(-ay_n, az_n)
             cp = math.cos(pitch0 * 0.5)
             sp = math.sin(pitch0 * 0.5)
@@ -1005,6 +1013,7 @@ class VibrationDetector:
         self.latest_raw = (ax, ay, az)
         self.latest_mag = math.sqrt(ax * ax + ay * ay + az * az)
         self._update_orientation(ax, ay, az)
+        self.pedometer.add_sample(ax, ay, az, t_now)
 
         if not self.hp_ready:
             self.hp_prev_raw = [ax, ay, az]
@@ -1831,6 +1840,8 @@ class LocationTracker:
     """
     Handles Dead Reckoning, CoreLocation integration, and Ecosystem Environment physics.
 
+    THIS is NOT an Accurate, it will drift eventually!. If you want an exact measurement purchase/use the actual sensors!
+
     CORE ASSUMPTIONS & CONSTANTS:
     - Inertial: Standard Gravity G=9.80665 m/s^2; 100Hz sampling.
     - Geography: Spherical Earth; M_PER_DEG_LAT = 111111.0.
@@ -1865,6 +1876,14 @@ class LocationTracker:
         self.load_avg = [0.0, 0.0, 0.0]
         self.uptime_system = 0.0
         self.uptime_earu = 0.0
+        self.battery_percent = 0.0
+        self.battery_charging = False
+        self.nonHumanInputHIDIdle = 0.0
+        self.last_hid_idle_update = 0.0
+        self.pmset_info = ""
+        self.last_battery_level_update = 0.0
+        self.last_charging_update = 0.0
+        self.last_pmset_update = 0.0
 
         # SMC data from .dat files
         self.smc_temps = {}
@@ -1927,6 +1946,7 @@ class LocationTracker:
         self._sys_running = False
         self._smc_p_running = False
         self._drift_running = False
+        self._hid_running = False
 
         self.drift_monitoring_path = "/usr/local/EnvironmentalAwareReferentialUnit/drift_monitoring.dat"
         self.last_drift_monitor = 0.0
@@ -2139,12 +2159,50 @@ class LocationTracker:
             now = time.time()
             uptime_s = now - self.boot_time
             uptime_e = now - self.earu_start_time
+
+            # Battery level and pmset - Every 60s
+            b_pct = self.battery_percent
+            pm_out = self.pmset_info
+            
+            do_battery_level = (now - self.last_battery_level_update >= 60.0)
+            do_pmset = (now - self.last_pmset_update >= 60.0)
+            
+            if do_battery_level or do_pmset:
+                batt = psutil.sensors_battery()
+                if batt and do_battery_level:
+                    b_pct = batt.percent
+                    self.last_battery_level_update = now
+                
+                if do_pmset:
+                    try:
+                        res_batt = subprocess.run(
+                            ["pmset", "-g", "batt"], capture_output=True, text=True, timeout=2
+                        )
+                        res_all = subprocess.run(
+                            ["pmset", "-g"], capture_output=True, text=True, timeout=2
+                        )
+                        pm_out = res_batt.stdout.strip() + "\n" + res_all.stdout.strip()
+                        self.last_pmset_update = now
+                    except Exception:
+                        pass
+
+            # Charging status - Every 5s
+            b_charging = self.battery_charging
+            if now - self.last_charging_update >= 5.0:
+                batt = psutil.sensors_battery()
+                b_charging = batt.power_plugged if batt else False
+                self.last_charging_update = now
+
             with self.lock:
                 self.cpu_usage = cpu
                 self.mem_usage = mem
                 self.load_avg = load
                 self.uptime_system = uptime_s
                 self.uptime_earu = uptime_e
+                self.battery_percent = b_pct
+                self.battery_charging = b_charging
+                self.nonHumanInputHIDIdle = hid_idle
+                self.pmset_info = pm_out
         except Exception:
             pass
         finally:
@@ -2152,6 +2210,32 @@ class LocationTracker:
 
     def check_system_metrics(self):
         self.check_system_metrics_async()
+
+    def check_hid_idle_async(self):
+        if self._hid_running:
+            return
+        now = time.time()
+        if now - self.last_hid_idle_update < 5.0:
+            return
+        self._hid_running = True
+        threading.Thread(target=self._check_hid_idle_bg, daemon=True).start()
+
+    def _check_hid_idle_bg(self):
+        try:
+            res = subprocess.run(
+                ["ioreg", "-c", "IOHIDSystem"], capture_output=True, text=True, timeout=2
+            )
+            for line in res.stdout.splitlines():
+                if "HIDIdleTime" in line:
+                    idle_ns = int(line.split("=")[-1].strip())
+                    with self.lock:
+                        self.nonHumanInputHIDIdle = idle_ns / 1_000_000_000.0
+                        self.last_hid_idle_update = time.time()
+                    break
+        except Exception:
+            pass
+        finally:
+            self._hid_running = False
 
     def check_smc_pressure_async(self):
         if self._smc_p_running:
@@ -2237,12 +2321,12 @@ class LocationTracker:
                         pass
                 
                 # ANE Point
-                ane_ms = 0.0
-                t_ane_ns = 0
+                inference_fabric_ms = 0.0
+                t_inference_fabric_ns = 0
                 if coreml_available:
                     t_ane_start = time.perf_counter_ns()
-                    ane_ms = 0.05 
-                    t_ane_ns = t_ane_start + int(ane_ms * 1e6)
+                    inference_fabric_ms = 0.05 
+                    t_inference_fabric_ns = t_ane_start + int(inference_fabric_ms * 1e6)
 
                 samples.append({
                     "cpu": t_cpu,
@@ -2250,10 +2334,10 @@ class LocationTracker:
                     "rtc_off": rtc_offset,
                     "spu": t_spu_ns,
                     "gpu": t_gpu_ns,
-                    "ane": t_ane_ns,
+                    "inference_fabric": t_inference_fabric_ns,
                     "spu_lat": spu_latency,
                     "gpu_lat": gpu_ms,
-                    "ane_lat": ane_ms
+                    "inference_fabric_lat": inference_fabric_ms
                 })
                 time.sleep(0.1)
 
@@ -2261,17 +2345,17 @@ class LocationTracker:
             avg_rtc = sum(s["rtc"] for s in samples) // 3
             avg_spu = sum(s["spu"] for s in samples) // 3
             avg_gpu = sum(s["gpu"] for s in samples) // 3
-            avg_ane = sum(s["ane"] for s in samples) // 3
+            avg_inference_fabric = sum(s["inference_fabric"] for s in samples) // 3
             avg_spu_lat = sum(s["spu_lat"] for s in samples) / 3.0
             avg_gpu_lat = sum(s["gpu_lat"] for s in samples) / 3.0
-            avg_ane_lat = sum(s["ane_lat"] for s in samples) / 3.0
+            avg_inference_fabric_lat = sum(s["inference_fabric_lat"] for s in samples) / 3.0
             
             offsets = [s["rtc_off"] for s in samples]
             mean_off = sum(offsets) / 3.0
             rtc_jitter_ms = (sum((o - mean_off)**2 for o in offsets) / 3.0)**0.5 / 1e6
 
             interference = False
-            if avg_spu_lat > 100.0 or avg_gpu_lat > 50.0 or avg_ane_lat > 10.0 or rtc_jitter_ms > 0.1:
+            if avg_spu_lat > 100.0 or avg_gpu_lat > 50.0 or avg_inference_fabric_lat > 10.0 or rtc_jitter_ms > 0.1:
                 interference = True
             if imu_ref and hasattr(imu_ref, 'ent_count') and imu_ref.ent_count > 0:
                 interference = True
@@ -2281,11 +2365,12 @@ class LocationTracker:
                 "t_rtc_ns": avg_rtc,
                 "t_spu_ns": avg_spu,
                 "t_gpu_ns": avg_gpu,
-                "t_ane_ns": avg_ane,
+                "t_inference_fabric_ns": avg_inference_fabric,
                 "rtc_jitter_ms": rtc_jitter_ms,
                 "spu_lat_ms": avg_spu_lat,
                 "gpu_lat_ms": avg_gpu_lat,
-                "ane_lat_ms": avg_ane_lat,
+                "inference_fabric_lat_ms": avg_inference_fabric_lat,
+                "t_dat_ns": avg_cpu,
                 "interference": "Yes" if interference else "No",
                 "ts": datetime.datetime.now().isoformat()
             }
@@ -2295,7 +2380,7 @@ class LocationTracker:
                 self.interference_detected = interference
             
             with open(self.drift_monitoring_path, "a") as f:
-                f.write(f"{data['ts']} | RTC:{data['t_rtc_ns']} | CPU:{data['t_cpu_ns']} | SPU:{data['t_spu_ns']} | GPU:{data['t_gpu_ns']} | ANE:{data['t_ane_ns']} | RTC_Jit:{data['rtc_jitter_ms']:.6f}ms | SPU_Δ:{data['spu_lat_ms']:.4f}ms | GPU_Δ:{data['gpu_lat_ms']:.4f}ms | ANE_Δ:{data['ane_lat_ms']:.4f}ms | Interference:{data['interference']}\n")
+                f.write(f"{data['ts']} | RTC:{data['t_rtc_ns']} | CPU:{data['t_cpu_ns']} | SPU:{data['t_spu_ns']} | GPU:{data['t_gpu_ns']} | inference_fabric:{data['t_inference_fabric_ns']} | dat:{data.get('t_dat_ns', 0)} | RTC_Jit:{data['rtc_jitter_ms']:.6f}ms | SPU_Δ:{data['spu_lat_ms']:.4f}ms | GPU_Δ:{data['gpu_lat_ms']:.4f}ms | inference_fabric_Δ:{data['inference_fabric_lat_ms']:.4f}ms | Interference:{data['interference']}\n")
         except Exception as e:
             sys.stderr.write(f"[!] Drift monitor failure: {e}\n")
         finally:
@@ -2382,8 +2467,6 @@ class LocationTracker:
 
     def _calculate_pressure(self, h):
         """Calculate hPa from altitude (m) using ISA barometric formula."""
-        if h > 11000:
-            return None
         # P = P0 * (1 - (L*h)/T0) ^ (g*M/(R*L))
         P0 = 1013.25
         L = 0.0065
@@ -2392,9 +2475,34 @@ class LocationTracker:
         M = 0.0289644
         R = 8.31447
 
-        exponent = (g * M) / (R * L)
-        pressure = P0 * math.pow(1 - (L * h) / T0, exponent)
+        if h <= 11000:
+            exponent = (g * M) / (R * L)
+            pressure = P0 * math.pow(1 - (L * h) / T0, exponent)
+        else:
+            # Stratosphere model (11km - 20km): Temperature is constant at 216.65K
+            # P = P11 * exp(-g * M * (h - 11000) / (R * T11))
+            P11 = 226.32
+            T11 = 216.65
+            h_diff = h - 11000
+            exponent = -(g * M * h_diff) / (8.31447 * T11)
+            pressure = P11 * math.exp(exponent)
+        
         return pressure
+
+    def _fetch_topo_altitude(self, lat, lon):
+        """Fetch ground elevation from OpenTopoData (ASTER 30m) as a fallback."""
+        try:
+            url = f"https://api.opentopodata.org/v1/aster30m?locations={lat},{lon}"
+            resp = requests.get(url, timeout=5.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "OK" and data.get("results"):
+                    elev = data["results"][0].get("elevation")
+                    if elev is not None:
+                        return float(elev)
+        except Exception:
+            pass
+        return None
 
     def update_imu(self, ax, ay, az, t_now, q, raw_accel=None, gyro_mag=0.0):
         """Update position using dead reckoning from IMU acceleration."""
@@ -2571,17 +2679,6 @@ class LocationTracker:
         )
         self.pressure_hpa = self._calculate_pressure(self.alt)
 
-        # Safety check: if drift/movement exceeds 1000m, reset locationd
-        if (
-            abs(self.pos[0]) > 1000
-            or abs(self.pos[1]) > 1000
-            or abs(self.pos[2]) > 1000
-        ):
-            try:
-                subprocess.run(["killall", "-9", "locationd"], capture_output=True)
-            except Exception:
-                pass
-
     def check_core_location_async(self, now):
         if not self.cl_available or now - self.last_cl_check < 30.0:
             return
@@ -2608,8 +2705,8 @@ class LocationTracker:
 
             if current_user and current_user != "root" and uid != "0":
                 # Execute via launchctl asuser + osascript to proxy the user's location permissions
-                # We use 'do shell script' via osascript to trigger the TCC-aware execution path
-                cl_cmd = f"{self.cl_path} -format '%latitude %longitude %altitude %direction' -once"
+                # We use the comma-separated format demonstrated by the user to prevent truncation
+                cl_cmd = f"{self.cl_path} -f %latitude,%longitude,%altitude,%direction,%h_accuracy,%v_accuracy -once"
                 cmd = [
                     "launchctl",
                     "asuser",
@@ -2621,47 +2718,141 @@ class LocationTracker:
             else:
                 cmd = [
                     self.cl_path,
-                    "-format",
-                    "%latitude %longitude %altitude %direction",
+                    "-f",
+                    "%latitude,%longitude,%altitude,%direction,%h_accuracy,%v_accuracy",
                     "-once",
                 ]
 
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
-            if res.returncode == 0:
-                parts = res.stdout.strip().split()
-                if len(parts) >= 4:
-                    new_lat = np.float64(parts[0])
-                    new_lon = np.float64(parts[1])
-                    new_alt = np.float64(parts[2])
-                    new_heading = np.float64(parts[3])
+            try:
+                while True:
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
+                    
+                    # Special handling for "The operation couldn’t be completed" (kCLErrorDomain error 0)
+                    # We sleep and retry as requested by the user, without killing locationd.
+                    if res.stderr and "The operation couldn’t be completed" in res.stderr:
+                        with open("CoreLocationCLI.log", "a") as f:
+                            f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                            f.write(f"Detected kCLErrorDomain error 0. Sleeping 1s and retrying...\n")
+                        time.sleep(1.0)
+                        continue
 
-                    with self.lock:
-                        # Drift Correction for Odometer
-                        # Since update_imu now integrates velocity (dist_inc) at 100Hz,
-                        # CoreLocation acts as a ground-truth anchor.
-                        dist = haversine(
-                            self.last_odometer_lat,
-                            self.last_odometer_lon,
-                            new_lat,
-                            new_lon,
-                        )
-                        if dist > 50.0:
-                            # If dead reckoning drifted > 50m from GPS, we accept the GPS delta
-                            # but we don't double count the integrated IMU distance.
-                            self.last_odometer_lat = new_lat
-                            self.last_odometer_lon = new_lon
+                    # Log other stderr to CoreLocationCLI.log
+                    if res.stderr:
+                        with open("CoreLocationCLI.log", "a") as f:
+                            f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                            f.write(f"Command: {' '.join(cmd) if isinstance(cmd, list) else cmd}\n")
+                            f.write(f"Return Code: {res.returncode}\n")
+                            f.write(f"Stderr: {res.stderr}")
+                            if not res.stderr.endswith("\n"):
+                                f.write("\n")
 
-                        self.seu_risk_multiplier = math.pow(2.0, float(new_alt) / 1500.0)
-                        self.alt_stress_multiplier = 1.0 + (float(new_alt) / 10000.0)
-                        self.lat = new_lat
-                        self.lon = new_lon
-                        self.alt = new_alt
-                        self.pressure_hpa = self._calculate_pressure(float(new_alt))
-                        self.heading = new_heading
-                        self.start_lat = new_lat
-                        self.start_lon = new_lon
-                        self.start_alt = new_alt
-                        self.pos = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+                    if res.returncode == 0:
+                        parts = res.stdout.strip().split(",")
+                        if len(parts) >= 6:
+                            try:
+                                # Parse Latitude and Longitude
+                                new_lat = np.float64(parts[0])
+                                new_lon = np.float64(parts[1])
+                                
+                                # Parse Accuracy (Meters; -1 means invalid)
+                                h_acc = float(parts[4])
+                                v_acc = float(parts[5])
+
+                                # 1. Altitude Validation Logic
+                                # Compare GPS altitude against measured pressure and temperature
+                                raw_alt = float(parts[2])
+                                
+                                # Use current measured pressure (SMC preferred)
+                                with self.lock:
+                                    meas_p = self.smc_pressure_hpa if self.smc_pressure_hpa is not None else self.pressure_hpa
+                                    current_alt = self.alt
+
+                                is_alt_nonsensical = False
+                                if v_acc > 0:
+                                    # Check if GPS altitude aligns with measured pressure
+                                    # P_expected for this altitude
+                                    p_exp = self._calculate_pressure(raw_alt)
+                                    # If diff > 100 hPa (~1000m error at sea level), it's likely a drift anomaly
+                                    if abs(p_exp - meas_p) > 100.0:
+                                        is_alt_nonsensical = True
+                                else:
+                                    is_alt_nonsensical = True
+
+                                if is_alt_nonsensical:
+                                    # Fallback 1: Try OpenTopoData API
+                                    topo_alt = self._fetch_topo_altitude(new_lat, new_lon)
+                                    if topo_alt is not None:
+                                        new_alt = np.float64(topo_alt)
+                                        with open("CoreLocationCLI.log", "a") as f:
+                                            f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                                            f.write(f"GPS Alt ({raw_alt}m) rejected. Using OpenTopoData: {topo_alt}m\n")
+                                    else:
+                                        # Fallback 2: Calculate from pressure if we have a sea-level baseline
+                                        # For now, we keep existing or rely on pressure-based updates in update_imu
+                                        new_alt = np.float64(current_alt)
+                                else:
+                                    new_alt = np.float64(raw_alt)
+
+                                # Only trust heading if valid
+                                raw_heading = float(parts[3])
+                                new_heading = np.float64(raw_heading if raw_heading >= 0 else 0.0)
+
+                                if h_acc > 500:
+                                    break # Exit retry loop on poor accuracy
+
+                                with self.lock:
+                                    dist = haversine(
+                                        self.last_odometer_lat,
+                                        self.last_odometer_lon,
+                                        new_lat,
+                                        new_lon,
+                                    )
+                                    if dist > 50.0:
+                                        self.last_odometer_lat = new_lat
+                                        self.last_odometer_lon = new_lon
+
+                                    self.seu_risk_multiplier = math.pow(2.0, float(new_alt) / 1500.0)
+                                    self.alt_stress_multiplier = 1.0 + (float(new_alt) / 10000.0)
+                                    self.lat = new_lat
+                                    self.lon = new_lon
+                                    self.alt = new_alt
+                                    self.pressure_hpa = self._calculate_pressure(float(new_alt))
+                                    self.heading = new_heading
+                                    self.start_lat = new_lat
+                                    self.start_lon = new_lon
+                                    self.start_alt = new_alt
+                                    self.pos = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+                                break # Success
+                            except (ValueError, IndexError):
+                                with open("CoreLocationCLI.log", "a") as f:
+                                    f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                                    f.write(f"Failed to parse comma format: {res.stdout.strip()}\n")
+                                break # Failure
+                        else:
+                            with open("CoreLocationCLI.log", "a") as f:
+                                f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                                f.write(f"Unexpected output format (got {len(parts)} parts): {res.stdout.strip()}\n")
+                            break # Failure
+                    else:
+                        if not res.stderr:
+                            with open("CoreLocationCLI.log", "a") as f:
+                                f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                                f.write(f"Command failed with code {res.returncode} but no stderr.\n")
+                                f.write(f"Stdout: {res.stdout}\n")
+                        break # Failure
+            except subprocess.TimeoutExpired:
+                with open("CoreLocationCLI.log", "a") as f:
+                    f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                    f.write(f"Command timed out after 15s: {' '.join(cmd)}\n")
+            except FileNotFoundError:
+                with open("CoreLocationCLI.log", "a") as f:
+                    f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                    f.write(f"Executable not found: {self.cl_path}\n")
+            except Exception as e:
+                with open("CoreLocationCLI.log", "a") as f:
+                    f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                    f.write(f"Subprocess exception: {str(e)}\n")
+
         except Exception:
             pass
         finally:
@@ -2687,7 +2878,7 @@ def render(
     a = raw_lines.append
     # ... rest of render header
 
-    title = " EARU-raw-TUI "
+    title = " A2779 Sensors and Augmented Sensors (EARU) "
     top_bar = "─" * (W - len(title) - 1)
     a(f"{DIM}┌─{RST}{BWHT}{title}{RST}{DIM}{top_bar}┐{RST}")
 
@@ -2701,6 +2892,8 @@ def render(
         f"R:{restarts}  Ev:{len(det.events)}"
     )
     a(_line(hdr))
+    a(_line(f" {BRED}{BOLD}THIS is NOT an Accurate, it will drift eventually!{RST}"))
+    a(_line(f" {DIM}If you want an exact measurement purchase/use the actual sensors!{RST}"))
 
     GW = W - 4
 
@@ -2858,6 +3051,11 @@ def render(
         a(_line(f" {DIM}Tired/Bored:{RST}  {c_tir:>3}%  {BRED}Anxious/Frustr:{RST} {c_anx:>3}%"))
     else:
         a(_line(f" {DIM}calculating...{RST}"))
+    a(_line(""))
+
+    a(_sep(" Augmented Sensor: Pedometer "))
+    steps = det.pedometer.steps
+    a(_line(f" {DIM}Total Steps:{RST} {BGRN}{BOLD}{steps:>6}{RST} {DIM}(Step counter with velocity magnitude integration via A2779 sensor){RST}"))
     a(_line(""))
 
     a(_sep(" Orientation "))
@@ -3161,12 +3359,56 @@ def render(
             )
         )
 
+        batt_col = (
+            BGRN
+            if location.battery_percent > 20
+            else (BYEL if location.battery_percent > 10 else BRED)
+        )
+        charging_str = (
+            f"{BGRN}Charging{RST}"
+            if location.battery_charging
+            else f"{BYEL}Discharging{RST}"
+        )
+        batt_bar = _gauge(location.battery_percent, 0, 100, 15)
+        a(
+            _line(
+                f" {DIM}Battery:{RST} {batt_col}{location.battery_percent:>5.1f}%{RST} [{batt_col}{batt_bar}{RST}] {charging_str}"
+            )
+        )
+        if location.pmset_info:
+            pm_lines = [l.strip() for l in location.pmset_info.split("\n") if l.strip()]
+            # First relevant battery line is usually index 1
+            if len(pm_lines) > 1:
+                a(_line(f" {DIM}pmset batt:{RST} {pm_lines[1]}"))
+            # Find "Currently in use:" and show a few settings
+            try:
+                start_idx = -1
+                for idx, line in enumerate(pm_lines):
+                    if "Currently in use:" in line:
+                        start_idx = idx
+                        break
+                if start_idx != -1:
+                    # Show up to 3 settings
+                    settings = []
+                    for i in range(start_idx + 1, min(start_idx + 4, len(pm_lines))):
+                        settings.append(pm_lines[i])
+                    if settings:
+                        a(_line(f" {DIM}pmset conf:{RST} {' | '.join(settings)}"))
+            except Exception:
+                pass
+
         up_s = int(location.uptime_system)
         up_e = int(location.uptime_earu)
+        hid_idle = location.nonHumanInputHIDIdle
         a(
             _line(
                 f" {DIM}System Uptime:{RST} {up_s // 3600}h {(up_s % 3600) // 60}m {up_s % 60}s  "
                 f"{DIM}EARU Uptime:{RST} {up_e // 3600}h {(up_e % 3600) // 60}m {up_e % 60}s"
+            )
+        )
+        a(
+            _line(
+                f" {DIM}HID Idle Time:{RST} {BWHT}{hid_idle:>7.1f}s{RST} {DIM}(nonHumanInputHIDIdle){RST}"
             )
         )
 
@@ -3371,18 +3613,18 @@ def render(
         if d_data:
             spu_col = BGRN if d_data["spu_lat_ms"] < 20 else (BYEL if d_data["spu_lat_ms"] < 50 else BRED)
             gpu_col = BGRN if d_data["gpu_lat_ms"] < 5 else (BYEL if d_data["gpu_lat_ms"] < 15 else BRED)
-            ane_col = BGRN if d_data["ane_lat_ms"] < 1 else (BYEL if d_data["ane_lat_ms"] < 5 else BRED)
+            ane_col = BGRN if d_data["inference_fabric_lat_ms"] < 1 else (BYEL if d_data["inference_fabric_lat_ms"] < 5 else BRED)
             rtc_col = BGRN if d_data["rtc_jitter_ms"] < 0.01 else (BYEL if d_data["rtc_jitter_ms"] < 0.1 else BRED)
             int_col = BRED if d_data["interference"] == "Yes" else BGRN
-            a(_line(f" {DIM}Electron Travel Measurement:{RST} {DIM}SPU Δ:{RST} {spu_col}{d_data['spu_lat_ms']:>7.3f}ms{RST} {DIM}GPU Δ:{RST} {gpu_col}{d_data['gpu_lat_ms']:>7.3f}ms{RST} {DIM}ANE Δ:{RST} {ane_col}{d_data['ane_lat_ms']:>7.3f}ms{RST}"))
+            a(_line(f" {DIM}Electron Travel Measurement:{RST} {DIM}SPU Δ:{RST} {spu_col}{d_data['spu_lat_ms']:>7.3f}ms{RST} {DIM}GPU Δ:{RST} {gpu_col}{d_data['gpu_lat_ms']:>7.3f}ms{RST} {DIM}inference_fabric Δ:{RST} {ane_col}{d_data['inference_fabric_lat_ms']:>7.3f}ms{RST}"))
             a(_line(f" {DIM}RTC Δ (Jit):{RST} {rtc_col}{d_data['rtc_jitter_ms']:>10.6f}ms{RST}"))
             a(_line(f" {DIM}RTC ns:{RST} {BWHT}{d_data['t_rtc_ns']}{RST}  {DIM}SPU ns:{RST} {BWHT}{d_data['t_spu_ns']}{RST}"))
-            a(_line(f" {DIM}CPU ns:{RST} {BWHT}{d_data['t_cpu_ns']}{RST}  {DIM}GPU ns:{RST} {BWHT}{d_data['t_gpu_ns']}{RST}  {DIM}ANE ns:{RST} {BWHT}{d_data['t_ane_ns']}{RST}"))
+            a(_line(f" {DIM}CPU ns:{RST} {BWHT}{d_data['t_cpu_ns']}{RST}  {DIM}GPU ns:{RST} {BWHT}{d_data['t_gpu_ns']}{RST}  {DIM}inference_fabric ns:{RST} {BWHT}{d_data['t_inference_fabric_ns']}{RST} {DIM}dat ns:{RST} {BWHT}{d_data.get('t_dat_ns', 0)}{RST}"))
             a(_line(f" {DIM}External Entity/Unfactored Physics Interference:{RST} {int_col}{BOLD}{d_data['interference']}{RST}"))
         else:
-            a(_line(f" {DIM}Electron Travel Measurement:{RST} {DIM}SPU Δ:{RST} {YEL}N/A{RST} {DIM}GPU Δ:{RST} {YEL}N/A{RST} {DIM}ANE Δ:{RST} {YEL}N/A{RST}"))
+            a(_line(f" {DIM}Electron Travel Measurement:{RST} {DIM}SPU Δ:{RST} {YEL}N/A{RST} {DIM}GPU Δ:{RST} {YEL}N/A{RST} {DIM}inference_fabric Δ:{RST} {YEL}N/A{RST}"))
             a(_line(f" {DIM}RTC Δ (Jit):{RST} {YEL}N/A{RST}"))
-            a(_line(f" {DIM}RTC ns:{RST} {YEL}N/A{RST}  {DIM}SPU ns:{RST} {YEL}N/A{RST}  {DIM}CPU ns:{RST} {YEL}N/A{RST}  {DIM}GPU ns:{RST} {YEL}N/A{RST}  {DIM}ANE ns:{RST} {YEL}N/A{RST}"))
+            a(_line(f" {DIM}RTC ns:{RST} {YEL}N/A{RST}  {DIM}SPU ns:{RST} {YEL}N/A{RST}  {DIM}CPU ns:{RST} {YEL}N/A{RST}  {DIM}GPU ns:{RST} {YEL}N/A{RST}  {DIM}inference_fabric ns:{RST} {YEL}N/A{RST} {DIM}dat ns:{RST} {YEL}N/A{RST}"))
             a(_line(f" {DIM}External Entity/Unfactored Physics Interference:{RST} {YEL}N/A{RST}"))
 
     gw = W - 18
@@ -3788,13 +4030,14 @@ def main(stdscr=None):
     _bg_running = [False]
     _bg_data_lock = threading.Lock()
     last_kys_check = 0.0
+    last_enforced_scan = 0.0
 
     def _bg_analysis_task():
-        nonlocal last_dwt, last_period, last_kys_check
+        nonlocal last_dwt, last_period, last_kys_check, last_enforced_scan
         while running[0]:
             try:
                 now = time.time()
-                
+
                 # 0. Async KYS check (Every 3.0s)
                 if now - last_kys_check >= 3.0:
                     if os.path.exists("kys"):
@@ -3806,8 +4049,20 @@ def main(stdscr=None):
                         break
                     last_kys_check = now
 
-                # 1. DWT Calculation (Every 0.2s)
-                if now - last_dwt >= 0.2:
+                # 0b. Enforced Scanning (Every 15s if moving > 0.5m/s)
+                if now - last_enforced_scan >= 15.0:
+                    if location.v_mag > 0.5 and not location._cl_running:
+                        try:
+                            # Force locationd to refresh its cache
+                            subprocess.run(["killall", "-9", "locationd"], capture_output=True)
+                            # Force an immediate CoreLocationCLI fetch
+                            location.last_cl_check = 0.0 
+                            location.check_core_location_async(now)
+                        except Exception:
+                            pass
+                    last_enforced_scan = now
+
+                # 1. DWT Calculation (Every 0.2s)                if now - last_dwt >= 0.2:
                     det.compute_dwt()
                     last_dwt = now
                 
@@ -3818,6 +4073,7 @@ def main(stdscr=None):
                     location.check_system_metrics()
                     location.check_smc_sensors()
                     location.check_smc_pressure()
+                    location.check_hid_idle_async()
                     last_period = now
 
                 # 2b. User/Entity Detection Analysis (Every 20.0s)
@@ -3983,7 +4239,7 @@ def main(stdscr=None):
 
             # 4. Emergency Impact Save Trigger
             is_impact = (det.peak > 3.0)
-            draw_period = 0.5
+            draw_period = 0.1
             
             profiler.start_block("render_save_check")
             if (now - last_draw >= draw_period) or (is_impact and now - last_impact_save > 0.5):
@@ -4059,6 +4315,11 @@ def main(stdscr=None):
                         "yaw": yaw_d,
                         "q": det._q,
                     },
+                    "orientation_degree": {
+                        "roll": roll_d,
+                        "pitch": pitch_d,
+                        "yaw": yaw_d,
+                    },
                     "location": {
                         "lat": location.lat,
                         "lon": location.lon,
@@ -4123,6 +4384,10 @@ def main(stdscr=None):
                         "load_avg": location.load_avg,
                         "uptime_system": location.uptime_system,
                         "uptime_earu": location.uptime_earu,
+                        "battery_percent": location.battery_percent,
+                        "battery_charging": location.battery_charging,
+                        "nonHumanInputHIDIdle": location.nonHumanInputHIDIdle,
+                        "pmset_info": location.pmset_info,
                     },
                     "loop_consistency": {
                         "pct_90_ms": l_pct_90,

@@ -1,4 +1,10 @@
-# EnvironmentalAwareReferentialUnit (EARU)
+# A2779 Sensors and Augmented Sensors (EARU)
+
+> [!WARNING]
+> **THIS is NOT an Accurate, it will drift eventually!. If you want an exact measurement purchase/use the actual sensors!**
+
+**Original Program:** [Olivier Bourbonnais](https://github.com/olvvier)  
+**Modified and Forked by:** [Albert Starfield Wahyu Suryo Samudro](mailto:albertstarfield2001@gmail.com)
 
 ## Built with this
 
@@ -32,9 +38,9 @@ pirate/mac-hardware-toys - Programmatically control Mac keyboard & display brigh
 
 ## what is this
 
-apple silicon chips (M2/M3/M4/M5) have a hard to find mems IMU (accelerometer + gyroscope) managed by the sensor processing unit (SPU).
+apple silicon chips (M2/M3/M4/M5), specifically the A2779 (MacBook Pro 14" M2 Pro), have a hard to find mems IMU (accelerometer + gyroscope) managed by the sensor processing unit (SPU).
 it's not exposed through any public api or framework.
-this project reads raw 3-axis acceleration and angular velocity data at ~800hz via iokit hid callbacks.
+this project reads raw 3-axis acceleration and angular velocity data at ~800hz via iokit hid callbacks, providing augmented sensors like a real-time **Pedometer**.
 
 only tested on macbook pro m3 pro so far - might work on other apple silicon macs but no guarantees
 
@@ -277,7 +283,7 @@ def run_task(data):
 
     sudo .venv/bin/python3 EARU.py [--no-tui] [--save-log] [--task path/to/task.py]
 
-the demo includes vibration detection, orientation gauges, experimental heartbeat (bcg), lid angle, and ambient light.
+the demo includes **augmented sensors (Pedometer)**, vibration detection, orientation gauges, experimental heartbeat (bcg), lid angle, and ambient light.
 
 ### with uv
 
