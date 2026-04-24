@@ -56,8 +56,8 @@ class PrimaryFlightDisplay:
         self.map_widget = None
         if tkintermapview:
             self.map_widget = tkintermapview.TkinterMapView(self.content_frame, corner_radius=0)
-            # Bind click to disable auto-center
-            self.map_widget.canvas.bind("<ButtonPress-1>", lambda e: self.set_auto_center(False))
+            # Use add="+" to avoid overwriting tkintermapview's internal bindings
+            self.map_widget.canvas.bind("<Button-1>", lambda e: self.set_auto_center(False), add="+")
         
         # State Variables
         self.pitch, self.roll, self.yaw = 0, 0, 0
@@ -86,7 +86,7 @@ class PrimaryFlightDisplay:
             {"label": "SYSTEM", "page": 1, "rect": (10+btn_w, 10, 10+2*btn_w, 50)},
             {"label": "SEISMIC", "page": 2, "rect": (15+2*btn_w, 10, 15+3*btn_w, 50)},
             {"label": "ADV", "page": 3, "rect": (20+3*btn_w, 10, 20+4*btn_w, 50)},
-            {"label": "MAP", "page": 4, "rect": (25+4*btn_w, 10, 25+5*btn_w, 50)},
+            {"label": "NAV", "page": 4, "rect": (25+4*btn_w, 10, 25+5*btn_w, 50)},
             {"label": "METAR", "page": 5, "rect": (30+5*btn_w, 10, 30+6*btn_w, 50)},
             {"label": "WIND", "page": 6, "rect": (35+6*btn_w, 10, 35+7*btn_w, 50)},
             {"label": "LOC", "cmd": "center", "rect": (40+7*btn_w, 10, 40+8*btn_w, 50)},
@@ -190,12 +190,13 @@ class PrimaryFlightDisplay:
 
     def draw_map_overlay(self, w, h):
         if self.map_widget:
-            # Update user marker
+            # Update user marker with a navigation triangle
+            label = f"\u25b2 {int(self.alt*3.28)}ft"
             if not self.user_marker:
-                self.user_marker = self.map_widget.set_marker(self.lat, self.lon, text=f"YOU ({int(self.alt*3.28)}ft)")
+                self.user_marker = self.map_widget.set_marker(self.lat, self.lon, text=label)
             else:
                 self.user_marker.set_position(self.lat, self.lon)
-                self.user_marker.set_text(f"YOU ({int(self.alt*3.28)}ft)")
+                self.user_marker.set_text(label)
             
             if self.auto_center:
                 self.map_widget.set_position(self.lat, self.lon)
@@ -246,23 +247,90 @@ class PrimaryFlightDisplay:
     def draw_metar_page(self, w, h):
         weather = self.full_data.get('ecosystem_weather', {})
         smc = self.full_data.get('smc', {})
+        loc = self.full_data.get('location', {})
+        
         spread = weather.get('dew_point_spread', 10.0)
         t_c = smc.get('ambient_temp_k', 293.15) - 273.15
         dp_c = weather.get('dew_point_k', 283.15) - 273.15
-        press = self.full_data.get('location', {}).get('pressure_hpa', 1013.25)
+        press = loc.get('pressure_hpa', 1013.25)
         altim = press / 33.8639
         tendency = weather.get('pressure_tendency_hpa', 0.0)
-        if spread < 1.5: self.canvas.create_rectangle(0, 0, w, h, fill="#2c2c2c", outline="")
-        elif spread < 5.0: self.canvas.create_rectangle(0, 0, w, h, fill="#1a3a5a", outline="")
-        else: self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
-        self.canvas.create_text(w/2, 40, text="AUGMENTED WEATHER (METAR/TAF)", fill="#00ff00", font=("Arial", 20, "bold"))
+        hum = smc.get('humidity_pct', 0.0)
+        curr_t = time.time()
+
+        # --- Dynamic Atmospheric Visuals ---
+        if t_c < 2 and spread < 3: # SNOW
+            self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
+            for i in range(100):
+                rx = (i * 137) % w
+                ry = (i * 253 + curr_t * 50) % h
+                size = (i % 3) + 1
+                self.canvas.create_oval(rx, ry, rx+size, ry+size, fill="white", outline="")
+            cond_icon = "SNOWING"
+        elif spread < 2.0 and tendency < -0.2: # RAIN
+            self.canvas.create_rectangle(0, 0, w, h, fill="#0a1a2a", outline="")
+            for i in range(80):
+                rx = (i * 157) % w
+                ry = (i * 353 + curr_t * 300) % h
+                self.canvas.create_line(rx, ry, rx-2, ry+15, fill="#4a90e2", width=1)
+            cond_icon = "RAINING"
+        elif spread < 1.5: # FOG
+            self.canvas.create_rectangle(0, 0, w, h, fill="#2c2c2c", outline="")
+            for i in range(40):
+                rx, ry = (i*97)%w, (i*131)%h
+                self.canvas.create_oval(rx, ry, rx+150, ry+60, fill="#3d3d3d", outline="")
+            cond_icon = "FOGGY"
+        elif spread < 5.0: # CLOUDY
+            self.canvas.create_rectangle(0, 0, w, h, fill="#1a3a5a", outline="")
+            for i in range(6):
+                cx = (i*200 + curr_t*5) % (w+200) - 100
+                cy = 100 + (i*31)%150
+                self.canvas.create_oval(cx, cy, cx+150, cy+70, fill="#555", outline="")
+            cond_icon = "CLOUDY"
+        else: # SHINY / CLEAR
+            self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
+            # Glowing Sun
+            sun_x, sun_y = w-100, 100
+            glow = (math.sin(curr_t * 2) + 1) * 5
+            self.canvas.create_oval(sun_x-60-glow, sun_y-60-glow, sun_x+60+glow, sun_y+60+glow, fill="#332200", outline="")
+            self.canvas.create_oval(sun_x-40, sun_y-40, sun_x+40, sun_y+40, fill="#ffaa00", outline="")
+            if spread > 8.0: # Light Rays
+                for i in range(12):
+                    ang = math.radians(i*30 + curr_t*10)
+                    self.canvas.create_line(sun_x, sun_y, sun_x+120*math.cos(ang), sun_y+120*math.sin(ang), fill="#443300", width=2)
+            cond_icon = "SHINY"
+
+        self.canvas.create_text(w/2, 40, text=f"METAR/TAF - {cond_icon}", fill="#00ff00", font=("Arial", 20, "bold"))
+        
+        # ... (rest of the page rendering)
         now = datetime.datetime.utcnow()
-        vis = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
+        time_str = now.strftime("%d%H%MZ")
+        vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
         clouds = "CLR"
         if spread < 2: clouds = "VV001"
         elif spread < 5: clouds = "BKN015"
-        metar = f"METAR EARU {now.strftime('%d%H%MZ')} 00000KT {vis} {clouds} {int(round(t_c)):02d}/{int(round(dp_c)):02d} A{int(altim*100):04d}"
-        self.canvas.create_text(50, 150, anchor="nw", text=f"REPORT:\n{metar}", fill="white", font=("Monaco", 14, "bold"), width=w-100)
+        elif spread < 10: clouds = "SCT035"
+        
+        temp_part = f"{int(round(t_c)):02d}/{int(round(dp_c)):02d}"
+        if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
+        metar = f"METAR EARU {time_str} 00000KT {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
+        
+        cond = f"{cond_icon}"
+        if tendency < -0.5: cond += " (DETERIORATING)"
+        elif tendency > 0.5: cond += " (IMPROVING)"
+        taf = f"TAF EARU {time_str} {now.strftime('%d%H/%e%H')} 00000KT {vis_val} {clouds} {'TEMPO SHRA' if tendency < -0.5 else 'SKC'}"
+
+        y = 100
+        self.canvas.create_text(50, y, anchor="nw", text="CURRENT REPORT (METAR):", fill="cyan", font=("Monaco", 12, "bold"))
+        self.canvas.create_text(50, y+30, anchor="nw", text=metar, fill="white", font=("Monaco", 14, "bold"), width=w-100)
+        self.canvas.create_text(50, y+60, anchor="nw", text=f"DECODED: {cond}", fill="yellow", font=("Monaco", 10))
+        y += 120
+        self.canvas.create_text(50, y, anchor="nw", text="FORECAST (TAF):", fill="cyan", font=("Monaco", 12, "bold"))
+        self.canvas.create_text(50, y+30, anchor="nw", text=taf, fill="white", font=("Monaco", 12), width=w-100)
+        y += 100
+        self.canvas.create_text(50, y, anchor="nw", text="PHYSICAL BASIS DATA:", fill="cyan", font=("Monaco", 12, "bold"))
+        basis = [f"STATION PRESSURE: {press:.2f} hPa", f"DEWPOINT SPREAD:  {spread:.2f} K", f"AIR DENSITY:      {weather.get('air_fluid_density',0):.4f} kg/m3", f"BARO TENDENCY:    {tendency:+.4f} hPa/hr", f"REL. HUMIDITY:    {hum:.1f} %"]
+        for i, b in enumerate(basis): self.canvas.create_text(70, y+30+i*25, anchor="nw", text=b, fill="white", font=("Monaco", 10))
 
     def draw_wind_page(self, w, h):
         self.canvas.create_text(w/2, 40, text="FLUID DYNAMICS: WIND MAPPING", fill="#00ffff", font=("Arial", 20, "bold"))
