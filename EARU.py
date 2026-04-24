@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+
+
 """
 A2779 Sensors and Augmented Sensors (EARU)
 Original Program by Olivier Bourbonnais.
@@ -1761,8 +1763,10 @@ class ProfilerDebug:
         self._get_stack().append((name, time.perf_counter()))
 
     def end_block(self):
+        if not self.enabled:
+            return
         stack = self._get_stack()
-        if not self.enabled or not stack:
+        if not stack:
             return
         name, start = stack.pop()
         dt = (time.perf_counter() - start) * 1_000_000.0
