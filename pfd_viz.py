@@ -57,7 +57,6 @@ class PrimaryFlightDisplay:
         self.map_widget = None
         if tkintermapview:
             self.map_widget = tkintermapview.TkinterMapView(self.content_frame, corner_radius=0)
-            # Use add="+" to avoid overwriting tkintermapview's internal bindings
             self.map_widget.canvas.bind("<Button-1>", lambda e: self.set_auto_center(False), add="+")
         
         # State Variables
@@ -70,6 +69,7 @@ class PrimaryFlightDisplay:
         self.raw_pitch, self.raw_roll, self.raw_yaw = 0, 0, 0
         self.full_data = {}
         self.clim_subpage = 0
+        self.clim_zoom = 0 # 0: Full, 1: 30d, 2: 7d, 3: 24h, 4: Forecast
 
         self.targets = {'pitch': 0, 'roll': 0, 'heading': 0, 'alt': 0, 'speed': 0, 'lat': 0, 'lon': 0}
         self.lerp_factor = 0.25
@@ -91,7 +91,7 @@ class PrimaryFlightDisplay:
             {"label": "NAV", "page": 4, "rect": (25+4*btn_w, 10, 25+5*btn_w, 50)},
             {"label": "METARLOCSENSOR", "page": 5, "rect": (30+5*btn_w, 10, 30+6*btn_w, 50)},
             {"label": "WIND", "page": 6, "rect": (35+6*btn_w, 10, 35+7*btn_w, 50)},
-            {"label": "CLIM", "page": 7, "rect": (40+7*btn_w, 10, 40+8*btn_w, 50)},
+            {"label": "CLIMEXT", "page": 7, "rect": (40+7*btn_w, 10, 40+8*btn_w, 50)},
             {"label": "LOC", "cmd": "center", "rect": (45+8*btn_w, 10, 45+9*btn_w, 50)},
             {"label": "PREV", "cmd": "prev", "rect": (w - 2*btn_w - 10, 10, w - btn_w - 10, 50)},
             {"label": "NEXT", "cmd": "next", "rect": (w - btn_w - 5, 10, w - 5, 50)}
@@ -112,7 +112,10 @@ class PrimaryFlightDisplay:
                     self.auto_center = True
                     if self.map_widget: self.map_widget.set_position(self.lat, self.lon)
                 self.switch_page_view()
-                break
+                return
+
+        if self.page == 7 and event.y > 150:
+            self.clim_zoom = (self.clim_zoom + 1) % 5
 
     def switch_page_view(self):
         if self.page == 4 and self.map_widget:
@@ -197,18 +200,14 @@ class PrimaryFlightDisplay:
 
     def draw_map_overlay(self, w, h):
         if self.map_widget:
-            # Update user marker with a navigation triangle
             label = f"\u25b2 {int(self.alt*3.28)}ft"
             if not self.user_marker:
                 self.user_marker = self.map_widget.set_marker(self.lat, self.lon, text=label)
             else:
                 self.user_marker.set_position(self.lat, self.lon)
                 self.user_marker.set_text(label)
-            
             if self.auto_center:
                 self.map_widget.set_position(self.lat, self.lon)
-            
-            # Draw overlay status on map
             self.canvas.create_text(10, 10, anchor="nw", text=f"AUTO-CENTER: {'ON' if self.auto_center else 'OFF (Panning)'}", fill="yellow", font=("Monaco", 10, "bold"))
         else:
             self.canvas.create_text(w/2, h/2, text="tkintermapview missing", fill="red")
@@ -255,7 +254,6 @@ class PrimaryFlightDisplay:
         weather = self.full_data.get('ecosystem_weather', {})
         smc = self.full_data.get('smc', {})
         loc = self.full_data.get('location', {})
-        
         spread = weather.get('dew_point_spread', 10.0)
         t_c = smc.get('ambient_temp_k', 293.15) - 273.15
         dp_c = weather.get('dew_point_k', 283.15) - 273.15
@@ -264,69 +262,54 @@ class PrimaryFlightDisplay:
         tendency = weather.get('pressure_tendency_hpa', 0.0)
         hum = smc.get('humidity_pct', 0.0)
         curr_t = time.time()
-
-        # --- Dynamic Atmospheric Visuals ---
-        if t_c < 2 and spread < 3: # SNOW
+        if t_c < 2 and spread < 3:
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
             for i in range(100):
-                rx = (i * 137) % w
-                ry = (i * 253 + curr_t * 50) % h
+                rx, ry = (i * 137) % w, (i * 253 + curr_t * 50) % h
                 size = (i % 3) + 1
                 self.canvas.create_oval(rx, ry, rx+size, ry+size, fill="white", outline="")
             cond_icon = "SNOWING"
-        elif spread < 2.0 and tendency < -0.2: # RAIN
+        elif spread < 2.0 and tendency < -0.2:
             self.canvas.create_rectangle(0, 0, w, h, fill="#0a1a2a", outline="")
             for i in range(80):
-                rx = (i * 157) % w
-                ry = (i * 353 + curr_t * 300) % h
+                rx, ry = (i * 157) % w, (i * 353 + curr_t * 300) % h
                 self.canvas.create_line(rx, ry, rx-2, ry+15, fill="#4a90e2", width=1)
             cond_icon = "RAINING"
-        elif spread < 1.5: # FOG
+        elif spread < 1.5:
             self.canvas.create_rectangle(0, 0, w, h, fill="#2c2c2c", outline="")
             for i in range(40):
                 rx, ry = (i*97)%w, (i*131)%h
                 self.canvas.create_oval(rx, ry, rx+150, ry+60, fill="#3d3d3d", outline="")
             cond_icon = "FOGGY"
-        elif spread < 5.0: # CLOUDY
+        elif spread < 5.0:
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a3a5a", outline="")
             for i in range(6):
-                cx = (i*200 + curr_t*5) % (w+200) - 100
-                cy = 100 + (i*31)%150
+                cx, cy = (i*200 + curr_t*5) % (w+200) - 100, 100 + (i*31)%150
                 self.canvas.create_oval(cx, cy, cx+150, cy+70, fill="#555", outline="")
             cond_icon = "CLOUDY"
-        else: # SHINY / CLEAR
+        else:
             self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
-            # Glowing Sun
             sun_x, sun_y = w-100, 100
             glow = (math.sin(curr_t * 2) + 1) * 5
             self.canvas.create_oval(sun_x-60-glow, sun_y-60-glow, sun_x+60+glow, sun_y+60+glow, fill="#332200", outline="")
             self.canvas.create_oval(sun_x-40, sun_y-40, sun_x+40, sun_y+40, fill="#ffaa00", outline="")
-            if spread > 8.0: # Light Rays
+            if spread > 8.0:
                 for i in range(12):
                     ang = math.radians(i*30 + curr_t*10)
                     self.canvas.create_line(sun_x, sun_y, sun_x+120*math.cos(ang), sun_y+120*math.sin(ang), fill="#443300", width=2)
             cond_icon = "SHINY"
-
         self.canvas.create_text(w/2, 40, text=f"METEAR/TAF - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
-        
-        # ... (rest of the page rendering)
-        now = datetime.datetime.utcnow()
-        time_str = now.strftime("%d%H%MZ")
+        now = datetime.datetime.utcnow(); time_str = now.strftime("%d%H%MZ")
         vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
         clouds = "CLR"
         if spread < 2: clouds = "VV001"
         elif spread < 5: clouds = "BKN015"
         elif spread < 10: clouds = "SCT035"
-        
         temp_part = f"{int(round(t_c)):02d}/{int(round(dp_c)):02d}"
         if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
         metar = f"METAR EARU {time_str} 00000KT {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
-        
-        cond = f"{cond_icon}"
-        if tendency < -0.5: cond += " (DETERIORATING)"
-        elif tendency > 0.5: cond += " (IMPROVING)"
+        cond = f"{cond_icon}"; (cond := cond + " (DETERIORATING)") if tendency < -0.5 else ((cond := cond + " (IMPROVING)") if tendency > 0.5 else None)
         taf = f"TAF EARU {time_str} {now.strftime('%d%H/%e%H')} 00000KT {vis_val} {clouds} {'TEMPO SHRA' if tendency < -0.5 else 'SKC'}"
-
         y = 100
         self.canvas.create_text(50, y, anchor="nw", text="CURRENT REPORT (METAR):", fill="cyan", font=("Monaco", 12, "bold"))
         self.canvas.create_text(50, y+30, anchor="nw", text=metar, fill="white", font=("Monaco", 14, "bold"), width=w-100)
@@ -341,179 +324,208 @@ class PrimaryFlightDisplay:
 
     def draw_wind_page(self, w, h):
         self.canvas.create_text(w/2, 40, text="FLUID DYNAMICS: WIND MAPPING", fill="#00ffff", font=("Monaco", 20, "bold"))
-        weather = self.full_data.get('ecosystem_weather', {})
-        grid = weather.get('wind_map', {}).get('grid_7x7_10m', [])
+        weather = self.full_data.get('ecosystem_weather', {}); grid = weather.get('wind_map', {}).get('grid_7x7_10m', [])
         if not grid: self.canvas.create_text(w/2, h/2, text="NO WIND GRID", fill="red"); return
-        
-        gs = 7; cs = min(w, h) // 12; sx, sy = w/2-(gs*cs)/2, h/2-(gs*cs)/2
+        gs, cs = 7, min(w, h) // 12; sx, sy = w/2-(gs*cs)/2, h/2-(gs*cs)/2
         self.canvas.create_text(w/2, sy - 30, text="TOP-DOWN 7x7 GRID (10m STEP)", fill="white", font=("Monaco", 10))
-
         for r in range(gs):
             for c in range(gs):
                 if r < len(grid) and c < len(grid[r]):
-                    ent = grid[r][c] # [intensity, [vx, vy, vz], pressure, temp]
-                    intensity, vel = ent[0], ent[1]
-                    vx, vy = vel[0], vel[1]
-                    x, y = sx+c*cs+cs/2, sy+r*cs+cs/2
-                    cv = min(255, int(intensity*10)); hx = f"#{cv:02x}{int(cv*0.5):02x}44"
-                    self.canvas.create_rectangle(x-cs/2,y-cs/2,x+cs/2,y+cs/2,fill=hx,outline="#222")
+                    intensity, vel = grid[r][c][0], grid[r][c][1]; vx, vy = vel[0], vel[1]; x, y = sx+c*cs+cs/2, sy+r*cs+cs/2
+                    cv = min(255, int(intensity*10)); self.canvas.create_rectangle(x-cs/2,y-cs/2,x+cs/2,y+cs/2,fill=f"#{cv:02x}{int(cv*0.5):02x}44",outline="#222")
                     if abs(vx)>0.1 or abs(vy)>0.1:
                         ml, ang = min(cs/2, math.sqrt(vx**2+vy**2)*2), math.atan2(vy, vx)
                         self.canvas.create_line(x,y,x+ml*math.cos(ang),y+ml*math.sin(ang),fill="white",arrow=tk.LAST)
-                    
-                    # Highlight center cell data
                     if r == 3 and c == 3:
-                        p_cent, t_cent = ent[2], ent[3]
-                        self.canvas.create_text(w/2, sy + gs*cs + 60, text=f"STATION: {p_cent:.2f} hPa | {t_cent:.2f} K", fill="white", font=("Monaco", 10))
-
+                        self.canvas.create_text(w/2, sy + gs*cs + 60, text=f"STATION: {grid[r][c][2]:.2f} hPa | {grid[r][c][3]:.2f} K", fill="white", font=("Monaco", 10))
         self.canvas.create_text(w/2, sy + gs*cs + 30, text="GRID CENTER: AT SENSOR LOCATION", fill="cyan", font=("Monaco", 10))
 
     def draw_weather_page(self, w, h):
-        subpage_titles = ["SUMMARY & TRENDS", "SURFACE & SOIL", "SOLAR RADIATION", "AVIATION & STABILITY", "HUMIDITY & VAPOUR"]
-        self.canvas.create_text(w/2, 40, text=f"METEO: {subpage_titles[self.clim_subpage]}", fill="#00ff7f", font=("Monaco", 20, "bold"))
-        self.canvas.create_text(w/2, 65, text=f"[ CLICK 'CLIM' AGAIN TO CYCLE SUBPAGES - PAGE {self.clim_subpage+1}/5 ]", fill="#aaa", font=("Monaco", 8))
-
+        sub_t = ["SUMMARY & TRENDS", "SURFACE & SOIL", "SOLAR RADIATION", "AVIATION & STABILITY", "HUMIDITY & VAPOUR"]
+        z_lbl = ["FULL (3mo+16d)", "LAST 30 DAYS", "LAST 7 DAYS", "LAST 24 HOURS", "16-DAY FORECAST"]
+        self.canvas.create_text(w/2, 25, text=f"METEO: {sub_t[self.clim_subpage]}", fill="#00ff7f", font=("Monaco", 18, "bold"))
+        self.canvas.create_text(w/2, 45, text=f"[ CYCLE PAGES ({self.clim_subpage+1}/5) | ZOOM: {z_lbl[self.clim_zoom]} (CLICK GRAPH) ]", fill="#aaa", font=("Monaco", 8))
+        
         weather = self.full_data.get('ecosystem_weather', {})
         meteo = weather.get('3rdparty_meteo', {})
         if not meteo:
-            self.canvas.create_text(w/2, h/2, text="NO 3RD PARTY METEO DATA CACHED", fill="red", font=("Monaco", 14))
+            self.canvas.create_text(w/2, h/2, text="NO 3RD PARTY METEO DATA", fill="red", font=("Monaco", 14))
             return
-
+            
         curr = meteo.get('current', {})
         hourly = meteo.get('hourly', {})
         daily = meteo.get('daily', {})
         now_ts = time.time()
-
+        
         def v_f(v, default=0.0):
             try:
-                if v is None: return default
-                fv = float(v)
-                return fv if math.isfinite(fv) else default
-            except: return default
-
-        def get_h(key): return hourly.get(key, [])
-        def get_d(key): return daily.get(key, [])
-        def g_idx(lst, idx): return lst[idx] if idx < len(lst) else 0
-        
-        h_times = get_h('time')
-        cur_idx = 0
-        for i, ts in enumerate(h_times):
-            if ts >= now_ts: cur_idx = i; break
-        
-        d_times = get_d('time')
+                return float(v) if v is not None and math.isfinite(float(v)) else default
+            except:
+                return default
+                
+        def g_idx(lst, idx):
+            return lst[idx] if idx < len(lst) else 0
+            
+        h_t = hourly.get('time', [])
+        c_idx = 0
+        for i, ts in enumerate(h_t):
+            if ts >= now_ts:
+                c_idx = i
+                break
+                
+        d_t = daily.get('time', [])
         d_idx = 0
-        for i, ts in enumerate(d_times):
-            if ts >= now_ts - 43200: d_idx = i; break
-
-        # --- Markers for Solar subpage ---
-        sr_marker, ss_marker = None, None
+        for i, ts in enumerate(d_t):
+            if ts >= now_ts - 43200:
+                d_idx = i
+                break
+                
+        def get_z(lst):
+            if not lst: return []
+            if self.clim_zoom == 0: return lst
+            elif self.clim_zoom == 1: return lst[max(0, c_idx-24*30):]
+            elif self.clim_zoom == 2: return lst[max(0, c_idx-24*7):]
+            elif self.clim_zoom == 3: return lst[max(0, c_idx-24):]
+            elif self.clim_zoom == 4: return lst[c_idx:]
+            return lst
+            
+        z_t, z_m = get_z(h_t), None
+        if self.clim_zoom < 4 and z_t:
+            for i, ts in enumerate(z_t):
+                if ts >= now_ts:
+                    z_m = i
+                    break
+                    
+        sr_m, ss_m = None, None
         if self.clim_subpage == 2:
-            sr_ts = v_f(g_idx(get_d('sunrise'), d_idx))
-            ss_ts = v_f(g_idx(get_d('sunset'), d_idx))
-            for i, ts in enumerate(h_times):
-                if ts >= sr_ts and sr_marker is None: sr_marker = i
-                if ts >= ss_ts and ss_marker is None: ss_marker = i
-
-        # --- SUBPAGE 0: SUMMARY ---
+            sr_ts = v_f(g_idx(daily.get('sunrise', []), d_idx))
+            ss_ts = v_f(g_idx(daily.get('sunset', []), d_idx))
+            for i, ts in enumerate(z_t):
+                if ts >= sr_ts and sr_m is None: sr_m = i
+                if ts >= ss_ts and ss_m is None: ss_m = i
+                
+        def plot(gx, gy, gw, gh, key, lbl, col, extra=None):
+            self.draw_graph(gx, gy, gw, gh, get_z(hourly.get(key, [])), lbl, col, mark_idx=z_m, times=z_t, extra_markers=extra)
+            
         if self.clim_subpage == 0:
-            lx, ly = 40, 100
-            self.canvas.create_text(lx, ly, anchor="nw", text="CURRENT SENSORS:", fill="cyan", font=("Monaco", 12, "bold"))
-            ly += 25
-            details = [f"TEMP: {v_f(curr.get('temperature_2m')):>5.1f}C", f"FEELS: {v_f(curr.get('apparent_temperature')):>5.1f}C", f"HUMID: {v_f(curr.get('relative_humidity_2m')):>5.1f}%", f"PRESS: {v_f(curr.get('pressure_msl')):>5.1f}hPa", f"WIND: {v_f(curr.get('wind_speed_10m')):>5.1f}kmh"]
-            for i, d in enumerate(details): self.canvas.create_text(lx + 10, ly + i*18, anchor="nw", text=d, fill="white", font=("Monaco", 9))
+            lx, ly = 40, 80
+            dtl = [
+                f"TEMP: {v_f(curr.get('temperature_2m')):>5.1f}C",
+                f"FEELS: {v_f(curr.get('apparent_temperature')):>5.1f}C",
+                f"HUMID: {v_f(curr.get('relative_humidity_2m')):>5.1f}%",
+                f"PRESS: {v_f(curr.get('pressure_msl')):>5.1f}hPa",
+                f"WIND: {v_f(curr.get('wind_speed_10m')):>5.1f}kmh"
+            ]
+            for i, d in enumerate(dtl):
+                self.canvas.create_text(lx+10, ly+i*16, anchor="nw", text=d, fill="white", font=("Monaco", 9))
+                
+            rx, ry = w*0.35, 80
+            dmx, dmn, dpb = daily.get('temperature_2m_max',[]), daily.get('temperature_2m_min',[]), daily.get('precipitation_probability_max',[])
+            for i in range(d_idx, min(d_idx+16, len(d_t))):
+                dt = datetime.datetime.fromtimestamp(d_t[i]).strftime("%m/%d")
+                tmn, tmx, pb = g_idx(dmn, i), g_idx(dmx, i), g_idx(dpb, i)
+                self.canvas.create_text(rx+10, ry+(i-d_idx)*14, anchor="nw", text=f"{dt}: {v_f(tmn):>4.1f}-{v_f(tmx):>4.1f}C | PREC:{v_f(pb):>3.0f}%", fill="white", font=("Monaco", 8))
+                
+            plot(50, 360, w-100, 150, 'temperature_2m', "TEMP TREND (C)", "cyan")
+            plot(50, 545, w-100, 150, 'precipitation_probability', "PRECIP PROB (%)", "magenta")
             
-            rx, ry = w*0.35, 100
-            self.canvas.create_text(rx, ry, anchor="nw", text="16-DAY FORECAST:", fill="cyan", font=("Monaco", 12, "bold"))
-            ry += 25
-            d_max, d_min, d_prob = get_d('temperature_2m_max'), get_d('temperature_2m_min'), get_d('precipitation_probability_max')
-            for i in range(d_idx, min(d_idx+16, len(d_times))):
-                dt = datetime.datetime.fromtimestamp(d_times[i]).strftime("%m/%d")
-                t_min = d_min[i] if i < len(d_min) else 0
-                t_max = d_max[i] if i < len(d_max) else 0
-                prob = d_prob[i] if i < len(d_prob) else 0
-                txt = f"{dt}: {v_f(t_min):>4.1f}-{v_f(t_max):>4.1f}C | PREC:{v_f(prob):>3.0f}%"
-                self.canvas.create_text(rx + 10, ry + (i-d_idx)*16, anchor="nw", text=txt, fill="white", font=("Monaco", 8))
-
-            gx, gy = 50, 400
-            gw, gh = w - 100, 120
-            self.draw_graph(gx, gy, gw, gh, get_h('temperature_2m'), "TEMP HIST/FCST (C)", "cyan", mark_idx=cur_idx, times=h_times)
-            self.draw_graph(gx, gy+160, gw, gh, get_h('precipitation_probability')[cur_idx:], "PRECIP PROB FCST (%)", "magenta", times=h_times[cur_idx:])
-
-        # --- SUBPAGE 1: SURFACE & SOIL ---
         elif self.clim_subpage == 1:
-            lx, ly = 40, 100
-            self.canvas.create_text(lx, ly, anchor="nw", text="SURFACE:", fill="cyan", font=("Monaco", 12, "bold"))
-            ly += 25
-            details = [f"SFC PRESS: {v_f(curr.get('surface_pressure')):>6.1f} hPa", f"VISIBILTY: {v_f(curr.get('visibility', 0))/1000:>6.1f} km", f"EVAPO(ET): {v_f(curr.get('evapotranspiration')):>6.2f} mm/h"]
-            for i, d in enumerate(details): self.canvas.create_text(lx + 10, ly + i*18, anchor="nw", text=d, fill="white", font=("Monaco", 9))
+            lx, ly = 40, 80
+            dtl = [
+                f"SFC PRESS: {v_f(curr.get('surface_pressure')):>6.1f} hPa",
+                f"VISIBILTY: {v_f(curr.get('visibility', 0))/1000:>6.1f} km",
+                f"EVAPO(ET): {v_f(curr.get('evapotranspiration')):>6.2f} mm/h"
+            ]
+            for i, d in enumerate(dtl):
+                self.canvas.create_text(lx+10, ly+i*18, anchor="nw", text=d, fill="white", font=("Monaco", 9))
+                
+            mx, my = w*0.4, 80
+            st_0 = hourly.get('soil_temperature_0cm',[])
+            st_54 = hourly.get('soil_temperature_54cm',[])
+            sm_0 = hourly.get('soil_moisture_0_to_1cm',[])
+            sl = [
+                f"TEMP (0cm): {v_f(g_idx(st_0, c_idx)):>5.1f}C",
+                f"TEMP(54cm): {v_f(g_idx(st_54, c_idx)):>5.1f}C",
+                f"MOIST(0-1): {v_f(g_idx(sm_0, c_idx))*100:>5.1f}%"
+            ]
+            for i, s in enumerate(sl):
+                self.canvas.create_text(mx+10, my+i*18, anchor="nw", text=s, fill="#8b4513", font=("Monaco", 9))
+                
+            plot(50, 220, w-100, 110, 'soil_temperature_0cm', "SOIL TEMP (0CM)", "#ff5500")
+            plot(50, 355, w-100, 110, 'soil_moisture_0_to_1cm', "SOIL MOISTURE (0-1CM)", "#00aa00")
+            plot(50, 490, w-100, 110, 'surface_pressure', "SURFACE PRESSURE", "#aaa")
             
-            mx, my = w*0.4, 100
-            self.canvas.create_text(mx, my, anchor="nw", text="SOIL ANALYTICS:", fill="cyan", font=("Monaco", 12, "bold"))
-            my += 25
-            soil = [f"TEMP (0cm): {v_f(g_idx(get_h('soil_temperature_0cm'), cur_idx)):>5.1f}C", f"TEMP(54cm): {v_f(g_idx(get_h('soil_temperature_54cm'), cur_idx)):>5.1f}C", f"MOIST(0-1): {v_f(g_idx(get_h('soil_moisture_0_to_1cm'), cur_idx))*100:>5.1f}%"]
-            for i, s in enumerate(soil): self.canvas.create_text(mx + 10, my + i*18, anchor="nw", text=s, fill="#8b4513", font=("Monaco", 9))
-
-            gx, gy = 50, 250
-            gw, gh = w - 100, 100
-            self.draw_graph(gx, gy, gw, gh, get_h('soil_temperature_0cm'), "SOIL TEMP (0CM) TREND", "#ff5500", mark_idx=cur_idx, times=h_times)
-            self.draw_graph(gx, gy+120, gw, gh, get_h('soil_moisture_0_to_1cm'), "SOIL MOISTURE (0-1CM) TREND", "#00aa00", mark_idx=cur_idx, times=h_times)
-            self.draw_graph(gx, gy+240, gw, gh, get_h('surface_pressure'), "SURFACE PRESSURE TREND", "#aaa", mark_idx=cur_idx, times=h_times)
-
-        # --- SUBPAGE 2: SOLAR RADIATION ---
         elif self.clim_subpage == 2:
-            lx, ly = 40, 100
-            self.canvas.create_text(lx, ly, anchor="nw", text="CURRENT SOLAR:", fill="cyan", font=("Monaco", 12, "bold"))
-            ly += 25
-            details = [f"SHORTWAVE: {v_f(g_idx(get_h('shortwave_radiation'), cur_idx)):>6.1f} W/m2", f"DIRECT: {v_f(g_idx(get_h('direct_radiation'), cur_idx)):>6.1f} W/m2", f"UV INDEX: {v_f(g_idx(get_h('uv_index'), cur_idx)):>6.1f}"]
-            for i, d in enumerate(details): self.canvas.create_text(lx + 10, ly + i*18, anchor="nw", text=d, fill="white", font=("Monaco", 9))
+            lx, ly = 40, 80
+            sw = hourly.get('shortwave_radiation',[])
+            dr = hourly.get('direct_radiation',[])
+            uv = hourly.get('uv_index',[])
+            dtl = [
+                f"SHORTWAVE: {v_f(g_idx(sw, c_idx)):>6.1f} W/m2",
+                f"DIRECT: {v_f(g_idx(dr, c_idx)):>6.1f} W/m2",
+                f"UV INDEX: {v_f(g_idx(uv, c_idx)):>6.1f}"
+            ]
+            for i, d in enumerate(dtl):
+                self.canvas.create_text(lx+10, ly+i*18, anchor="nw", text=d, fill="white", font=("Monaco", 9))
+                
+            mx, my = w*0.4, 80
+            def fmt_t(ts):
+                return datetime.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "--:--"
+                
+            sr_ts = v_f(g_idx(daily.get('sunrise', []), d_idx))
+            ss_ts = v_f(g_idx(daily.get('sunset', []), d_idx))
+            dl_dur = v_f(g_idx(daily.get('daylight_duration', []), d_idx))
+            astro = [
+                f"SUNRISE: {fmt_t(sr_ts)}",
+                f"SUNSET: {fmt_t(ss_ts)}",
+                f"DAYLIGHT: {dl_dur/3600:>5.1f} hrs"
+            ]
+            for i, a in enumerate(astro):
+                self.canvas.create_text(mx+10, my+i*18, anchor="nw", text=a, fill="yellow", font=("Monaco", 9))
+                
+            mrk = []
+            if sr_m: mrk.append((sr_m, "SR", "yellow"))
+            if ss_m: mrk.append((ss_m, "SS", "orange"))
             
-            mx, my = w*0.4, 100
-            self.canvas.create_text(mx, my, anchor="nw", text="ASTRO TIMES:", fill="cyan", font=("Monaco", 12, "bold"))
-            my += 25
-            def fmt_t(ts): return datetime.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "--:--"
-            astro = [f"SUNRISE: {fmt_t(g_idx(get_d('sunrise'), d_idx))}", f"SUNSET: {fmt_t(g_idx(get_d('sunset'), d_idx))}", f"DAYLIGHT: {v_f(g_idx(get_d('daylight_duration'), d_idx))/3600:>5.1f} hrs"]
-            for i, a in enumerate(astro): self.canvas.create_text(mx + 10, my + i*18, anchor="nw", text=a, fill="yellow", font=("Monaco", 9))
-
-            gx, gy = 50, 250
-            gw, gh = w - 100, 85
-            # We'll plot markers for Sunrise and Sunset if available
-            markers = []
-            if sr_marker: markers.append((sr_marker, "SR", "yellow"))
-            if ss_marker: markers.append((ss_marker, "SS", "orange"))
+            plot(50, 220, w-100, 95, 'shortwave_radiation', "SHORTWAVE (W/m2)", "yellow", extra=mrk)
+            plot(50, 335, w-100, 95, 'uv_index', "UV INDEX", "#ffaa00", extra=mrk)
+            plot(50, 450, w-100, 95, 'global_tilted_irradiance', "TILTED IRRAD", "#ffd700", extra=mrk)
+            plot(50, 565, w-100, 95, 'sunshine_duration', "SUNSHINE DURATION (s)", "#fffacd", extra=mrk)
             
-            self.draw_graph(gx, gy, gw, gh, get_h('shortwave_radiation'), "SHORTWAVE RADIATION (W/m2)", "yellow", mark_idx=cur_idx, times=h_times, extra_markers=markers)
-            self.draw_graph(gx, gy+100, gw, gh, get_h('uv_index'), "UV INDEX TREND", "#ffaa00", mark_idx=cur_idx, times=h_times, extra_markers=markers)
-            self.draw_graph(gx, gy+200, gw, gh, get_h('global_tilted_irradiance'), "GLOBAL TILTED IRRADIANCE", "#ffd700", mark_idx=cur_idx, times=h_times, extra_markers=markers)
-            self.draw_graph(gx, gy+300, gw, gh, get_h('sunshine_duration'), "SUNSHINE DURATION (s)", "#fffacd", mark_idx=cur_idx, times=h_times, extra_markers=markers)
-
-        # --- SUBPAGE 3: AVIATION & STABILITY ---
         elif self.clim_subpage == 3:
-            lx, ly = 40, 100
-            self.canvas.create_text(lx, ly, anchor="nw", text="STABILITY:", fill="cyan", font=("Monaco", 12, "bold"))
-            ly += 25
-            stability = [f"CAPE: {v_f(g_idx(get_h('cape'), cur_idx)):>6.1f} J/kg", f"LIFTED IX: {v_f(g_idx(get_h('lifted_index'), cur_idx)):>6.1f}", f"FREEZE LVL:{v_f(g_idx(get_h('freezing_level_height'), cur_idx)):>6.1f} m", f"PBL HEIGHT:{v_f(g_idx(get_h('boundary_layer_height'), cur_idx)):>6.1f} m"]
-            for i, s in enumerate(stability): self.canvas.create_text(lx + 10, ly + i*18, anchor="nw", text=s, fill="white", font=("Monaco", 9))
-
-            gx, gy = 50, 250
-            gw, gh = w - 100, 100
-            self.draw_graph(gx, gy, gw, gh, get_h('cape'), "CAPE (CONVECTIVE POTENTIAL)", "red", mark_idx=cur_idx, times=h_times)
-            self.draw_graph(gx, gy+120, gw, gh, get_h('freezing_level_height'), "FREEZING LEVEL HEIGHT (m)", "white", mark_idx=cur_idx, times=h_times)
-            self.draw_graph(gx, gy+240, gw, gh, get_h('boundary_layer_height'), "BOUNDARY LAYER HEIGHT (m)", "cyan", mark_idx=cur_idx, times=h_times)
-
-        # --- SUBPAGE 4: HUMIDITY & VAPOUR ---
+            lx, ly = 40, 80
+            cp = hourly.get('cape',[])
+            li = hourly.get('lifted_index',[])
+            fl = hourly.get('freezing_level_height',[])
+            bl = hourly.get('boundary_layer_height',[])
+            stab = [
+                f"CAPE: {v_f(g_idx(cp, c_idx)):>6.1f} J/kg",
+                f"LIFTED IX: {v_f(g_idx(li, c_idx)):>6.1f}",
+                f"FREEZE LVL:{v_f(g_idx(fl, c_idx)):>6.1f} m",
+                f"PBL HEIGHT:{v_f(g_idx(bl, c_idx)):>6.1f} m"
+            ]
+            for i, s in enumerate(stab):
+                self.canvas.create_text(lx+10, ly+i*18, anchor="nw", text=s, fill="white", font=("Monaco", 9))
+            plot(50, 220, w-100, 110, 'cape', "CAPE (CONVECTIVE)", "red")
+            plot(50, 355, w-100, 110, 'freezing_level_height', "FREEZING HEIGHT (m)", "white")
+            plot(50, 490, w-100, 110, 'boundary_layer_height', "BOUNDARY LAYER (m)", "cyan")
+            
         elif self.clim_subpage == 4:
-            lx, ly = 40, 100
-            self.canvas.create_text(lx, ly, anchor="nw", text="VAPOUR:", fill="cyan", font=("Monaco", 12, "bold"))
-            ly += 25
-            vapour = [f"DEW POINT: {v_f(g_idx(get_h('dew_point_2m'), cur_idx)):>5.1f}C", f"WET BULB: {v_f(g_idx(get_h('wet_bulb_temperature_2m'), cur_idx)):>5.1f}C", f"VPD: {v_f(g_idx(get_h('vapour_pressure_deficit'), cur_idx)):>6.2f} kPa"]
-            for i, v in enumerate(vapour): self.canvas.create_text(lx + 10, ly + i*18, anchor="nw", text=v, fill="white", font=("Monaco", 9))
-
-            gx, gy = 50, 250
-            gw, gh = w - 100, 100
-            self.draw_graph(gx, gy, gw, gh, get_h('relative_humidity_2m'), "RELATIVE HUMIDITY (%)", "cyan", mark_idx=cur_idx, times=h_times)
-            self.draw_graph(gx, gy+120, gw, gh, get_h('vapour_pressure_deficit'), "VAPOUR PRESSURE DEFICIT (kPa)", "magenta", mark_idx=cur_idx, times=h_times)
-            self.draw_graph(gx, gy+240, gw, gh, get_h('total_column_integrated_water_vapour'), "PRECIPITABLE WATER (kg/m2)", "#5555ff", mark_idx=cur_idx, times=h_times)
-
+            lx, ly = 40, 80
+            dp = hourly.get('dew_point_2m',[])
+            wb = hourly.get('wet_bulb_temperature_2m',[])
+            vpd = hourly.get('vapour_pressure_deficit',[])
+            vap = [
+                f"DEW POINT: {v_f(g_idx(dp, c_idx)):>5.1f}C",
+                f"WET BULB: {v_f(g_idx(wb, c_idx)):>5.1f}C",
+                f"VPD: {v_f(g_idx(vpd, c_idx)):>6.2f} kPa"
+            ]
+            for i, v in enumerate(vap):
+                self.canvas.create_text(lx+10, ly+i*18, anchor="nw", text=v, fill="white", font=("Monaco", 9))
+            plot(50, 220, w-100, 110, 'relative_humidity_2m', "REL HUMIDITY (%)", "cyan")
+            plot(50, 355, w-100, 110, 'vapour_pressure_deficit', "VAPOUR DEFICIT", "magenta")
+            plot(50, 490, w-100, 110, 'total_column_integrated_water_vapour', "PRECIP WATER", "#5555ff")
+            
         ft = meteo.get('fetch_time', 0)
         ago = int(time.time() - ft)
         self.canvas.create_text(w-50, h-40, anchor="se", text=f"LAST FETCH: {ago}s AGO", fill="#555", font=("Monaco", 8))
@@ -521,70 +533,36 @@ class PrimaryFlightDisplay:
     def draw_graph(self, x, y, w, h, data, label, color, mark_idx=None, times=None, extra_markers=None):
         self.canvas.create_rectangle(x, y, x+w, y+h, fill="#050505", outline="#333")
         self.canvas.create_text(x, y-10, anchor="sw", text=label, fill=color, font=("Monaco", 9, "bold"))
-        
         def is_fin(v):
-            try:
-                return v is not None and math.isfinite(float(v))
-            except:
-                return False
-
+            try: return v is not None and math.isfinite(float(v))
+            except: return False
         baseline = 0.0
         for v in data:
-            if is_fin(v):
-                baseline = float(v)
-                break
-
-        clean_data = [float(d) if is_fin(d) else baseline for d in data]
-        if not clean_data: return
-        
-        n = len(clean_data)
-        d_min, d_max = min(clean_data), max(clean_data)
+            if is_fin(v): baseline = float(v); break
+        clean = [float(d) if is_fin(d) else baseline for d in data]
+        if not clean: return
+        n, d_min, d_max = len(clean), min(clean), max(clean)
         if d_max == d_min: d_max += 1
-        
-        pts = []
-        for i, v in enumerate(clean_data):
-            px = x + (i / max(1, n-1)) * w
-            py = y + h - ((v - d_min) / (d_max - d_min)) * h
-            pts.append((px, py))
-            
-        if len(pts) >= 2:
-            self.canvas.create_line(pts, fill=color, width=1 if n > 500 else 2)
-            
+        pts = [(x + (i / max(1, n-1)) * w, y + h - ((v - d_min) / (d_max - d_min)) * h) for i, v in enumerate(clean)]
+        if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1 if n > 500 else 2)
         if mark_idx is not None and 0 <= mark_idx < n:
             mx = x + (mark_idx / max(1, n-1)) * w
             self.canvas.create_line(mx, y, mx, y+h, fill="yellow", dash=(4,4))
             self.canvas.create_text(mx, y+h+5, anchor="n", text="NOW", fill="yellow", font=("Monaco", 7))
-
         if extra_markers:
             for m_idx, m_lbl, m_col in extra_markers:
                 if 0 <= m_idx < n:
                     mx = x + (m_idx / max(1, n-1)) * w
                     self.canvas.create_line(mx, y, mx, y+h, fill=m_col, dash=(2,2))
                     self.canvas.create_text(mx, y-5, anchor="s", text=m_lbl, fill=m_col, font=("Monaco", 6))
-
-        # --- X-Axis Time Labels ---
         if times and len(times) == n:
-            num_labels = 8
-            label_indices = [int(i * (n - 1) / (num_labels - 1)) for i in range(num_labels)]
-            # Ensure "NOW" is always one of the labels if available
-            if mark_idx is not None:
-                # Replace nearest label or just add it
-                label_indices.append(mark_idx)
-                label_indices = sorted(list(set(label_indices)))
-
-            for idx in label_indices:
+            num = 8; idxs = sorted(list(set([int(i * (n-1) / (num-1)) for i in range(num)] + ([mark_idx] if mark_idx is not None else []))))
+            for idx in idxs:
                 if 0 <= idx < n:
-                    tx = x + (idx / max(1, n-1)) * w
-                    ts = float(times[idx])
-                    dt_obj = datetime.datetime.fromtimestamp(ts)
-                    ts_str = dt_obj.strftime("%d/%m %Hh")
-                    anchor = "n"
-                    if idx == 0: anchor = "nw"
-                    elif idx == n-1: anchor = "ne"
-                    
+                    tx = x + (idx / max(1, n-1)) * w; dt = datetime.datetime.fromtimestamp(float(times[idx]))
+                    anchor = "nw" if idx == 0 else ("ne" if idx == n-1 else "n")
                     self.canvas.create_line(tx, y+h, tx, y+h+5, fill="#666")
-                    self.canvas.create_text(tx, y+h+8, anchor=anchor, text=ts_str, fill="#999", font=("Monaco", 7))
-
+                    self.canvas.create_text(tx, y+h+8, anchor=anchor, text=dt.strftime("%d/%m %Hh"), fill="#999", font=("Monaco", 7))
         self.canvas.create_text(x-5, y, anchor="ne", text=f"{d_max:.1f}", fill="white", font=("Monaco", 7))
         self.canvas.create_text(x-5, y+h, anchor="se", text=f"{d_min:.1f}", fill="white", font=("Monaco", 7))
 
@@ -600,32 +578,23 @@ class PrimaryFlightDisplay:
         r = min(w, h) * 0.25
         self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill="#1a1a1a", outline="white", width=2)
         roll_rad, pitch_rad, yaw_rad = math.radians(self.roll), math.radians(self.pitch), math.radians(self.heading)
-        
-        # Parallels (Latitude)
         for lat in range(-90, 91, 15):
-            pts = []; color = "#555"
-            if lat < 0: color = "#4b2503" # Darker Earth
-            elif lat > 0: color = "#004477" # Darker Sky
-            if lat == 0: color = "white"
-            
+            pts, color = [], ("white" if lat == 0 else ("#4b2503" if lat < 0 else "#004477"))
             for lon in range(0, 361, 5):
                 px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
                 if pz > 0: pts.append((cx + px, cy + py))
                 else:
-                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=2 if lat==0 else 1); pts = []
-                    else: pts = []
+                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=2 if lat==0 else 1)
+                    pts = []
             if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=2 if lat==0 else 1)
-            
-        # Meridians (Longitude)
         for lon in range(0, 360, 30):
-            pts = []; color = "#333"
-            if lon % 90 == 0: color = "#666"
+            pts, color = [], ("#666" if lon % 90 == 0 else "#333")
             for lat in range(-90, 91, 5):
                 px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
                 if pz > 0: pts.append((cx + px, cy + py))
                 else:
-                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1); pts = []
-                    else: pts = []
+                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
+                    pts = []
             if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
         m_pts = [(-10,-10), (w+10,-10), (w+10,h+10), (-10,h+10), (-10,-10)]
         for i in range(41):
