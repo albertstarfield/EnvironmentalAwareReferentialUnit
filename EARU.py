@@ -5577,6 +5577,11 @@ if HAS_QUART:
             wea = d.get('ecosystem_weather', {}) # pyrefly: ignore
             ext = d.get('ecosystem_weather', {}).get('3rdparty_meteo', {}).get('current', {}) # pyrefly: ignore
             
+            # Use WindMap stats at 10m radius for environmental wind
+            wind_data = wea.get('wind_map', {}).get('stats', {}).get('10.0', (0.0, "", "", 0.0)) # pyrefly: ignore
+            w_spd_mps = float(wind_data[0]) if isinstance(wind_data, (list, tuple)) else 0.0
+            w_dir_deg = float(wind_data[3]) if isinstance(wind_data, (list, tuple)) else 0.0
+
             # Davis/WiFiLogger style mapping
             wfl = {
                 "stnmod": 17, # VP2 mode
@@ -5587,9 +5592,9 @@ if HAS_QUART:
                 "humout": f"{smc.get('humidity_pct', 0):.0f}", # pyrefly: ignore
                 "tempin": f"{k_to_f(smc.get('airflow_inlet_k', 293.15)):.1f}", # pyrefly: ignore
                 "humin": f"{smc.get('humidity_pct', 0):.0f}", # pyrefly: ignore
-                "windspd": f"{mps_to_mph(loc.get('v_mag', 0)):.1f}", # pyrefly: ignore
-                "winddir": f"{loc.get('heading', 0):.0f}", # pyrefly: ignore
-                "windavg10": f"{mps_to_mph(loc.get('v_mag', 0)):.1f}", # pyrefly: ignore
+                "windspd": f"{mps_to_mph(w_spd_mps):.1f}",
+                "winddir": f"{w_dir_deg:.0f}",
+                "windavg10": f"{mps_to_mph(w_spd_mps):.1f}",
                 "bar": f"{hpa_to_inhg(loc.get('pressure_hpa', 1013.25)):.3f}", # pyrefly: ignore
                 "dew": f"{k_to_f(wea.get('dew_point_k', 293.15)):.1f}", # pyrefly: ignore
                 "rainr": "0.00",
