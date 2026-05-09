@@ -151,17 +151,26 @@ Detects physiological signals through the chassis using the IMU.
 
 ---
 
-## WifiLogger API Access
-The same data structure found in `EARU_data.dat` is also available in real-time via the built-in async API.
+## WiFiLogger 2 / Davis API Compatibility
+EARU emulates the **WiFiLogger 2** (Davis Instruments) local API. This allows third-party weather software to treat EARU as a professional Davis weather station.
 
-| Method | Endpoint | Port | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/` | `3270` | Returns the latest full system state JSON. |
+| Method | Endpoint | Port | Format | Units |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/wflexp.json` | `3270` | Davis JSON | Imperial (F, inHg, mph) |
+| `GET` | `/wflexpj.json` | `3270` | Davis JSON | Imperial (F, inHg, mph) |
+| `GET` | `/` | `3270` | Full System | SI / Metric (K, hPa, m/s) |
 
-### Usage Example (cURL)
-```bash
-curl http://localhost:3270/
-```
+### Davis Field Mapping
+| Davis Key | EARU Source |
+| :--- | :--- |
+| `tempout` | Ambient temperature from SMC (`ambient_temp_k`) |
+| `bar` | Local barometric pressure (`pressure_hpa`) |
+| `windspd` | Current ground speed / motion vector (`v_mag`) |
+| `dew` | Calculated dew point (`dew_point_k`) |
+| `solrad` | External 3rd party shortwave radiation |
+
+### Integration Example (Home Assistant)
+Configure your Davis integration to point to `http://[YOUR_IP]:3270/wflexp.json`.
 
 ## Technical Implementation Notes
 - **JSON Encoding:** Numpy integers and floats are converted to standard JSON types. Binary `als` data is hex-encoded.

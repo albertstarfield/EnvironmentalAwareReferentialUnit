@@ -67,10 +67,10 @@ EARU acts as a **Hybrid Weather Station**, combining local high-frequency hardwa
 - **Local Analytics:** Real-time estimation of **Dew Point**, **Air Density**, and **Pressure Tendency** derived from internal SMC thermodynamics and the Bosch pressure sensor.
 - **Fluid Dynamics:** 7x7 grid of **Wind Mapping** vectors interpolated from device motion and pressure differentials.
 - **Weather History:** Integration with external APIs (OpenMeteo) for historical trends and 16-day forecasting.
-- **WifiLogger API:** High-concurrency async REST API serving the full system state in JSON format.
+- **WiFiLogger 2 API:** Drop-in compatibility for **WiFiLogger 2 / Davis WeatherLinkIP** clients.
+  - **Endpoints:** `/wflexp.json`, `/wflexpj.json`
+  - **Standard:** Follows Davis naming conventions (`tempout`, `bar`, `windspd`) and imperial units (F, inHg, mph) for seamless integration with Home Assistant, Cumulus MX, and other weather software.
   - **Port:** `3270`
-  - **Endpoint:** `GET /`
-  - **Latency:** < 2ms (served from thread-safe global memory)
 
 ### self-bootstrapping
 
