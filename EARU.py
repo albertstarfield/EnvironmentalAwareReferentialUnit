@@ -5575,34 +5575,40 @@ if HAS_QUART:
             smc = d.get('smc', {}) # pyrefly: ignore
             loc = d.get('location', {}) # pyrefly: ignore
             wea = d.get('ecosystem_weather', {}) # pyrefly: ignore
-            ext = d.get('ecosystem_weather', {}).get('3rdparty_meteo', {}).get('current', {}) # pyrefly: ignore
+            ext = wea.get('3rdparty_meteo', {}).get('current', {}) # pyrefly: ignore
             
-            # Use WindMap stats at 10m radius for environmental wind
+            # WindMap environmental wind (10m radius)
             wind_data = wea.get('wind_map', {}).get('stats', {}).get('10.0', (0.0, "", "", 0.0)) # pyrefly: ignore
-            w_spd_mps = float(wind_data[0]) if isinstance(wind_data, (list, tuple)) else 0.0
-            w_dir_deg = float(wind_data[3]) if isinstance(wind_data, (list, tuple)) else 0.0
+            w_spd = float(wind_data[0]) if isinstance(wind_data, (list, tuple)) else 0.0
+            w_dir = float(wind_data[3]) if isinstance(wind_data, (list, tuple)) else 0.0
 
-            # Davis/WiFiLogger style mapping - Strictly formatted for clients
+            # Unit helpers (returning metric as per user's expected structure example)
+            def to_c(k): return k - 273.15
+            
+            # Barometer Trend (Davis codes: 0=steady, 20=rising, -20=falling)
+            tendency = wea.get('pressure_tendency_hpa', 0.0) # pyrefly: ignore
+            bt_code = 0
+            if tendency > 0.5: bt_code = 20
+            elif tendency < -0.5: bt_code = -20
+
+            # Rain Rate Proxy: use external precip or dew point spread risk
+            precip = float(ext.get('precipitation', 0.0)) # pyrefly: ignore
+            spread = wea.get('dew_point_spread', 10.0) # pyrefly: ignore
+            # If spread is < 1.0K, assume high risk/ongoing precip if precip data is missing
+            rr_val = precip if precip > 0 else (0.5 if spread < 1.0 else 0.0)
+
+            # Strictly abbreviated format for WiFiLogger clients
             wfl = {
-                "stnmod": 17, 
-                "ver": "2.12",
-                "loctime": int(d.get('time', time.time())), # pyrefly: ignore
-                "utctime": int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
-                "tempout": f"{k_to_f(smc.get('ambient_temp_k', 293.15)):.1f}", # pyrefly: ignore
-                "humout": f"{smc.get('humidity_pct', 0):.0f}", # pyrefly: ignore
-                "tempin": f"{k_to_f(smc.get('airflow_inlet_k', 293.15)):.1f}", # pyrefly: ignore
-                "humin": f"{smc.get('humidity_pct', 0):.0f}", # pyrefly: ignore
-                "windspd": f"{mps_to_mph(w_spd_mps):.1f}",
-                "winddir": f"{w_dir_deg:.0f}",
-                "windavg10": f"{mps_to_mph(w_spd_mps):.1f}",
-                "bar": f"{hpa_to_inhg(loc.get('pressure_hpa', 1013.25)):.3f}", # pyrefly: ignore
-                "dew": f"{k_to_f(wea.get('dew_point_k', 293.15)):.1f}", # pyrefly: ignore
-                "rainr": "0.00",
-                "raind": "0.00",
-                "rainm": "0.00",
-                "rainy": "0.00",
-                "solrad": f"{ext.get('shortwave_radiation', 0):.0f}", # pyrefly: ignore
-                "uv": f"{ext.get('uv_index', 0):.1f}" # pyrefly: ignore
+                "OT": round(float(ext.get('temperature_2m', to_c(smc.get('ambient_temp_k', 293.15)))), 1), # pyrefly: ignore
+                "OH": int(float(ext.get('relative_humidity_2m', smc.get('humidity_pct', 0)))), # pyrefly: ignore
+                "IT": round(to_c(smc.get('ambient_temp_k', 293.15)), 1), # pyrefly: ignore
+                "IH": int(float(smc.get('humidity_pct', 0))), # pyrefly: ignore
+                "AP": round(float(loc.get('pressure_hpa', 1013.2)), 1), # pyrefly: ignore
+                "WS": round(w_spd, 1),
+                "WD": int(w_dir),
+                "RR": round(rr_val, 1),
+                "BT": bt_code,
+                "utctime": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             return wfl
 
