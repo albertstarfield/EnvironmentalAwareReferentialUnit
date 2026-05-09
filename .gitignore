@@ -12,12 +12,14 @@ __pycache__/
 .env
 
 # EARU Data and State
-EARU_data.dat
-EARU_WeatherAPIHistory.dat
-.meteo_cache.sqlite
+*.dat
+*.log
+.meteo_cache.sqlite*
 save_state/
 EARU.py.bak
 tmpfs/
+EARU_dataIO
+smcFanPressurehPaDetection
 
 # Build and Core
 EARU_app
