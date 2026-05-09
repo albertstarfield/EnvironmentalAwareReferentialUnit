@@ -5560,15 +5560,64 @@ def main(stdscr=None):
 if HAS_QUART:
     app = Quart(__name__) # pyrefly: ignore
 
-    @app.route("/")
-    async def get_data():
+    def k_to_f(k):
+        return (k - 273.15) * 9/5 + 32
+
+    def hpa_to_inhg(hpa):
+        return hpa * 0.02953
+
+    def mps_to_mph(mps):
+        return mps * 2.23694
+
+    def get_wifilogger_json():
         with latest_earu_data_lock:
-            return jsonify(latest_earu_data) # pyrefly: ignore
+            d = latest_earu_data
+            smc = d.get('smc', {}) # pyrefly: ignore
+            loc = d.get('location', {}) # pyrefly: ignore
+            wea = d.get('ecosystem_weather', {}) # pyrefly: ignore
+            ext = d.get('ecosystem_weather', {}).get('3rdparty_meteo', {}).get('current', {}) # pyrefly: ignore
+            
+            # Davis/WiFiLogger style mapping
+            wfl = {
+                "stnmod": 17, # VP2 mode
+                "ver": "2.12-EARU",
+                "loctime": int(d.get('time', time.time())), # pyrefly: ignore
+                "utctime": int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+                "tempout": f"{k_to_f(smc.get('ambient_temp_k', 293.15)):.1f}", # pyrefly: ignore
+                "humout": f"{smc.get('humidity_pct', 0):.0f}", # pyrefly: ignore
+                "tempin": f"{k_to_f(smc.get('airflow_inlet_k', 293.15)):.1f}", # pyrefly: ignore
+                "humin": f"{smc.get('humidity_pct', 0):.0f}", # pyrefly: ignore
+                "windspd": f"{mps_to_mph(loc.get('v_mag', 0)):.1f}", # pyrefly: ignore
+                "winddir": f"{loc.get('heading', 0):.0f}", # pyrefly: ignore
+                "windavg10": f"{mps_to_mph(loc.get('v_mag', 0)):.1f}", # pyrefly: ignore
+                "bar": f"{hpa_to_inhg(loc.get('pressure_hpa', 1013.25)):.3f}", # pyrefly: ignore
+                "dew": f"{k_to_f(wea.get('dew_point_k', 293.15)):.1f}", # pyrefly: ignore
+                "rainr": "0.00",
+                "raind": "0.00",
+                "rainm": "0.00",
+                "rainy": "0.00",
+                "solrad": f"{ext.get('shortwave_radiation', 0):.0f}", # pyrefly: ignore
+                "uv": f"{ext.get('uv_index', 0):.1f}" # pyrefly: ignore
+            }
+            return wfl
+
+    @app.route("/")
+    async def get_raw_data():
+        with latest_earu_data_lock:
+            data_str = json.dumps(latest_earu_data, cls=NpEncoder)
+            return data_str, 200, {'Content-Type': 'application/json'}
+
+    @app.route("/wflexp.json")
+    @app.route("/wflexpj.json")
+    async def get_wifilogger_data():
+        return jsonify(get_wifilogger_json())
 
     async def run_quart_api():
         config = Config() # pyrefly: ignore
         config.bind = ["0.0.0.0:3270"]
-        await serve(app, config) # pyrefly: ignore
+        # Hypercorn tries to register signal handlers by default, 
+        # but we are in a thread, so we must disable them.
+        await serve(app, config, shutdown_trigger=lambda: asyncio.Future()) # pyrefly: ignore
 
     def start_api_thread():
         def _run():
