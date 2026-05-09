@@ -25,6 +25,7 @@ from ._spu import (
     shm_read_new, shm_read_new_gyro,
     shm_read_new_accel_timed, shm_read_new_gyro_timed,
     shm_snap_read, check_available, get_device_info,
+    get_hid_idle_nanoseconds,
     SHM_NAME, SHM_NAME_GYRO, SHM_SIZE,
     SHM_NAME_ALS, SHM_ALS_SIZE, SHM_NAME_LID, SHM_LID_SIZE,
     SHM_SNAP_HDR, ALS_REPORT_LEN,

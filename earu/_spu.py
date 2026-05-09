@@ -249,6 +249,51 @@ def get_device_info():
     return info
 
 
+def get_hid_idle_nanoseconds():
+    """Return the system HID idle time in nanoseconds (no root needed)."""
+    _iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library('IOKit'))
+    _cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library('CoreFoundation'))
+
+    _iokit.IOServiceMatching.restype = ctypes.c_void_p
+    _iokit.IOServiceGetMatchingService.restype = ctypes.c_uint
+    _iokit.IOServiceGetMatchingService.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+    _iokit.IORegistryEntryCreateCFProperty.restype = ctypes.c_void_p
+    _iokit.IORegistryEntryCreateCFProperty.argtypes = [
+        ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
+    _iokit.IOObjectRelease.argtypes = [ctypes.c_uint]
+
+    _cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+    _cf.CFStringCreateWithCString.argtypes = [
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+    _cf.CFNumberGetValue.restype = ctypes.c_bool
+    _cf.CFNumberGetValue.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+    _cf.CFRelease.argtypes = [ctypes.c_void_p]
+
+    def cfstr(s):
+        return _cf.CFStringCreateWithCString(None, s.encode(), CF_UTF8)
+
+    matching = _iokit.IOServiceMatching(b"IOHIDSystem")
+    service = _iokit.IOServiceGetMatchingService(0, matching)
+    if not service:
+        return None
+    
+    prop_name = cfstr("HIDIdleTime")
+    property_ref = _iokit.IORegistryEntryCreateCFProperty(service, prop_name, None, 0)
+    _cf.CFRelease(prop_name)
+    _iokit.IOObjectRelease(service)
+    
+    if not property_ref:
+        return None
+    
+    value = ctypes.c_int64()
+    success = _cf.CFNumberGetValue(property_ref, CF_SINT64, ctypes.byref(value))
+    _cf.CFRelease(property_ref)
+    
+    if success:
+        return value.value
+    return None
+
+
 def sensor_worker(shm_name, restart_count, gyro_shm_name=None,
                    als_shm_name=None, lid_shm_name=None, decimation=None,
                    shutdown_event=None):

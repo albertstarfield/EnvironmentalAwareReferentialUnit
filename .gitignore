@@ -1,14 +1,26 @@
+# IDE and OS
+.DS_Store
+.vscode/
+.idea/
 __pycache__/
 *.py[cod]
 *$py.class
-.DS_Store
-vibration_log_*.json
+
+# Environment
 .venv/
 .venv_pfd/
-build/
-dist/
-*.egg-info/
-.localbin/
-*.log
-*.dat
-smcFanPressurehPaDetection
+.env
+
+# EARU Data and State
+EARU_data.dat
+EARU_WeatherAPIHistory.dat
+.meteo_cache.sqlite
+save_state/
+EARU.py.bak
+tmpfs/
+
+# Build and Core
+EARU_app
+EARU_core.mm
+com.earu.service.plist
+.meteo_cache.sqlite-journal

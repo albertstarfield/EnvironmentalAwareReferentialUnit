@@ -32,6 +32,7 @@ import sys
 import threading
 import time
 from collections import deque
+from typing import Any
 
 # Ensure local earu directory is in path
 curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -39,9 +40,9 @@ if curr_dir not in sys.path:
     sys.path.insert(0, curr_dir)
 
 import numpy as np
-import psutil
+import psutil  # pyrefly: ignore
 import requests
-from numba import njit
+from numba import njit  # pyrefly: ignore
 
 from earu.pedometer import Pedometer
 from earu._spu import (
@@ -59,6 +60,7 @@ from earu._spu import (
     shm_read_new_accel_timed,
     shm_read_new_gyro,
     shm_snap_read,
+    get_hid_idle_nanoseconds,
 )
 
 RST = "\033[0m"
@@ -109,65 +111,127 @@ def ensure_dependencies():
 # Run dependency check
 ensure_dependencies()
 
-def setup_ramdisk():
-    """Creates a 1GB APFS RAM disk for high-frequency data IO if not already present."""
+def setup_ramdisk(force_remount=False):
+    """Creates a 64MB APFS RAM disk for high-frequency data IO."""
     target_vol = "/Volumes/EARU_dataIO"
-    if os.path.exists(target_vol):
-        return target_vol
-
-    print(f"{CYN}[*] Initializing 1GB RAM disk (EARU_dataIO)...{RST}")
+    
+    # 1. Detect and detach all existing EARU_dataIO mounts
     try:
-        # 1. Attach RAM device (2097152 sectors = 1024MB)
-        cmd_attach = ["hdiutil", "attach", "-nomount", "ram://2097152"]
+        mounts = subprocess.check_output(["mount"]).decode().splitlines()
+        earu_mounts = [m for m in mounts if "EARU_dataIO" in m]
+    except Exception:
+        earu_mounts = []
+
+    if earu_mounts:
+        has_canonical = any(f" on {target_vol} (" in m for m in earu_mounts)
+        if not force_remount and has_canonical:
+            return target_vol
+        
+        print(f"{YEL}[*] Cleaning up existing EARU_dataIO mounts...{RST}")
+        for m in earu_mounts:
+            try:
+                m_point = m.split(" on ")[1].split(" (")[0]
+                subprocess.run(["hdiutil", "detach", m_point, "-force"], capture_output=True)
+            except Exception:
+                pass
+
+    # 2. Remove any stale directories in /Volumes
+    try:
+        for d in os.listdir("/Volumes"):
+            if "EARU_dataIO" in d:
+                full_path = os.path.join("/Volumes", d)
+                if not os.path.ismount(full_path):
+                    print(f"{YEL}[*] Removing stale mount point: {full_path}{RST}")
+                    subprocess.run(["rm", "-rf", full_path])
+    except Exception:
+        pass
+
+    print(f"{CYN}[*] Initializing 64MB RAM disk (EARU_dataIO)...{RST}")
+    try:
+        # 1. Attach RAM device (131072 sectors = 64MB)
+        cmd_attach = ["hdiutil", "attach", "-nomount", "ram://131072"]
         dev_path = subprocess.check_output(cmd_attach).decode().strip()
         
         # 2. Format as APFS
         subprocess.check_call(["diskutil", "apfs", "create", dev_path, "EARU_dataIO"])
+        
+        # Verify it mounted at the target_vol
+        if not os.path.exists(target_vol):
+            # Sometimes it might still mount with a number if cleanup was slow
+            mounts = subprocess.check_output(["mount"]).decode().splitlines()
+            for m in mounts:
+                if "EARU_dataIO" in m:
+                    actual_path = m.split(" on ")[1].split(" (")[0]
+                    if actual_path != target_vol:
+                        print(f"{YEL}[!] Warning: Mounted at {actual_path} instead of {target_vol}{RST}")
+                        return actual_path
+        
         print(f"{BGRN}[ok] RAM disk mounted at {target_vol}{RST}")
         return target_vol
     except Exception as e:
         print(f"{BRED}[!] Failed to create RAM disk: {e}{RST}")
         return None
 
-# Initialize RAM Disk and Symlink
-ram_path = setup_ramdisk()
-if ram_path:
-    dat_link = os.path.join(curr_dir, "EARU_data.dat")
-    target_file = os.path.join(ram_path, "EARU_data.dat")
-    
-    # If it exists and is a real file, move it to RAM first to preserve state
-    if os.path.exists(dat_link) and not os.path.islink(dat_link):
-        try:
-            shutil.move(dat_link, target_file)
-        except Exception: pass
-    
-    # Ensure symlink exists
-    if not os.path.islink(dat_link):
-        if os.path.exists(dat_link): os.remove(dat_link)
-        try:
-            os.symlink(target_file, dat_link)
-            print(f"{CYN}[*] EARU_data.dat symlinked to RAM disk.{RST}")
-        except Exception as e:
-            print(f"{BRED}[!] Symlink failed: {e}{RST}")
+def ensure_ramdisk_links(ram_path):
+    """Ensures symlinks to RAM disk are present and state is restored."""
+    if not ram_path: return
+    for filename in ["EARU_data.dat", "EARU_WeatherAPIHistory.dat"]:
+        dat_link = os.path.join(curr_dir, filename)
+        target_file = os.path.join(ram_path, filename)
+        
+        # If it exists and is a real file, move it to RAM first to preserve state
+        if os.path.exists(dat_link) and not os.path.islink(dat_link):
+            try:
+                shutil.move(dat_link, target_file)
+            except Exception: pass
+
+        # Restore from save_state if it exists and target doesn't
+        save_dir = os.path.join(curr_dir, "save_state")
+        save_file = os.path.join(save_dir, filename)
+        if not os.path.exists(target_file) and os.path.exists(save_file):
+            try:
+                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                shutil.copy2(save_file, target_file)
+                print(f"{BGRN}[ok] {filename} restored from save_state.{RST}")
+            except Exception as e:
+                print(f"{BRED}[!] Failed to restore {filename} from save_state: {e}{RST}")
+
+        # Ensure symlink exists
+        if not os.path.islink(dat_link):
+            if os.path.exists(dat_link): 
+                try: os.remove(dat_link)
+                except: pass
+            try:
+                os.symlink(target_file, dat_link)
+                print(f"{CYN}[*] {filename} symlinked to RAM disk.{RST}")
+            except Exception as e:
+                print(f"{BRED}[!] Symlink failed for {filename}: {e}{RST}")
+
+# Initialize RAM Disk and Symlink (Force remount on start, skipped for --onlySelfTest)
+if "--onlySelfTest" not in sys.argv:
+    ram_path = setup_ramdisk(force_remount=True)
+    ensure_ramdisk_links(ram_path)
+else:
+    ram_path = "/Volumes/EARU_dataIO" # Dummy path for self-test
 
 # 3rd party meteo requirements
 try:
-    import openmeteo_requests
-    import pandas as pd
-    import requests_cache
-    from retry_requests import retry
+    import openmeteo_requests  # pyrefly: ignore
+    import pandas as pd  # pyrefly: ignore
+    import requests_cache  # pyrefly: ignore
+    from retry_requests import retry  # pyrefly: ignore
     HAS_OPENMETEO = True
 except ImportError:
     HAS_OPENMETEO = False
 
 class NpEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer): return int(obj)
-        if isinstance(obj, np.floating): return float(obj)
-        if isinstance(obj, np.ndarray): return obj.tolist()
-        if isinstance(obj, deque): return list(obj)
-        if isinstance(obj, bytes): return obj.hex()
-        return super(NpEncoder, self).default(obj)
+    def default(self, o):
+        if isinstance(o, np.integer): return int(o)
+        if isinstance(o, np.floating): return float(o)
+        if isinstance(o, np.ndarray): return o.tolist()
+        if isinstance(o, deque): return list(o)
+        if isinstance(o, bytes): return o.hex()
+        return super(NpEncoder, self).default(o)
 
 
 @njit(cache=True)
@@ -705,6 +769,7 @@ class VibrationDetector:
         self.fs = fs
         self._lock = threading.Lock()
         self.sample_count = 0
+        self.current_lid_angle: float = 0.0
         # ... (rest of init)
         self.prob_total_damage_fatigue = 0.0
         self.cumulative_fatigue = 0.0
@@ -748,12 +813,12 @@ class VibrationDetector:
         
         self._dwt_ok = False
         try:
-            import pywt
+            import pywt  # pyrefly: ignore
 
-            self._pywt = pywt
+            self._pywt: Any = pywt
             self._dwt_ok = True
         except ImportError:
-            self._pywt = None
+            self._pywt: Any = None  # pyrefly: ignore
 
         # cusum bilateral
         self.cusum_pos = 0.0
@@ -800,6 +865,7 @@ class VibrationDetector:
         self._mahony_ki = 0.05
         self._mahony_err_int = [0.0, 0.0, 0.0]
         self._orient_init = False
+        self._last_orient_t = 0.0
         self.pedometer = Pedometer(fs)
         self.last_entity_update = 0.0
         self.last_seismic_update = 0.0
@@ -866,7 +932,7 @@ class VibrationDetector:
             self._last_fatigue_update = now
 
             # Derive dominant frequency f_dom
-            if self.period_freq and self.period_cv < 0.4:
+            if self.period_freq and self.period_cv is not None and self.period_cv < 0.4:
                 f_dom = self.period_freq
             else:
                 # Weighted average frequency from spectral bands
@@ -923,7 +989,7 @@ class VibrationDetector:
                     )  # Scales up to 1.5x at 100% RH
 
                 # Pressure Tendency: Rapid atmospheric shift contributes to fatigue
-                if len(location.pressure_history) > 60:
+                if len(location.pressure_history) >= 60 and not location.weather_inop:
                     tendency = abs(
                         location.pressure_history[-1] - location.pressure_history[0]
                     )
@@ -1104,7 +1170,12 @@ class VibrationDetector:
             self.sample_count += 1
         self.latest_raw = (ax, ay, az)
         self.latest_mag = math.sqrt(ax * ax + ay * ay + az * az)
-        self._update_orientation(ax, ay, az)
+        
+        # Throttle orientation update to 100Hz max
+        if t_now - self._last_orient_t >= 0.01:
+            self._update_orientation(ax, ay, az)
+            self._last_orient_t = t_now
+
         self.pedometer.add_sample(ax, ay, az, t_now)
 
         if not self.hp_ready:
@@ -1921,7 +1992,7 @@ class LoopConsistencyTracker:
 
     def get_stats(self):
         if not self.loop_times:
-            return 0.0, 0.0, 0.0, 0.0, 0
+            return 0.0, 0.0, 0.0, 0.0, 0, []
 
         sorted_times = sorted(self.loop_times)
         n = len(sorted_times)
@@ -1969,7 +2040,7 @@ class LocationTracker:
         self.smc_pressure_hpa = None
         self.api_pressure_hpa = None
         self.heading = 0.0
-        self.heading_offset = 0.0
+        self.CorrectionFactor_Reckoning_Heading = 0.0
 
         self.start_lat = np.float64(start_lat)
         self.start_lon = np.float64(start_lon)
@@ -1980,11 +2051,16 @@ class LocationTracker:
         self.earu_start_time = time.time()
         self.cpu_usage = 0.0
         self.mem_usage = 0.0
-        self.load_avg = [0.0, 0.0, 0.0]
+        self.meteo_cache_path = os.path.join(curr_dir, "EARU_WeatherAPIHistory.dat")
+        self.load_avg: list[float] = [0.0, 0.0, 0.0]
         self.uptime_system = 0.0
         self.uptime_earu = 0.0
         self.battery_percent = 0.0
         self.battery_charging = False
+        self.battery_energy_bank_wh = 0.0
+        self.battery_full_charge_capacity_wh = 0.0
+        self.battery_design_capacity_wh = 0.0
+        self.battery_health_pct = 100.0
         self.nonHumanInputHIDIdle = 0.0
         self.last_hid_idle_update = 0.0
         self.pmset_info = ""
@@ -2068,29 +2144,292 @@ class LocationTracker:
         self.seu_risk_multiplier = 1.0  # Normalized to Sea Level (1.0)
         self.alt_stress_multiplier = 1.0
 
+        # Power Usage Tracking
+        self.day_power_usage_wh = 0.0
+        self.month_power_usage_wh = 0.0
+        self.meter_power_usage_wh = 0.0
+        self.last_power_time = time.time()
+        self.last_reset_day = datetime.date.today().toordinal()
+        self.last_reset_month = datetime.date.today().month
+        self.power_history = deque(maxlen=86400) # 1Hz for 24h max
+        self.estimated_today_usage_wh = 0.0
+        self.will_battery_survive_one_day = "Yes"
+        self.in_order_to_survive_day_must_hibernate = "No"
+        self.pulsing_suggestion_wake = 0.0
+        self.pulsing_suggestion_wake_length = 0.0
+        self.torch_available = False
+        self.coreml_available = False
+        self._check_torch_available()
+        self._load_power_metrics()
+
         # Weather tracking
         self.pressure_history = deque(maxlen=3600)  # 1 hour at 1Hz or 100 samples/sec
         self.dew_point_k = 293.15
         self.dew_point_spread = 5.0
         self.weather_category = "Stable / Dry"
+        self.weather_inop = False
         self._last_weather_update = 0.0
 
         # 3rd Party Meteo Cache
         self.external_meteo = {}
         self.last_external_meteo_fetch = 0.0
-        self.meteo_cache_path = "/usr/local/EnvironmentalAwareReferentialUnit/3rdparty_meteo_data.json"
+
+        # CoreLocation Anchor & PID-like Adjustment
+        self.cl_history = deque(maxlen=2)  # Store (time, lat, lon, alt)
+        self.CorrectionFactor_Reckoning_Velocity = 1.0  # Multiplier for Dead Reckoning velocity to match CL anchor
+        self.CorrectionFactor_Reckoning_VerticalRate = 1.0 # Multiplier for Vertical Rate integration
+        self.CorrectionFactor_Reckoning_Altitude = 0.0     # Additive offset for altitude reckoning
+        self.heading_adj_deg = 0.0 # Correction for heading from CL gradient
+        self.smc_p_offset = 0.0  # Dynamic offset for SMC pressure based on API anchor
+        self.hum_offset = 0.0    # Dynamic offset for humidity calibration
+        self.api_humidity_pct = None # External anchor for humidity
+        self.weather_history_path = os.path.join(curr_dir, "EARU_WeatherAPIHistory.dat")
+        self.last_weather_history_write = 0.0
         self._meteo_running = False
         self._load_meteo_cache()
 
-    def _load_meteo_cache(self):
-        if os.path.exists(self.meteo_cache_path):
+        # Pre-calculated damping factors for performance
+        self._damping_stationary = math.pow(0.1, 1.0 / fs)
+        self._damping_uniform = math.pow(0.95, 1.0 / fs)
+        self._damping_jitter = math.pow(0.7, 1.0 / fs)
+
+    def _check_torch_available(self):
+        try:
+            import torch # pyrefly: ignore
+            self.torch_available = True
+            self.torch_device = "cpu"
+            if torch.backends.mps.is_available():
+                self.torch_device = "mps"
+            elif hasattr(torch, "cuda") and torch.cuda.is_available():
+                self.torch_device = "cuda"
+            
             try:
-                with open(self.meteo_cache_path, "r") as f:
+                import CoreML # pyrefly: ignore
+                self.coreml_available = True
+            except ImportError:
+                self.coreml_available = False
+        except ImportError:
+            self.torch_available = False
+
+    def _solve_pulsing_numerically(self, target_p, avg_p_active):
+        best_err = float("inf")
+        best_t, best_tau = 0.0, 0.0
+        p_sleep = 0.5  # Estimated 0.5W during deep maintenance sleep
+
+        # Numerical sweep over possible wake lengths (1s to 60s)
+        for tau in np.linspace(1.0, 60.0, 60):
+            # Relationship: target_p = (avg_p_active * tau + p_sleep * (T - tau)) / T
+            # Solve for T: T = (tau * (avg_p_active - p_sleep)) / (target_p - p_sleep)
+            if target_p > p_sleep:
+                t_sol = (tau * (avg_p_active - p_sleep)) / (target_p - p_sleep)
+                # Apply box constraints: T in [300, 3600]
+                t_clamped = max(300.0, min(3600.0, t_sol))
+
+                # Calculate actual power result for this pair
+                p_res = (avg_p_active * tau + p_sleep * (t_clamped - tau)) / t_clamped
+                err = abs(p_res - target_p)
+
+                if err < best_err:
+                    best_err = err
+                    best_t, best_tau = t_clamped, tau
+            else:
+                # If target is lower than sleep power, we must max out the interval
+                if 3600.0 > 0:
+                    p_res = (avg_p_active * tau + p_sleep * (3600.0 - tau)) / 3600.0
+                    err = abs(p_res - target_p)
+                    if err < best_err:
+                        best_err = err
+                        best_t, best_tau = 3600.0, tau
+
+        return best_t, best_tau
+
+    def _estimate_daily_power_ai(self):
+        # Time of day as fraction 0.0 to 1.0
+        now = datetime.datetime.now()
+        day_frac = (now.hour * 3600 + now.minute * 60 + now.second) / 86400.0
+
+        if not self.power_history or len(self.power_history) < 2:
+            self.estimated_today_usage_wh = self.day_power_usage_wh
+            return
+
+        # AI-based projection:
+        # We use a small PyTorch model to learn the power pattern of the day so far
+        # then project the remaining hours.
+        if self.torch_available:
+            try:
+                import torch  # pyrefly: ignore
+                import torch.nn as nn  # pyrefly: ignore
+
+                data = np.array(self.power_history)
+                # Subsample if too large for quick training
+                if len(data) > 100:
+                    idx = np.linspace(0, len(data) - 1, 100, dtype=int)
+                    data = data[idx]
+
+                x = (
+                    torch.tensor(data[:, 0], dtype=torch.float32)
+                    .view(-1, 1)
+                    .to(self.torch_device)
+                )
+                y = (
+                    torch.tensor(data[:, 1], dtype=torch.float32)
+                    .view(-1, 1)
+                    .to(self.torch_device)
+                )
+
+                # Small MLP for trajectory estimation
+                model = nn.Sequential(nn.Linear(1, 16), nn.ReLU(), nn.Linear(16, 1)).to(
+                    self.torch_device
+                )
+
+                optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
+                criterion = nn.MSELoss()
+
+                # Quick optimization (50 steps is fast for 100 points)
+                for _ in range(50):
+                    optimizer.zero_grad()
+                    pred = model(x)
+                    loss = criterion(pred, y)
+                    loss.backward()
+                    optimizer.step()
+
+                # Predict for the rest of the day until 23:59:59 (1.0)
+                future_times = (
+                    torch.linspace(day_frac, 1.0, steps=10)
+                    .view(-1, 1)
+                    .to(self.torch_device)
+                )
+                with torch.no_grad():
+                    future_powers = model(future_times).cpu().numpy()
+
+                avg_future_power = max(0.0, float(np.mean(future_powers)))
+                remaining_hours = (1.0 - day_frac) * 24.0
+                predicted_remaining_wh = avg_future_power * remaining_hours
+
+                self.estimated_today_usage_wh = (
+                    self.day_power_usage_wh + predicted_remaining_wh
+                )
+            except Exception:
+                # Fallback to simple mean if Torch fails
+                avg_power = np.mean([p for t, p in self.power_history])
+                remaining_hours = (1.0 - day_frac) * 24.0
+                self.estimated_today_usage_wh = self.day_power_usage_wh + (
+                    avg_power * remaining_hours
+                )
+        else:
+            # Fallback to simple mean
+            avg_power = np.mean([p for t, p in self.power_history])
+            remaining_hours = (1.0 - day_frac) * 24.0
+            self.estimated_today_usage_wh = self.day_power_usage_wh + (
+                avg_power * remaining_hours
+            )
+
+        # Survival Logic
+        remaining_energy_needed = max(
+            0.0, self.estimated_today_usage_wh - self.day_power_usage_wh
+        )
+        now = datetime.datetime.now()
+        seconds_until_midnight = (
+            ((23 - now.hour) * 3600) + ((59 - now.minute) * 60) + (60 - now.second)
+        )
+        hours_until_midnight = seconds_until_midnight / 3600.0
+
+        if self.battery_energy_bank_wh >= remaining_energy_needed:
+            self.will_battery_survive_one_day = "Yes"
+            self.in_order_to_survive_day_must_hibernate = "No"
+            self.pulsing_suggestion_wake = 0.0
+            self.pulsing_suggestion_wake_length = 0.0
+        else:
+            self.will_battery_survive_one_day = "No"
+            # Calculate pulsing to stretch energy using numerical solver
+            if hours_until_midnight > 0:
+                target_p = self.battery_energy_bank_wh / hours_until_midnight
+                avg_p_active = (
+                    np.mean([p for t, p in self.power_history])
+                    if self.power_history
+                    else 10.0
+                )
+                self.pulsing_suggestion_wake, self.pulsing_suggestion_wake_length = (
+                    self._solve_pulsing_numerically(target_p, avg_p_active)
+                )
+                
+                # Check if even the most aggressive pulsing (1s wake / 3600s interval) 
+                # is higher than the target power.
+                p_agg = (avg_p_active * 1.0 + 0.5 * (3600.0 - 1.0)) / 3600.0
+                if target_p < p_agg:
+                    self.in_order_to_survive_day_must_hibernate = "Yes"
+                else:
+                    self.in_order_to_survive_day_must_hibernate = "No"
+            else:
+                self.pulsing_suggestion_wake = 0.0
+                self.pulsing_suggestion_wake_length = 0.0
+                self.in_order_to_survive_day_must_hibernate = "No"
+
+    def _load_power_metrics(self):
+        p = os.path.join(curr_dir, "save_state", "power_metrics.json")
+        if os.path.exists(p):
+            try:
+                with open(p, "r") as f:
+                    data = json.load(f)
+                    self.day_power_usage_wh = data.get("day_power_usage_wh", 0.0)
+                    self.month_power_usage_wh = data.get("month_power_usage_wh", 0.0)
+                    self.meter_power_usage_wh = data.get("meter_power_usage_wh", 0.0)
+                    self.last_reset_day = data.get("last_reset_day", self.last_reset_day)
+                    self.last_reset_month = data.get("last_reset_month", self.last_reset_month)
+            except Exception:
+                pass
+
+    def save_power_metrics_async(self):
+        threading.Thread(target=self._save_power_metrics_bg, daemon=True).start()
+
+    def _save_power_metrics_bg(self):
+        save_dir = os.path.join(curr_dir, "save_state")
+        if not os.path.exists(save_dir):
+            try: os.makedirs(save_dir)
+            except Exception: return
+        
+        p = os.path.join(save_dir, "power_metrics.json")
+        with self.lock:
+            data = {
+                "day_power_usage_wh": self.day_power_usage_wh,
+                "month_power_usage_wh": self.month_power_usage_wh,
+                "meter_power_usage_wh": self.meter_power_usage_wh,
+                "last_reset_day": self.last_reset_day,
+                "last_reset_month": self.last_reset_month,
+                "timestamp": time.time()
+            }
+        try:
+            with open(p, "w") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
+
+    def _load_meteo_cache(self):
+        if os.path.exists(self.weather_history_path):
+            try:
+                with open(self.weather_history_path, "r") as f:
                     data = json.load(f)
                     self.external_meteo = data.get("meteo", {})
                     self.last_external_meteo_fetch = data.get("timestamp", 0.0)
+                    self.last_weather_history_write = self.last_external_meteo_fetch
             except Exception:
                 pass
+
+    def write_weather_history_async(self):
+        """Triggers an async write of the weather history data."""
+        threading.Thread(target=self._write_weather_history_bg, daemon=True).start()
+
+    def _write_weather_history_bg(self):
+        with self.lock:
+            cache_data = {
+                "timestamp": self.last_external_meteo_fetch,
+                "meteo": self.external_meteo
+            }
+        try:
+            with open(self.weather_history_path, "w") as f:
+                json.dump(cache_data, f)
+        except Exception:
+            pass
 
     def update_weather_thermodynamics(self):
         """
@@ -2102,7 +2441,22 @@ class LocationTracker:
             return
         self._last_weather_update = now
 
-        # 1. Dew Point Calculation (Magnus-Tetens)
+        # 1. Humidity Calibration & Weighted Averaging
+        # We use the API humidity as an anchor to calibrate our local humidity state
+        if self.api_humidity_pct is not None:
+            if 10.0 <= self.alt <= 50.0:
+                # Calculate error vs local humidity_pct
+                h_error = self.api_humidity_pct - self.humidity_pct
+                # Nudge humidity offset (alpha=0.05)
+                self.hum_offset = self.hum_offset * 0.95 + h_error * 0.05
+            
+            # Apply weighted averaging: 0.8 API, 0.2 calibrated local
+            calibrated_local_hum = self.humidity_pct + self.hum_offset
+            self.humidity_pct = (0.8 * self.api_humidity_pct) + (0.2 * calibrated_local_hum)
+            # Clamp to physical limits
+            self.humidity_pct = max(0.0, min(100.0, self.humidity_pct))
+
+        # 1b. Dew Point Calculation (Magnus-Tetens)
         # T in Celsius
         tc = self.ambient_temp_k - 273.15
         rh = max(1.0, min(100.0, self.humidity_pct))
@@ -2114,21 +2468,50 @@ class LocationTracker:
         self.dew_point_k = td_c + 273.15
         self.dew_point_spread = tc - td_c
 
-        # 2. Pressure Tendency
-        pressures = [
-            p
-            for p in [self.pressure_hpa, self.smc_pressure_hpa, self.api_pressure_hpa]
-            if p is not None
+        # 2. Pressure Tendency with Weighted Averaging & Dynamic Calibration
+        # We use the API pressure as an anchor to calibrate the SMC sensor offset
+        # only when we are near the base terrain altitude (e.g. 10-50m range)
+        if self.api_pressure_hpa is not None and self.smc_pressure_hpa is not None:
+            # Check if within logical base calibration range (10m to 50m relative to sea level
+            # or near starting altitude where API data is most relevant for ground-level anchor)
+            if 10.0 <= self.alt <= 50.0:
+                # Calculate the error between API anchor and SMC measured
+                p_error = self.api_pressure_hpa - self.smc_pressure_hpa
+                # Nudge the SMC offset using a Proportional gain (alpha=0.05)
+                # This acts as a slow-moving PID filter to calibrate the sensor drift.
+                self.smc_p_offset = self.smc_p_offset * 0.95 + p_error * 0.05
+
+        # Apply the calibrated offset to the SMC reading
+        calibrated_smc = (self.smc_pressure_hpa + self.smc_p_offset) if self.smc_pressure_hpa is not None else None
+
+        internal_p = [
+            p for p in [self.pressure_hpa, calibrated_smc] if p is not None
         ]
-        avg_p = sum(pressures) / len(pressures) if pressures else 1013.25
+        avg_internal = sum(internal_p) / len(internal_p) if internal_p else 1013.25
+        
+        if self.api_pressure_hpa is not None:
+            # Weight 0.8 to external anchor, 0.2 to calibrated internal
+            avg_p = (0.8 * self.api_pressure_hpa) + (0.2 * avg_internal)
+        else:
+            avg_p = avg_internal
+
         self.pressure_history.append(avg_p)
 
-        # Calculate tendency over last 10 minutes (600 samples)
+        # Calculate tendency over last 1 hour (60 samples @ 60s interval)
         tendency = 0.0
-        if len(self.pressure_history) > 60:
-            # Simple linear regression or just delta
+        if len(self.pressure_history) >= 60:
             old_p = self.pressure_history[0]
-            tendency = avg_p - old_p  # hPa change over window
+            tendency = avg_p - old_p  # hPa change over 1 hour
+
+        # Check for INOP condition (> 7 hPa / hour)
+        if abs(tendency) > 7.0:
+            self.weather_inop = True
+            self.weather_category = "INOP"
+            self.dew_point_k = -999.0
+            self.dew_point_spread = -999.0
+            return
+        else:
+            self.weather_inop = False
 
         # 3. Categorization (4 Categories)
         # - Stable / Dry: High spread (> 5C), Stable P
@@ -2160,8 +2543,8 @@ class LocationTracker:
     def _fetch_external_meteo_bg(self):
         try:
             # Setup the Open-Meteo API client with cache and retry on error
-            cache_path = os.path.join(os.path.dirname(self.meteo_cache_path), ".meteo_cache")
-            cache_session = requests_cache.CachedSession(cache_path, expire_after = 3600)
+            cache_db_path = os.path.join(curr_dir, ".meteo_cache")
+            cache_session = requests_cache.CachedSession(cache_db_path, expire_after = 3600)
             retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
             openmeteo = openmeteo_requests.Client(session = retry_session)
 
@@ -2248,7 +2631,7 @@ class LocationTracker:
                 })
                 self.last_external_meteo_fetch = time.time()
                 
-                # Save to persistent cache
+                # Save to local state for persistence
                 try:
                     cache_data = {
                         "timestamp": self.last_external_meteo_fetch,
@@ -2256,9 +2639,8 @@ class LocationTracker:
                     }
                     with open(self.meteo_cache_path, "w") as f:
                         json.dump(cache_data, f)
-                except Exception:
-                    pass
-
+                except Exception: pass
+                
         except Exception as e:
             # Silently fail or log if needed
             pass
@@ -2325,6 +2707,43 @@ class LocationTracker:
                 self.smc_temps.update(new_temps)
                 self.fan_rpms = new_rpms
                 self.smc_turbo = new_turbo
+
+                # Power Usage Statistics Update
+                pstr = self.smc_temps.get("PSTR")
+                if pstr is not None:
+                    now = time.time()
+                    dt = now - self.last_power_time
+                    self.last_power_time = now
+
+                    # Reset if day changed
+                    today_ordinal = datetime.date.today().toordinal()
+                    curr_month = datetime.date.today().month
+                    
+                    if today_ordinal != self.last_reset_day:
+                        self.day_power_usage_wh = 0.0
+                        self.power_history.clear()
+                        self.last_reset_day = today_ordinal
+                        
+                    if curr_month != self.last_reset_month:
+                        self.month_power_usage_wh = 0.0
+                        self.last_reset_month = curr_month
+
+                    # Accumulate Watt-Hours: P(W) * dt(h)
+                    power_w = float(pstr)
+                    energy_delta_wh = power_w * (dt / 3600.0)
+                    self.day_power_usage_wh += energy_delta_wh
+                    self.month_power_usage_wh += energy_delta_wh
+                    self.meter_power_usage_wh += energy_delta_wh
+
+                    # Store history for AI projection (time_of_day_frac, power)
+                    dt_now = datetime.datetime.now()
+                    day_frac = (dt_now.hour * 3600 + dt_now.minute * 60 + dt_now.second) / 86400.0
+                    self.power_history.append((day_frac, power_w))
+
+                    # Periodic AI estimation (every ~120s or when data is sparse)
+                    if len(self.power_history) % 120 == 0:
+                        self._estimate_daily_power_ai()
+                        self.save_power_metrics_async() # Save every ~120 updates (~120s)
 
                 # Recalculate thermodynamics on new SMC data
                 ts0p = self.smc_temps.get("Ts0P")
@@ -2402,19 +2821,25 @@ class LocationTracker:
 
     def _check_system_metrics_bg(self):
         try:
+            with self.lock:
+                hid_idle = self.nonHumanInputHIDIdle
+                b_pct = self.battery_percent
+                pm_out = self.pmset_info
+                b_charging = self.battery_charging
+                b_energy = self.battery_energy_bank_wh
+
             cpu = psutil.cpu_percent(interval=None)
             mem = psutil.virtual_memory().percent
-            load = os.getloadavg()
             now = time.time()
             uptime_s = now - self.boot_time
             uptime_e = now - self.earu_start_time
 
             # Battery level and pmset - Every 60s
-            b_pct = self.battery_percent
-            pm_out = self.pmset_info
-            
             do_battery_level = (now - self.last_battery_level_update >= 60.0)
             do_pmset = (now - self.last_pmset_update >= 60.0)
+            b_full_cap_wh = self.battery_full_charge_capacity_wh
+            b_design_cap_wh = self.battery_design_capacity_wh
+            b_health = self.battery_health_pct
             
             if do_battery_level or do_pmset:
                 batt = psutil.sensors_battery()
@@ -2422,6 +2847,37 @@ class LocationTracker:
                     b_pct = batt.percent
                     self.last_battery_level_update = now
                 
+                # Fetch detailed battery stats from ioreg
+                try:
+                    res_ioreg = subprocess.run(
+                        ["ioreg", "-rw0", "-c", "AppleSmartBattery"], capture_output=True, text=True, timeout=2
+                    )
+                    out = res_ioreg.stdout
+                    # Parse Capacity and Voltage
+                    cap_match = re.search(r'"AppleRawCurrentCapacity"\s*=\s*(\d+)', out)
+                    max_cap_match = re.search(r'"AppleRawMaxCapacity"\s*=\s*(\d+)', out)
+                    design_cap_match = re.search(r'"DesignCapacity"\s*=\s*(\d+)', out)
+                    vol_match = re.search(r'"Voltage"\s*=\s*(\d+)', out)
+                    
+                    if vol_match:
+                        vol_mv = float(vol_match.group(1))
+                        vol_v = vol_mv / 1000.0
+                        
+                        if cap_match:
+                            b_energy = (float(cap_match.group(1)) / 1000.0) * vol_v
+                        
+                        if max_cap_match:
+                            b_full_cap_wh = (float(max_cap_match.group(1)) / 1000.0) * vol_v
+                            
+                        if design_cap_match:
+                            design_mah = float(design_cap_match.group(1))
+                            b_design_cap_wh = (design_mah / 1000.0) * vol_v
+                            
+                        if b_design_cap_wh > 0:
+                            b_health = (b_full_cap_wh / b_design_cap_wh) * 100.0
+                except Exception:
+                    pass
+
                 if do_pmset:
                     try:
                         res_batt = subprocess.run(
@@ -2436,7 +2892,6 @@ class LocationTracker:
                         pass
 
             # Charging status - Every 5s
-            b_charging = self.battery_charging
             if now - self.last_charging_update >= 5.0:
                 batt = psutil.sensors_battery()
                 b_charging = batt.power_plugged if batt else False
@@ -2445,11 +2900,15 @@ class LocationTracker:
             with self.lock:
                 self.cpu_usage = cpu
                 self.mem_usage = mem
-                self.load_avg = load
+                self.load_avg = list(psutil.getloadavg())
                 self.uptime_system = uptime_s
                 self.uptime_earu = uptime_e
                 self.battery_percent = b_pct
                 self.battery_charging = b_charging
+                self.battery_energy_bank_wh = b_energy
+                self.battery_full_charge_capacity_wh = b_full_cap_wh
+                self.battery_design_capacity_wh = b_design_cap_wh
+                self.battery_health_pct = b_health
                 self.nonHumanInputHIDIdle = hid_idle
                 self.pmset_info = pm_out
         except Exception:
@@ -2464,23 +2923,18 @@ class LocationTracker:
         if self._hid_running:
             return
         now = time.time()
-        if now - self.last_hid_idle_update < 5.0:
+        if now - self.last_hid_idle_update < 0.1:
             return
         self._hid_running = True
         threading.Thread(target=self._check_hid_idle_bg, daemon=True).start()
 
     def _check_hid_idle_bg(self):
         try:
-            res = subprocess.run(
-                ["ioreg", "-c", "IOHIDSystem"], capture_output=True, text=True, timeout=2
-            )
-            for line in res.stdout.splitlines():
-                if "HIDIdleTime" in line:
-                    idle_ns = int(line.split("=")[-1].strip())
-                    with self.lock:
-                        self.nonHumanInputHIDIdle = idle_ns / 1_000_000_000.0
-                        self.last_hid_idle_update = time.time()
-                    break
+            idle_ns = get_hid_idle_nanoseconds()
+            if idle_ns is not None:
+                with self.lock:
+                    self.nonHumanInputHIDIdle = idle_ns / 1_000_000_000.0
+                    self.last_hid_idle_update = time.time()
         except Exception:
             pass
         finally:
@@ -2522,16 +2976,17 @@ class LocationTracker:
 
     def _check_drift_bg(self, imu_ref):
         try:
+            torch = None
             torch_available = False
             try:
-                import torch
+                import torch  # pyrefly: ignore
                 torch_available = torch.backends.mps.is_available()
             except ImportError:
                 pass
 
             coreml_available = False
             try:
-                import CoreML
+                import CoreML  # pyrefly: ignore
                 coreml_available = True
             except ImportError:
                 pass
@@ -2558,14 +3013,15 @@ class LocationTracker:
                 t_gpu_ns = 0
                 if torch_available:
                     try:
-                        start_evt = torch.mps.Event(enable_timing=True)
-                        end_evt = torch.mps.Event(enable_timing=True)
-                        start_evt.record()
-                        _ = torch.zeros(1, device="mps")
-                        end_evt.record()
-                        torch.mps.synchronize()
-                        gpu_ms = start_evt.elapsed_time(end_evt)
-                        t_gpu_ns = t_cpu + int(gpu_ms * 1e6)
+                        if torch is not None:
+                            start_evt = torch.mps.Event(enable_timing=True)
+                            end_evt = torch.mps.Event(enable_timing=True)
+                            start_evt.record()
+                            _ = torch.zeros(1, device="mps")
+                            end_evt.record()
+                            torch.mps.synchronize()
+                            gpu_ms = start_evt.elapsed_time(end_evt)
+                            t_gpu_ns = t_cpu + int(gpu_ms * 1e6)
                     except Exception:
                         pass
                 
@@ -2705,7 +3161,7 @@ class LocationTracker:
                 data = response.json()
                 with self.lock:
                     self.api_pressure_hpa = data["current"]["surface_pressure"]
-                    self.humidity_pct = float(data["current"]["relative_humidity_2m"])
+                    self.api_humidity_pct = float(data["current"]["relative_humidity_2m"])
         except Exception:
             pass
         finally:
@@ -2789,11 +3245,7 @@ class LocationTracker:
         wy *= G
         wz *= G
 
-        # 1. Acceleration Dead-Band (Noise Gate)
-        # If dynamic acceleration is very small, it's likely MEMS jitter/noise floor.
         a_dyn_mag = math.sqrt(wx**2 + wy**2 + wz**2)
-        if a_dyn_mag < 0.15:  # ~0.015g threshold
-            wx, wy, wz = 0.0, 0.0, 0.0
 
         # 2. High-Frequency Jitter Filter (Shaking Detection)
         # If gyro_mag is high but v_mag is low, or if we detect "shaking" 
@@ -2808,7 +3260,7 @@ class LocationTracker:
         # Integrate velocity
         self.vel[0] += wx * dt
         self.vel[1] += wy * dt
-        self.vel[2] += wz * dt
+        self.vel[2] += wz * dt * self.CorrectionFactor_Reckoning_VerticalRate
 
         # 3. Dynamic Velocity Damping (Advanced ZUPT)
         if gyro_mag < 0.8:
@@ -2816,23 +3268,17 @@ class LocationTracker:
             raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
             if abs(raw_mag - self.calibrated_g) < 0.05:
                 # Stationary: Aggressive damping to kill drift
-                damping = math.pow(0.1, 1.0/self.fs) # 90% decay per second
                 for i in range(3):
-                    self.vel[i] *= damping
+                    self.vel[i] *= self._damping_stationary
             else:
                 # Uniform motion: Slight damping
                 for i in range(3):
-                    self.vel[i] *= math.pow(0.95, 1.0/self.fs)
+                    self.vel[i] *= self._damping_uniform
         else:
             # Rotating/Shaking: Apply jitter-aware damping
             # This prevents "centrifugal drift" during shakes
             for i in range(3):
-                self.vel[i] *= math.pow(0.7, 1.0/self.fs)
-
-        # Absolute Zero Floor
-        for i in range(3):
-            if abs(self.vel[i]) < 0.01:
-                self.vel[i] = 0.0
+                self.vel[i] *= self._damping_jitter
 
         self.v_mag = math.sqrt(self.vel[0] ** 2 + self.vel[1] ** 2 + self.vel[2] ** 2)
 
@@ -2865,56 +3311,46 @@ class LocationTracker:
         sin_y = 2.0 * (qw * qz + qx * qy)
         cos_y = 1.0 - 2.0 * (qy * qy + qz * qz)
         yaw_d = math.degrees(math.atan2(sin_y, cos_y))
-        self.heading = (yaw_d + self.heading_offset) % 360.0
+        self.heading = (yaw_d + self.CorrectionFactor_Reckoning_Heading) % 360.0
 
         # Integrate position using augmented velocity
-        if self.v_mag >= 0.005:
-            dx = v_aug[0] * dt
-            dy = v_aug[1] * dt
-            dz = v_aug[2] * dt
+        dx = v_aug[0] * dt
+        dy = v_aug[1] * dt
+        dz = v_aug[2] * dt
 
-            # Physical Movement Integration: Use a realistic physical knob (1.0)
-            # We preserve the dynamic g multiplier as a "responsiveness" factor
-            # but keep the base physics at 1:1 scale.
-            dyn_accel_mag = math.sqrt(wx**2 + wy**2 + wz**2)
-            moving_g_normalized = dyn_accel_mag / 9.80665
-            
-            # Knob is now a physical modifier (1.0 = pure inertial)
-            MovementAugAmpKnob = 1.0 * (1.0 + min(0.1, moving_g_normalized))
-            
-            self.pos[0] += dx * MovementAugAmpKnob
-            self.pos[1] += dy * MovementAugAmpKnob
-            self.pos[2] += dz * MovementAugAmpKnob
+        # Physical Movement Integration: Use a realistic physical knob (1.0)
+        # We apply CorrectionFactor_Reckoning_Velocity as a PID-like adjustment derived from CoreLocation anchor
+        dyn_accel_mag = math.sqrt(wx**2 + wy**2 + wz**2)
+        moving_g_normalized = dyn_accel_mag / 9.80665
+        
+        # Combined knob: physical responsiveness * CL-anchored gain
+        CorrectionFactor_Reckoning_Movement = self.CorrectionFactor_Reckoning_Velocity * (1.0 + min(0.1, moving_g_normalized))
+        
+        self.pos[0] += dx * CorrectionFactor_Reckoning_Movement
+        self.pos[1] += dy * CorrectionFactor_Reckoning_Movement
+        self.pos[2] += dz * CorrectionFactor_Reckoning_Movement
 
-            # Environmental Odometer also respects the physical scale
-            weighted_dx = dx * MovementAugAmpKnob
-            weighted_dy = dy * MovementAugAmpKnob
-            weighted_dz = dz * MovementAugAmpKnob
-            dist_inc = math.sqrt(weighted_dx**2 + weighted_dy**2 + weighted_dz**2)
-            self.total_distance_m += dist_inc
-            self.odometer_30m_history.append(
-                (t_now, (self.pos[0], self.pos[1], self.pos[2]))
-            )
-            while (
-                self.odometer_30m_history
-                and self.odometer_30m_history[0][0] < t_now - 1800
-            ):
-                self.odometer_30m_history.popleft()
+        # Environmental Odometer also respects the physical scale
+        weighted_dx = dx * CorrectionFactor_Reckoning_Movement
+        weighted_dy = dy * CorrectionFactor_Reckoning_Movement
+        weighted_dz = dz * CorrectionFactor_Reckoning_Movement
+        dist_inc = math.sqrt(weighted_dx**2 + weighted_dy**2 + weighted_dz**2)
+        self.total_distance_m += dist_inc
+        self.odometer_30m_history.append(
+            (t_now, (self.pos[0], self.pos[1], self.pos[2]))
+        )
+        while (
+            self.odometer_30m_history
+            and self.odometer_30m_history[0][0] < t_now - 1800
+        ):
+            self.odometer_30m_history.popleft()
 
-            # Update lat/lon/alt
-            self.lat = np.float64(self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT))
-            m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
-            self.lon = np.float64(self.start_lon + (self.pos[0] / m_per_deg_lon))
-            self.alt = np.float64(self.start_alt + self.pos[2])
-            self.altitude_rate_per_second = self.vel[2]
-        else:
-            # Noise filter: no delta for coordinates
-            self.altitude_rate_per_second = 0.0
-            # Optional: bleed velocity to absolute zero if it was already tiny
-            if self.v_mag < 0.027420:
-                for i in range(3):
-                    self.vel[i] = 0.0
-                self.v_mag = 0.0
+        # Update lat/lon/alt
+        self.lat = np.float64(self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT))
+        m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
+        self.lon = np.float64(self.start_lon + (self.pos[0] / m_per_deg_lon))
+        self.alt = np.float64(self.start_alt + self.pos[2] + self.CorrectionFactor_Reckoning_Altitude)
+        self.altitude_rate_per_second = self.vel[2]
 
         # Update Wind Map (100Hz)
         # Use SMC measured pressure vs. altitude-derived static pressure for dynamic pressure (q)
@@ -3050,6 +3486,59 @@ class LocationTracker:
                                     break # Exit retry loop on poor accuracy
 
                                 with self.lock:
+                                    now_cl = time.time()
+                                    # 2. Update CL history and calculate anchor velocity/heading
+                                    self.cl_history.append((now_cl, new_lat, new_lon, float(new_alt)))
+                                    
+                                    if len(self.cl_history) == 2:
+                                        t1, lat1, lon1, alt1 = self.cl_history[0]
+                                        t2, lat2, lon2, alt2 = self.cl_history[1]
+                                        dt_cl = t2 - t1
+                                        
+                                        if dt_cl > 0:
+                                            # Ground distance from CL
+                                            cl_dist = haversine(lat1, lon1, lat2, lon2)
+                                            cl_v_ground = cl_dist / dt_cl
+                                            
+                                            # Vertical distance from CL
+                                            cl_v_vert = (alt2 - alt1) / dt_cl
+                                            cl_v_mag = math.sqrt(cl_v_ground**2 + cl_v_vert**2)
+                                            
+                                            # Dead Reckoning average v_mag over this window is roughly self.v_mag
+                                            # but since CL updates are slow (30s+), we use it as a gain anchor.
+                                            # If CL says we moved 100m and DR says 80m, CorrectionFactor_Reckoning_Velocity should increase.
+                                            if self.v_mag > 0.1 and cl_v_mag > 0.1:
+                                                # Proportional-only "gain" adjustment (PID-like anchor)
+                                                error_ratio = cl_v_mag / self.v_mag
+                                                # Dampen the gain change to avoid oscillations (alpha=0.2)
+                                                self.CorrectionFactor_Reckoning_Velocity = self.CorrectionFactor_Reckoning_Velocity * 0.8 + (self.CorrectionFactor_Reckoning_Velocity * error_ratio) * 0.2
+                                                # Clamp gain to sane limits
+                                                self.CorrectionFactor_Reckoning_Velocity = max(0.5, min(2.0, self.CorrectionFactor_Reckoning_Velocity))
+
+                                            # Vertical Rate Gain Anchor
+                                            if abs(self.altitude_rate_per_second) > 0.05 and abs(cl_v_vert) > 0.05:
+                                                error_ratio_v = cl_v_vert / self.altitude_rate_per_second
+                                                self.CorrectionFactor_Reckoning_VerticalRate = self.CorrectionFactor_Reckoning_VerticalRate * 0.8 + (self.CorrectionFactor_Reckoning_VerticalRate * error_ratio_v) * 0.2
+                                                self.CorrectionFactor_Reckoning_VerticalRate = max(0.5, min(2.0, self.CorrectionFactor_Reckoning_VerticalRate))
+
+                                            # Altitude Offset Anchor (PID-like nudge, alpha=0.05 for offsets)
+                                            alt_error = float(new_alt) - self.alt
+                                            self.CorrectionFactor_Reckoning_Altitude += alt_error * 0.05
+                                            
+                                            # 3. Heading fix from CL gradient
+                                            if cl_dist > 2.0: # Only if moved enough to have a reliable bearing
+                                                dlon = math.radians(lon2 - lon1)
+                                                y = math.sin(dlon) * math.cos(math.radians(lat2))
+                                                x = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - \
+                                                    math.sin(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.cos(dlon)
+                                                cl_bearing = (math.degrees(math.atan2(y, x)) + 360) % 360
+                                                
+                                                # Compare current heading vs CL ground track bearing
+                                                # and calculate a correction offset
+                                                bearing_diff = (cl_bearing - self.heading + 180) % 360 - 180
+                                                # Slowly nudge CorrectionFactor_Reckoning_Heading to align with CL ground track
+                                                self.CorrectionFactor_Reckoning_Heading = (self.CorrectionFactor_Reckoning_Heading + bearing_diff * 0.1) % 360
+
                                     dist = haversine(
                                         self.last_odometer_lat,
                                         self.last_odometer_lon,
@@ -3255,6 +3744,7 @@ def render(
         a(_line(f" {DIM}no regular pattern detected{RST}"))
         a(_line(""))
 
+    phase = False
     ent_active = len(det.ent_detected) > 0
     if ent_active:
         bpm_primary = det.ent_detected[0][0]
@@ -3350,6 +3840,28 @@ def render(
                 f"{DIM}Velocity:{RST} {BYEL}{location.v_mag:>5.2f} m/s{RST}"
             )
         )
+        
+        # Display CorrectionFactor_Reckoning_Velocity and CorrectionFactor_Reckoning_Heading
+        vg_col = BGRN if 0.9 <= location.CorrectionFactor_Reckoning_Velocity <= 1.1 else BYEL
+        vgr_col = BGRN if 0.9 <= location.CorrectionFactor_Reckoning_VerticalRate <= 1.1 else BYEL
+        a(
+            _line(
+                f" {DIM}Velocity Correction:{RST} {vg_col}{location.CorrectionFactor_Reckoning_Velocity:>5.2f}x{RST}  "
+                f"{DIM}Vertical Rate Corr:{RST} {vgr_col}{location.CorrectionFactor_Reckoning_VerticalRate:>5.2f}x{RST}"
+            )
+        )
+        a(
+            _line(
+                f" {DIM}Altitude Offset:{RST} {BWHT}{location.CorrectionFactor_Reckoning_Altitude:>+7.2f}m{RST}  "
+                f"{DIM}SMC P-Offset:{RST} {BWHT}{location.smc_p_offset:>+6.2f} hPa{RST}  "
+                f"{DIM}Heading Offset:{RST} {BWHT}{location.CorrectionFactor_Reckoning_Heading:>+6.1f}°{RST}"
+            )
+        )
+        a(
+            _line(
+                f" {DIM}Mach:{RST} {BWHT}{location.mach:>5.3f}{RST}"
+            )
+        )
 
         pressures = [
             p
@@ -3407,8 +3919,7 @@ def render(
         )
         a(
             _line(
-                f" {DIM}Humidity:{RST} {BWHT}{location.humidity_pct:>5.1f}%{RST}  "
-                f"{DIM}Cp:{RST} {location.gas_Cp:>7.2f} {DIM}R:{RST} {location.gas_R:>7.2f} {DIM}γ:{RST} {location.gas_gamma:>6.4f}"
+                f" {DIM}Cp:{RST} {location.gas_Cp:>7.2f} {DIM}R:{RST} {location.gas_R:>7.2f} {DIM}γ:{RST} {location.gas_gamma:>6.4f}"
             )
         )
 
@@ -3454,47 +3965,63 @@ def render(
             "Moist / Fog Risk": BCYN,
             "Storm Risk / Falling": BRED,
             "Improving / Clearing": BYEL,
+            "INOP": BRED,
         }.get(cat, BWHT)
 
         a(_line(f" {DIM}Category:{RST} {col}{BOLD}{cat:<25}{RST}"))
-        a(
-            _line(
-                f" {DIM}Dew Point:{RST} {BWHT}{location.dew_point_k:>6.2f}K{RST} ({location.dew_point_k - 273.15:>6.2f}°C)"
+        
+        if location.weather_inop:
+            a(_line(f" {DIM}Dew Point:{RST} {BRED}{'INOP':>6}{RST}"))
+            a(_line(f" {DIM}Dew Point Spread:{RST} {BRED}{'INOP':>5}{RST}"))
+            # Display Air Fluid Density as INOP
+            a(_line(f" {DIM}Air Fluid Density:{RST} {BRED}{'INOP':>7} kg/m³{RST}"))
+            # Pressure Tendency as INOP
+            a(_line(f" {DIM}Pressure Tendency:{RST} {BRED}{'INOP':>7} hPa{RST}"))
+        else:
+            a(
+                _line(
+                    f" {DIM}Humidity:{RST} {BWHT}{location.humidity_pct:>5.1f}%{RST}  "
+                    f"{DIM}Offset:{RST} {BWHT}{location.hum_offset:>+5.1f}%{RST}  "
+                    f"{DIM}API Anchor:{RST} {BWHT}{location.api_humidity_pct if location.api_humidity_pct is not None else 0.0:>5.1f}%{RST}"
+                )
             )
-        )
-
-        spread = location.dew_point_spread
-        spr_col = BGRN if spread > 5.0 else (BYEL if spread > 2.0 else BRED)
-        a(
-            _line(
-                f" {DIM}Dew Point Spread:{RST} {spr_col}{spread:>5.2f}°C{RST} {DIM}(Low spread = Fog/Rain risk){RST}"
+            a(
+                _line(
+                    f" {DIM}Dew Point:{RST} {BWHT}{location.dew_point_k:>6.2f}K{RST} ({location.dew_point_k - 273.15:>6.2f}°C)"
+                )
             )
-        )
-
-        # Display Air Fluid Density
-        den_col = (
-            BGRN
-            if location.air_density > 1.1
-            else (BYEL if location.air_density > 0.9 else BRED)
-        )
-        a(
-            _line(
-                f" {DIM}Air Fluid Density:{RST} {den_col}{location.air_density:>7.4f} kg/m³{RST}"
+            spread = location.dew_point_spread
+            spr_col = BGRN if spread > 5.0 else (BYEL if spread > 2.0 else BRED)
+            a(
+                _line(
+                    f" {DIM}Dew Point Spread:{RST} {spr_col}{spread:>5.2f}°C{RST} {DIM}(Low spread = Fog/Rain risk){RST}"
+                )
             )
-        )
 
-        # Calculate tendency string
-        tendency = 0.0
-        if len(location.pressure_history) > 60:
-            tendency = location.pressure_history[-1] - location.pressure_history[0]
-
-        ten_col = BRED if tendency < -0.5 else (BGRN if tendency > 0.5 else DIM)
-        ten_dir = "↓↓" if tendency < -0.5 else ("↑↑" if tendency > 0.5 else "→")
-        a(
-            _line(
-                f" {DIM}Pressure Tendency:{RST} {ten_col}{tendency:>+6.2f} hPa{RST} {ten_col}{ten_dir}{RST}"
+            # Display Air Fluid Density
+            den_col = (
+                BGRN
+                if location.air_density > 1.1
+                else (BYEL if location.air_density > 0.9 else BRED)
             )
-        )
+            a(
+                _line(
+                    f" {DIM}Air Fluid Density:{RST} {den_col}{location.air_density:>7.4f} kg/m³{RST}"
+                )
+            )
+
+            # Calculate tendency string
+            tendency = 0.0
+            if len(location.pressure_history) >= 60:
+                tendency = location.pressure_history[-1] - location.pressure_history[0]
+
+            ten_col = BRED if tendency < -0.5 else (BGRN if tendency > 0.5 else DIM)
+            ten_dir = "↓↓" if tendency < -0.5 else ("↑↑" if tendency > 0.5 else "→")
+            a(
+                _line(
+                    f" {DIM}Pressure Tendency:{RST} {ten_col}{tendency:>+6.2f} hPa{RST} {ten_col}{ten_dir}{RST}"
+                )
+            )
 
         # Merged Wind Map Scales
         odo_30m = 0.0
@@ -3621,7 +4148,18 @@ def render(
         batt_bar = _gauge(location.battery_percent, 0, 100, 15)
         a(
             _line(
-                f" {DIM}Battery:{RST} {batt_col}{location.battery_percent:>5.1f}%{RST} [{batt_col}{batt_bar}{RST}] {charging_str}"
+                f" {DIM}Battery:{RST} {batt_col}{location.battery_percent:>5.1f}%{RST} [{batt_col}{batt_bar}{RST}] {charging_str}  "
+                f"{DIM}Bank:{RST} {BYEL}{location.battery_energy_bank_wh:>5.2f}Wh{RST}  "
+                f"{DIM}Health:{RST} {BGRN if location.battery_health_pct > 80 else BYEL}{location.battery_health_pct:>5.1f}%{RST}"
+            )
+        )
+        survive_col = BGRN if location.will_battery_survive_one_day == "Yes" else BRED
+        hib_col = BRED if location.in_order_to_survive_day_must_hibernate == "Yes" else BGRN
+        a(
+            _line(
+                f" {DIM}Will Survive Today:{RST} {survive_col}{location.will_battery_survive_one_day}{RST}  "
+                f"{DIM}Hibernate Req:{RST} {hib_col}{location.in_order_to_survive_day_must_hibernate}{RST}  "
+                f"{DIM}Pulse Sug:{RST} {BCYN}{location.pulsing_suggestion_wake:.0f}s/{location.pulsing_suggestion_wake_length:.0f}s{RST}"
             )
         )
         if location.pmset_info:
@@ -3966,19 +4504,23 @@ def load_task(path):
         return None
     try:
         spec = importlib.util.spec_from_file_location("earu_task", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        if hasattr(module, "run_task"):
-            return module.run_task
-        else:
-            print(f"{YEL}[!] Task script {path} has no 'run_task' function.{RST}")
-            return None
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if hasattr(module, "run_task"):
+                return module.run_task
+            else:
+                print(f"{YEL}[!] Task script {path} has no 'run_task' function.{RST}")
+                return None
+        return None
     except Exception as e:
         print(f"{RED}[!] Error loading task {path}: {e}{RST}")
         return None
 
 
 def main(stdscr=None):
+    phase = False
+    frame = ""
     # Ensure working directory is the script's directory
     # (Called outside wrapper to avoid issues with current working dir changes)
 
@@ -4019,7 +4561,7 @@ def main(stdscr=None):
             i += 1
         elif arg in ("-h", "--help"):
             print(
-                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--low-power] [--profilerDebug] [--no-writing-dat-API-bridge] [--task path/to/script.py]"
+                f"usage: sudo python3 {sys.argv[0]} [--no-tui] [--save-log] [--daemon] [--kys] [--low-power] [--profilerDebug] [--no-writing-dat-API-bridge] [--onlySelfTest] [--task path/to/script.py]"
             )
             return
         i += 1
@@ -4067,8 +4609,8 @@ def main(stdscr=None):
         return
 
     if daemon_mode:
-        # Relaunch without --daemon
-        cmd = [sys.executable] + [a for a in sys.argv if a != "--daemon"]
+        # Relaunch without --daemon but with taskpolicy -b for background priority
+        cmd = ["taskpolicy", "-b", sys.executable] + [a for a in sys.argv if a != "--daemon"]
         print(f"{GRN}[*] starting in daemon mode...{RST}")
         log_file = open("EARU.log", "a")
         subprocess.Popen(
@@ -4111,22 +4653,26 @@ def main(stdscr=None):
     shm = multiprocessing.shared_memory.SharedMemory(
         name=SHM_NAME, create=True, size=SHM_SIZE
     )
-    shm.buf[:SHM_SIZE] = b"\x00" * SHM_SIZE
+    if shm and shm.buf:
+        shm.buf[:SHM_SIZE] = b"\x00" * SHM_SIZE
 
     shm_gyro = multiprocessing.shared_memory.SharedMemory(
         name=SHM_NAME_GYRO, create=True, size=SHM_SIZE
     )
-    shm_gyro.buf[:SHM_SIZE] = b"\x00" * SHM_SIZE
+    if shm_gyro and shm_gyro.buf:
+        shm_gyro.buf[:SHM_SIZE] = b"\x00" * SHM_SIZE
 
     shm_als = multiprocessing.shared_memory.SharedMemory(
         name=SHM_NAME_ALS, create=True, size=SHM_ALS_SIZE
     )
-    shm_als.buf[:SHM_ALS_SIZE] = b"\x00" * SHM_ALS_SIZE
+    if shm_als and shm_als.buf:
+        shm_als.buf[:SHM_ALS_SIZE] = b"\x00" * SHM_ALS_SIZE
 
     shm_lid = multiprocessing.shared_memory.SharedMemory(
         name=SHM_NAME_LID, create=True, size=SHM_LID_SIZE
     )
-    shm_lid.buf[:SHM_LID_SIZE] = b"\x00" * SHM_LID_SIZE
+    if shm_lid and shm_lid.buf:
+        shm_lid.buf[:SHM_LID_SIZE] = b"\x00" * SHM_LID_SIZE
 
     running = [True]
     restart_count = [0]
@@ -4274,10 +4820,13 @@ def main(stdscr=None):
     last_period = 0.0
     last_integrity_check = 0.0
     last_write_t = 0.0
+    last_state_save_t = time.time()  # Initialize with current time to start 600s timer
     last_aug_parity_t = 0.0
     last_ext_parity_t = 0.0
+    last_int_parity_t = 0.0
     cached_aug_parity = ""
     cached_ext_parity = ""
+    cached_int_parity = ""
     worker = None
     MAX_BATCH = 4000 if not low_power_mode else 200
 
@@ -4286,12 +4835,16 @@ def main(stdscr=None):
     _bg_data_lock = threading.Lock()
     last_kys_check = 0.0
     last_enforced_scan = 0.0
+    last_ramdisk_check_t = 0.0
 
     def _bg_analysis_task():
-        nonlocal last_dwt, last_period, last_kys_check, last_enforced_scan
+        nonlocal last_dwt, last_period, last_kys_check, last_enforced_scan, last_ramdisk_check_t
         while running[0]:
             try:
                 now = time.time()
+                
+                # Internal data refresh (Every 100ms approx via loop sleep)
+                location.check_hid_idle_async()
 
                 # 0. Async KYS check (Every 3.0s)
                 if now - last_kys_check >= 3.0:
@@ -4317,43 +4870,71 @@ def main(stdscr=None):
                             pass
                     last_enforced_scan = now
 
-                # 1. DWT Calculation (Every 0.2s)                if now - last_dwt >= 0.2:
+                # 0c. RAM Disk Integrity Check (Every 30s)
+                if now - last_ramdisk_check_t >= 30.0:
+                    # Check if ANY EARU_dataIO is mounted and if it's at the canonical path
+                    is_mounted = False
+                    has_canonical = False
+                    try:
+                        mounts = subprocess.check_output(["mount"]).decode().splitlines()
+                        is_mounted = any("EARU_dataIO" in m for m in mounts)
+                        has_canonical = any(" on /Volumes/EARU_dataIO (" in m for m in mounts)
+                    except Exception:
+                        # Fallback to basic existence check
+                        is_mounted = os.path.exists("/Volumes/EARU_dataIO")
+                        has_canonical = is_mounted
+
+                    if not is_mounted or not has_canonical:
+                        # If missing or incorrectly named, remount
+                        def _remount():
+                            print(f"{YEL}[*] RAM Disk integrity issue detected. Remounting...{RST}")
+                            rp = setup_ramdisk(force_remount=True)
+                            ensure_ramdisk_links(rp)
+                        threading.Thread(target=_remount, daemon=True).start()
+                    last_ramdisk_check_t = now
+
+                # 1. DWT Calculation (Every 1.0s)
+                if now - last_dwt >= 1.0:
                     det.compute_dwt()
                     last_dwt = now
                 
-                # 2. Ecosystem Analysis (Every 1.0s)
-                if now - last_period >= 1.0:
+                # 2. Ecosystem Analysis (Every 5.0s)
+                if now - last_period >= 5.0:
                     det.detect_periodicity()
                     location.check_core_location(now)
                     location.check_system_metrics()
                     location.check_smc_sensors()
                     location.check_smc_pressure()
-                    location.check_hid_idle_async()
                     last_period = now
 
-                # 2b. User/Entity Detection Analysis (Every 20.0s)
-                if now - det.last_entity_update >= 20.0:
+                # 2b. User/Entity Detection Analysis (Every 120.0s)
+                if now - det.last_entity_update >= 120.0:
                     det.detect_entities()
                     det.last_entity_update = now
 
-                # 2c. Seismic Classification (Every 0.2s)
-                if now - det.last_seismic_update >= 0.2:
+                # 2c. Seismic Classification (Every 1.0s)
+                if now - det.last_seismic_update >= 1.0:
                     # Provide lid context if available
                     if 'lid_angle' in locals() or 'lid_angle' in globals():
-                        det.current_lid_angle = lid_angle
+                        det.current_lid_angle = float(lid_angle) if lid_angle is not None else 0.0
                     det.classify_seismic(location)
                     det.last_seismic_update = now
 
-                # 2d. Weather Analysis (Every 60.0s)
-                if now - location.last_weather_update >= 60.0:
+                # 2d. Weather Analysis (Every 120.0s)
+                if now - location.last_weather_update >= 120.0:
                     location.fetch_api_pressure()
                     location.update_weather_thermodynamics()
                     location.check_drift_async(det)
                     location.fetch_external_meteo_async()
                     location.last_weather_update = now
 
-                # 3. Wind Map Estimation and Grid Generation (Every 60.0s)
-                if now - location.last_wind_grid_update >= 60.0:
+                # 2e. Weather History Write (Every 1 hour)
+                if now - location.last_weather_history_write >= 3600.0:
+                    location.write_weather_history_async()
+                    location.last_weather_history_write = now
+
+                # 3. Wind Map Estimation and Grid Generation (Every 120.0s)
+                if now - location.last_wind_grid_update >= 120.0:
                     profiler.start_block("wind_map_update")
                     
                     profiler.start_block("estimation")
@@ -4369,7 +4950,7 @@ def main(stdscr=None):
                     location.last_wind_grid_update = now
                     profiler.end_block() # wind_map_update
                 
-                time.sleep(0.1)
+                time.sleep(0.5)
             except Exception:
                 time.sleep(0.5)
 
@@ -4378,6 +4959,8 @@ def main(stdscr=None):
 
     last_main_loop_time = time.time()
 
+    frame = ""
+    phase = False
     try:
         while running[0]:
             loop_start = time.time()
@@ -4403,7 +4986,7 @@ def main(stdscr=None):
             profiler.end_block() # li_worker_check
 
             profiler.start_block("li_sleep")
-            time.sleep(0.033 if low_power_mode else 0.005)
+            time.sleep(0.066 if low_power_mode else 0.02)
             profiler.end_block() # li_sleep
 
             now = time.time()
@@ -4501,7 +5084,7 @@ def main(stdscr=None):
             if (now - last_draw >= draw_period) or (is_impact and now - last_impact_save > 0.5):
                 if is_impact:
                     # Emergency Classification to capture impact damage immediately
-                    det.current_lid_angle = lid_angle
+                    det.current_lid_angle = float(lid_angle) if lid_angle is not None else 0.0
                     det.classify_seismic(location)
                     last_impact_save = now
                 last_draw = now
@@ -4535,9 +5118,7 @@ def main(stdscr=None):
                 profiler.end_block() # dp_pressure
 
                 profiler.start_block("dp_loop_stats")
-                l_pct_90, l_low_1, l_low_01, l_avg, l_stutters, l_hz_history = (
-                    loop_tracker.get_stats()
-                )
+                l_pct_90, l_low_1, l_low_01, l_avg, l_stutters, l_hz_history = loop_tracker.get_stats()
                 profiler.end_block() # dp_loop_stats
 
                 profiler.start_block("dp_wind_map")
@@ -4585,10 +5166,14 @@ def main(stdscr=None):
                         "heading": location.heading,
                         "compass_dir": _degrees_to_compass(location.heading),
                         "v_mag": location.v_mag,
+                        "CorrectionFactor_Reckoning_Velocity": location.CorrectionFactor_Reckoning_Velocity,
+                        "CorrectionFactor_Reckoning_VerticalRate": location.CorrectionFactor_Reckoning_VerticalRate,
+                        "CorrectionFactor_Reckoning_Altitude": location.CorrectionFactor_Reckoning_Altitude,
                         "mach": location.mach,
                         "calibrated_g": location.calibrated_g,
                         "pos": location.pos,
                         "total_distance_m": location.total_distance_m,
+                        "CorrectionFactor_Reckoning_Heading": location.CorrectionFactor_Reckoning_Heading,
                         "odometer_30m": math.sqrt(
                             (location.pos[0] - location.odometer_30m_history[0][1][0])
                             ** 2
@@ -4604,17 +5189,20 @@ def main(stdscr=None):
                         "category": location.weather_category,
                         "dew_point_k": location.dew_point_k,
                         "dew_point_spread": location.dew_point_spread,
-                        "air_fluid_density": location.air_density,
-                        "pressure_tendency_hpa": (
-                            location.pressure_history[-1] - location.pressure_history[0]
-                        )
-                        if len(location.pressure_history) > 60
-                        else 0.0,
+                        "smc_p_offset_hpa": location.smc_p_offset,
+                        "humidity_pct": location.humidity_pct,
+                        "hum_offset": location.hum_offset,
+                        "api_humidity_pct": location.api_humidity_pct,
+                        "air_fluid_density": "INOP" if location.weather_inop else location.air_density,
+                        "pressure_tendency_hpa": "INOP" if location.weather_inop else (
+                            (location.pressure_history[-1] - location.pressure_history[0])
+                            if len(location.pressure_history) >= 60
+                            else 0.0
+                        ),
                         "wind_map": {
                             "grid_7x7_10m": location.cached_wind_grid if location.cached_wind_grid is not None else [],
                             "stats": wind_stats
                         },
-                        "3rdparty_meteo": location.external_meteo,
                     },
                     "seismic_activity": {
                         "motion_type": det.motion_type,
@@ -4643,6 +5231,10 @@ def main(stdscr=None):
                         "uptime_earu": location.uptime_earu,
                         "battery_percent": location.battery_percent,
                         "battery_charging": location.battery_charging,
+                        "BatteryEnergyBankWh": location.battery_energy_bank_wh,
+                        "BatteryFullChargeCapacityWh": location.battery_full_charge_capacity_wh,
+                        "BatteryDesignCapacityWh": location.battery_design_capacity_wh,
+                        "BatteryHealthPct": location.battery_health_pct,
                         "nonHumanInputHIDIdle": location.nonHumanInputHIDIdle,
                         "pmset_info": location.pmset_info,
                     },
@@ -4673,6 +5265,15 @@ def main(stdscr=None):
                             "gamma": location.gas_gamma,
                         },
                         "power": location.smc_temps.get("PSTR", 0.0),
+                        "PowerRateUsage": location.smc_temps.get("PSTR", 0.0),
+                        "DayPowerUsage_Wh": location.day_power_usage_wh,
+                        "EstimatedTodayPowerUsage_Wh": location.estimated_today_usage_wh,
+                        "AccumulativePowerUsageThisMonth_Wh": location.month_power_usage_wh,
+                        "AccumulativePowerUsageMeter_Wh": location.meter_power_usage_wh,
+                        "WillBatterySurviveOneDay": location.will_battery_survive_one_day,
+                        "inOrderToSurviveDayMustHibernate": location.in_order_to_survive_day_must_hibernate,
+                        "PulsingSuggestionMaintenanceWindowWake": location.pulsing_suggestion_wake,
+                        "PulsingSuggestionMaintenanceWindowWakeLength": location.pulsing_suggestion_wake_length,
                     },
                     "lid_angle": lid_angle,
                     "lid_speed": det.lid_speed,
@@ -4700,7 +5301,7 @@ def main(stdscr=None):
 
                 # Write to EARU_data.dat asynchronously to avoid blocking
                 def _write_data_bg(json_data_copy, now_val):
-                    nonlocal cached_aug_parity, cached_ext_parity, last_aug_parity_t, last_ext_parity_t, last_integrity_check
+                    nonlocal cached_aug_parity, cached_ext_parity, cached_int_parity, last_aug_parity_t, last_ext_parity_t, last_int_parity_t, last_integrity_check
                     try:
                         profiler.start_block("bg_thread_exec")
                         
@@ -4716,7 +5317,7 @@ def main(stdscr=None):
                                 "user_entity_detection": json_data_copy["user_entity_detection"],
                                 "high_res_drift": json_data_copy["high_res_drift"],
                                 "events": json_data_copy["events"],
-                                "weather_local": {k:v for k,v in json_data_copy["ecosystem_weather"].items() if k != "3rdparty_meteo"}
+                                "weather_local": json_data_copy["ecosystem_weather"]
                             }
                             p_aug_payload = json.dumps(aug_subset, default=str, sort_keys=True)
                             cached_aug_parity = hashlib.sha256(p_aug_payload.encode()).hexdigest()
@@ -4726,32 +5327,35 @@ def main(stdscr=None):
                         # 2. External Weather Parity (Every 1800s)
                         if now_val - last_ext_parity_t >= 1800.0 or not cached_ext_parity:
                             profiler.start_block("parity_external")
-                            p_ext_payload = json.dumps(json_data_copy["ecosystem_weather"].get("3rdparty_meteo", {}), default=str, sort_keys=True)
+                            p_ext_payload = json.dumps(location.get_external_meteo(), default=str, sort_keys=True)
                             cached_ext_parity = hashlib.sha256(p_ext_payload.encode()).hexdigest()
                             last_ext_parity_t = now_val
                             profiler.end_block() # parity_external
 
+                        # 3. Internal Parity (Every 2s)
+                        if now_val - last_int_parity_t >= 2.0 or not cached_int_parity:
+                            profiler.start_block("parity_internal")
+                            int_subset = {
+                                "time": json_data_copy["time"],
+                                "accel": json_data_copy["accel"],
+                                "gyro": json_data_copy["gyro"],
+                                "orientation": json_data_copy["orientation"],
+                                "lid_angle": json_data_copy["lid_angle"],
+                                "lid_speed": json_data_copy["lid_speed"],
+                                "als": json_data_copy["als"].hex() if isinstance(json_data_copy["als"], bytes) else json_data_copy["als"]
+                            }
+                            p_int_payload = json.dumps(int_subset, default=str, sort_keys=True)
+                            cached_int_parity = hashlib.sha256(p_int_payload.encode()).hexdigest()
+                            last_int_parity_t = now_val
+                            profiler.end_block() # parity_internal
+
                         # Update parities in the copy before writing
                         json_data_copy["p_augmented"] = cached_aug_parity
                         json_data_copy["p_external"] = cached_ext_parity
+                        json_data_copy["p_internal"] = cached_int_parity
 
-                        # 3. Internal Parity (Realtime for every write)
-                        profiler.start_block("parity_internal")
-                        int_subset = {
-                            "time": json_data_copy["time"],
-                            "accel": json_data_copy["accel"],
-                            "gyro": json_data_copy["gyro"],
-                            "orientation": json_data_copy["orientation"],
-                            "lid_angle": json_data_copy["lid_angle"],
-                            "lid_speed": json_data_copy["lid_speed"],
-                            "als": json_data_copy["als"].hex() if isinstance(json_data_copy["als"], bytes) else json_data_copy["als"]
-                        }
-                        p_int_payload = json.dumps(int_subset, default=str, sort_keys=True)
-                        json_data_copy["p_internal"] = hashlib.sha256(p_int_payload.encode()).hexdigest()
-                        profiler.end_block() # parity_internal
-
-                        # 4. Heavy Data Integrity Check (Variable frequency)
-                        i_interval = np.interp(location.v_mag, [0.0, 1.0, 7.0, 10.0], [60.0, 30.0, 2.0, 0.0])
+                        # 4. Heavy Data Integrity Check (Variable frequency: 10s to 120s)
+                        i_interval = np.interp(location.v_mag, [0.0, 1.0, 7.0, 10.0], [120.0, 60.0, 30.0, 10.0])
                         if now_val - last_integrity_check >= i_interval:
                             profiler.start_block("slow_integrity_check")
                             _ = json.dumps(json_data_copy, cls=NpEncoder)
@@ -4776,8 +5380,8 @@ def main(stdscr=None):
                         det.anomaly_event_upsets += 1
 
                 if not no_writing_dat:
-                    # Variable write interval: v=0: 1s (1Hz), v=0.5: 0.33s (3Hz), v=1: 0.16s (6Hz), v>1: 0.1s (10Hz)
-                    w_interval = np.interp(location.v_mag, [0.0, 0.5, 1.0], [1.0, 0.333, 0.1])
+                    # Variable write interval: v=0: 0.5s (2Hz), v=0.5: 0.3s (3.3Hz), v=1: 0.2s (5Hz)
+                    w_interval = np.interp(location.v_mag, [0.0, 0.5, 1.0], [0.5, 0.3, 0.2])
                     if now - last_write_t >= w_interval:
                         profiler.start_block("bg_write_spawn")
                         threading.Thread(target=_write_data_bg, args=(data.copy(), now), daemon=True).start()
@@ -4793,35 +5397,49 @@ def main(stdscr=None):
                             profiler.end_block() # task_exec
 
                 if use_tui:
-                    profiler.start_block("tui_render")
-                    frame = render(
-                        det,
-                        t_start,
-                        restart_count[0],
-                        lid_angle=lid_angle,
-                        als_raw=als_raw,
-                        location=location,
-                        loop_stats=(
-                            l_pct_90,
-                            l_low_1,
-                            l_low_01,
-                            l_avg,
-                            l_stutters,
-                            l_hz_history,
-                        ),
-                    )
-                    profiler.end_block() # tui_render
+                    if now - last_draw >= 0.2: # 5Hz TUI update
+                        profiler.start_block("tui_render")
+                        frame = render(
+                            det,
+                            t_start,
+                            restart_count[0],
+                            lid_angle=lid_angle,
+                            als_raw=als_raw,
+                            location=location,
+                            loop_stats=(
+                                l_pct_90,
+                                l_low_1,
+                                l_low_01,
+                                l_avg,
+                                l_stutters,
+                                l_hz_history,
+                            ),
+                        )
+                        profiler.end_block() # tui_render
 
-                    profiler.start_block("tui_refresh")
-                    if stdscr:
-                        stdscr.erase()
-                        _add_ansi_to_curses(stdscr, frame)
-                        stdscr.refresh()
-                    else:
-                        sys.stdout.write(CLEAR + frame)
-                        sys.stdout.flush()
-                    profiler.end_block() # tui_refresh
-                last_draw = now
+                        profiler.start_block("tui_refresh")
+                        if stdscr:
+                            stdscr.erase()
+                            _add_ansi_to_curses(stdscr, frame)
+                            stdscr.refresh()
+                        else:
+                            sys.stdout.write(CLEAR + frame)
+                            sys.stdout.flush()
+                        profiler.end_block() # tui_refresh
+                        last_draw = now
+                
+                # 5. Periodic State Save (Every 600s)
+                if now - last_state_save_t >= 600.0:
+                    profiler.start_block("periodic_save")
+                    try:
+                        save_dir = "save_state"
+                        if not os.path.exists(save_dir): os.makedirs(save_dir)
+                        if os.path.exists("EARU_data.dat"):
+                            shutil.copy2("EARU_data.dat", os.path.join(save_dir, "EARU_data.dat"))
+                    except Exception:
+                        pass
+                    last_state_save_t = now
+                    profiler.end_block() # periodic_save
             profiler.end_block() # render_save_check
 
             profiler.start_block("profiler_track")
@@ -4897,6 +5515,30 @@ def main(stdscr=None):
 if __name__ == "__main__":
     # Set working directory once
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+    # Strict Self-Check with pyrefly
+    pyrefly_bin = shutil.which("pyrefly")
+    if pyrefly_bin:
+        cp = subprocess.run([pyrefly_bin, "check", "--min-severity", "warn", __file__], capture_output=True, text=True)
+        output = cp.stdout + cp.stderr
+        has_issues = False
+        for line in output.splitlines():
+            if "ERROR" in line or "WARN" in line:
+                has_issues = True
+                break
+        
+        if cp.returncode != 0 or has_issues:
+            sys.stderr.write(f"STRICT CHECK FAILED (pyrefly):\n{output}\n")
+            sys.exit(1)
+            
+        if "--onlySelfTest" in sys.argv:
+            print("SELF-TEST PASSED (pyrefly integrity confirmed)")
+            sys.exit(0)
+    else:
+        # Only exit if not found and we are not in bootstrap (but we handle it here)
+        if "--onlySelfTest" in sys.argv:
+            sys.stderr.write("Error: pyrefly dependency not found in environment.\n")
+            sys.exit(1)
 
     if "--no-tui" in sys.argv or "--daemon" in sys.argv or not sys.stdout.isatty():
         main(None)

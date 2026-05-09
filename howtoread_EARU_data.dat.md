@@ -58,6 +58,10 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `pos` | Meters | Relative Cartesian position `[x, y, z]`. | |
 | `total_distance_m` | Meters | Odometer for total distance traveled. | |
 | `odometer_30m` | Meters | Distance traveled in the last 30 seconds. | |
+| `CorrectionFactor_Reckoning_Velocity` | Ratio | Gain factor for horizontal velocity anchored to GPS (0.5 to 2.0). | |
+| `CorrectionFactor_Reckoning_Heading` | Degrees | Additive offset for heading alignment anchored to GPS gradient. | |
+| `CorrectionFactor_Reckoning_Altitude` | Meters | Additive offset for altitude anchored to GPS/TopoData. | |
+| `CorrectionFactor_Reckoning_VerticalRate` | Ratio | Gain factor for vertical velocity anchored to GPS change. | |
 
 ### 6. `ecosystem_weather`
 | Variable | Unit | Description | Possible Outputs |
@@ -98,6 +102,10 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `uptime_earu` | Seconds | Process uptime for EARU. |
 | `battery_percent` | % | Current battery level. |
 | `battery_charging` | Bool | Whether the system is plugged into power. |
+| `BatteryEnergyBankWh` | Wh | Remaining energy in the battery in Watt-hours. |
+| `BatteryFullChargeCapacityWh` | Wh | Maximum energy the battery can hold at its current health. |
+| `BatteryDesignCapacityWh` | Wh | Original energy capacity of the battery when new. |
+| `BatteryHealthPct` | % | Battery health (Full Charge Capacity / Design Capacity). |
 | `pmset_info` | String | Raw output from macOS `pmset -g live`. |
 
 ### 9. `loop_consistency` (Performance)
@@ -123,18 +131,27 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `thrust_n` | Newtons | Force exerted by the cooling fans. |
 | `humidity_pct` | % | Estimated relative humidity. |
 | `power` | Watts | Power consumption (derived from `PSTR`). |
+| `PowerRateUsage` | Watts | Duplicate of `power`. |
+| `DayPowerUsage_Wh` | Wh | Cumulative energy consumption for the current day. |
+| `EstimatedTodayPowerUsage_Wh` | Wh | AI-estimated total energy consumption for the end of the day. |
+| `AccumulativePowerUsageThisMonth_Wh` | Wh | Cumulative energy consumption for the current month. |
+| `AccumulativePowerUsageMeter_Wh` | Wh | Lifetime cumulative energy consumption (total meter). |
+| `WillBatterySurviveOneDay` | String | "Yes" or "No" prediction based on current bank vs projected usage. |
+| `inOrderToSurviveDayMustHibernate` | String | "Yes" if even pulsing cannot save enough energy, necessitating hibernation. |
+| `PulsingSuggestionMaintenanceWindowWake` | Seconds | Suggested background wake interval to stretch battery life. |
+| `PulsingSuggestionMaintenanceWindowWakeLength` | Seconds | Suggested duration for each background wake. |
 
-### 10. `user_entity_detection` (BCG)
+### 11. `user_entity_detection` (BCG)
 Detects physiological signals through the chassis using the IMU.
 | Variable | Unit | Description | Possible Outputs |
 | :--- | :--- | :--- | :--- |
 | `detected` | BPM | List of detected heart rates in the vicinity. | |
 | `count` | Integer | Number of distinct entities detected. | |
-| `inferred_mood` | Probability | Probability map of the detected user's mood. | "Calm", "Excited", "Tired", "Anxious" |
+| `inferred_mood` | Probability | Probability map of the detected user's mood. | "Calm/Relaxed", "Excited/Joyful", "Tired/Bored", "Anxious/Frustrated" |
 
 ---
 
 ## Technical Implementation Notes
 - **JSON Encoding:** Numpy integers and floats are converted to standard JSON types. Binary `als` data is hex-encoded.
 - **Data Integrity:** The `parity` field inside the JSON and the `RECOVERY_V1` footer allow for validation of every write operation.
-- **Sampling Rate:** Typically updated at 10Hz-100Hz depending on system load and sensor availability.
+- **Sampling Rate:** Typically updated at 5Hz-10Hz depending on motion and system load. (Main sensor loop remains 100Hz).
