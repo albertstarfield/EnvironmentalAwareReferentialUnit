@@ -31,8 +31,35 @@ import subprocess
 import sys
 import threading
 import time
+import venv
 from collections import deque
 from typing import Any
+
+# --- Self-Bootstrapping Block ---
+def bootstrap():
+    venv_dir = os.path.join(os.path.dirname(__file__), ".venv")
+    if sys.prefix == os.path.abspath(venv_dir): return
+    if not os.path.exists(venv_dir): venv.create(venv_dir, with_pip=True)
+    
+    python_exe = os.path.join(venv_dir, "bin", "python")
+    pip_exe = os.path.join(venv_dir, "bin", "pip")
+    # Windows compatibility
+    if os.name == 'nt':
+        python_exe = os.path.join(venv_dir, "Scripts", "python.exe")
+        pip_exe = os.path.join(venv_dir, "Scripts", "pip.exe")
+
+    print(f"\033[36m[*] Synchronizing EARU dependencies in venv...\033[0m")
+    try:
+        reqs = ["numpy", "psutil", "requests", "openmeteo-requests", "pandas", "requests-cache", "retry-requests", "quart", "hypercorn", "numba"]
+        subprocess.check_call([pip_exe, "install"] + reqs)
+    except Exception as e:
+        print(f"\033[31m[!] Bootstrap failed: {e}\033[0m")
+    
+    os.execv(python_exe, [python_exe] + sys.argv)
+
+if __name__ == "__main__" and "--no-bootstrap" not in sys.argv:
+    try: bootstrap()
+    except Exception: pass
 
 # Ensure local earu directory is in path
 curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -42,9 +69,17 @@ if curr_dir not in sys.path:
 import numpy as np
 import psutil  # pyrefly: ignore
 import requests
+import asyncio
+from quart import Quart, jsonify
+from hypercorn.config import Config
+from hypercorn.asyncio import serve
 from numba import njit  # pyrefly: ignore
 
 from earu.pedometer import Pedometer
+
+# Global store for API
+latest_earu_data = {}
+latest_earu_data_lock = threading.Lock()
 from earu._spu import (
     ALS_REPORT_LEN,
     SHM_ALS_SIZE,
@@ -5291,6 +5326,10 @@ def main(stdscr=None):
                 data["p_external"] = cached_ext_parity
                 profiler.end_block() # dp_dict_build
 
+                # Update global store for API
+                with latest_earu_data_lock:
+                    latest_earu_data.update(data)
+
                 # Data Integrity / Anomaly Event Upset Detection (Lightweight part)
                 profiler.start_block("data_integrity_check")
                 # 1. Time Monotonicity Check (Strictly backward check - MUST BE REALTIME)
@@ -5512,6 +5551,27 @@ def main(stdscr=None):
                 pass
 
 
+app = Quart(__name__)
+
+@app.route("/")
+async def get_data():
+    with latest_earu_data_lock:
+        return jsonify(latest_earu_data)
+
+async def run_quart_api():
+    config = Config()
+    config.bind = ["0.0.0.0:3270"]
+    await serve(app, config)
+
+def start_api_thread():
+    def _run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_quart_api())
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    print(f"\033[92m[ok] EARU WifiLogger API starting on port 3270\033[0m")
+
 if __name__ == "__main__":
     # Set working directory once
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -5540,6 +5600,7 @@ if __name__ == "__main__":
             sys.stderr.write("Error: pyrefly dependency not found in environment.\n")
             sys.exit(1)
 
+    start_api_thread()
     if "--no-tui" in sys.argv or "--daemon" in sys.argv or not sys.stdout.isatty():
         main(None)
     else:
