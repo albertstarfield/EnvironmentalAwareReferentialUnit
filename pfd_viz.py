@@ -9,39 +9,70 @@ import tkinter as tk
 from collections import deque
 import datetime
 import numpy as np
+import shutil
+from typing import Optional, Any, Union, Literal
 
 # --- Self-Bootstrapping Block ---
-def bootstrap():
+def bootstrap() -> None:
     venv_dir = os.path.join(os.path.dirname(__file__), ".venv_pfd")
     if sys.prefix == os.path.abspath(venv_dir): return
     if not os.path.exists(venv_dir): venv.create(venv_dir, with_pip=True)
     python_exe = os.path.join(venv_dir, "Scripts" if os.name == 'nt' else "bin", "python")
     pip_exe = os.path.join(venv_dir, "Scripts" if os.name == 'nt' else "bin", "pip")
     try:
-        subprocess.check_call([pip_exe, "install", "tkintermapview", "Pillow", "numpy"])
+        subprocess.check_call([pip_exe, "install", "tkintermapview", "Pillow", "numpy", "pyrefly"])
     except Exception: pass
     os.execv(python_exe, [python_exe] + sys.argv)
 
 if __name__ == "__main__" and "--no-bootstrap" not in sys.argv:
     try: bootstrap()
     except Exception: pass
+    
+    # Strict Self-Check with pyrefly
+    pyrefly_bin = shutil.which("pyrefly")
+    if pyrefly_bin:
+        cp = subprocess.run([pyrefly_bin, "check", "--min-severity", "warn", __file__], capture_output=True, text=True)
+        output = cp.stdout + cp.stderr
+        has_issues = False
+        for line in output.splitlines():
+            if "ERROR" in line or "WARN" in line:
+                has_issues = True
+                break
+        
+        if cp.returncode != 0 or has_issues:
+            sys.stderr.write(f"STRICT CHECK FAILED (pyrefly):\n{output}\n")
+            sys.exit(1)
+    else:
+        sys.stderr.write("Error: pyrefly dependency not found in environment.\n")
+        sys.exit(1)
 
 try:
     import tkintermapview
+    from tkintermapview import decimal_to_osm
 except ImportError:
     tkintermapview = None
+    def decimal_to_osm(*args: Any) -> tuple[float, float]: return (0.0, 0.0)
 
 class PrimaryFlightDisplay:
-    def __init__(self, root):
+    def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("SensorAugmentedViewerandTools")
-        self.root.geometry("1000x750")
+        self.root.geometry("1000x800")
         self.root.configure(bg='black')
 
-        self.page = 0 
-        self.data_path = "EARU_data.dat"
-        self.auto_center = True
-        self.user_marker = None
+        self.page: int = 0 
+        self.data_path: str = "EARU_data.dat"
+        self.weather_history_path: str = "EARU_WeatherAPIHistory.dat"
+        self.auto_center: bool = True
+        self.map_heading_up: bool = True
+        self.user_marker: Any = None
+
+        # Map Interaction State
+        self.map_zoom: int = 15
+        self.pan_lat: float = 0.0
+        self.pan_lon: float = 0.0
+        self.panning_keys: set[str] = set()
+        self.pan_accel: float = 1.0
 
         # Layout: Content Frame (Top) + Nav Canvas (Bottom)
         self.content_frame = tk.Frame(self.root, bg='black')
@@ -54,70 +85,168 @@ class PrimaryFlightDisplay:
         self.canvas = tk.Canvas(self.content_frame, bg='black', highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        self.map_widget = None
+        self.map_widget: Any = None
         if tkintermapview:
             self.map_widget = tkintermapview.TkinterMapView(self.content_frame, corner_radius=0)
-            self.map_widget.canvas.bind("<Button-1>", lambda e: self.set_auto_center(False), add="+")
+            # Bindings for modern responsiveness
+            self.root.bind("<KeyPress>", self.on_key_press)
+            self.root.bind("<KeyRelease>", self.on_key_release)
+            self.map_widget.canvas.bind("<Button-1>", self.on_map_click, add="+")
         
         # State Variables
-        self.pitch, self.roll, self.yaw = 0, 0, 0
-        self.alt, self.speed, self.heading = 0, 0, 0
-        self.lat, self.lon = 0, 0
-        self.alt_rate, self.mach = 0, 0
-        self.cpu, self.batt, self.charging = 0, 0, False
-        self.simulated = False
-        self.raw_pitch, self.raw_roll, self.raw_yaw = 0, 0, 0
-        self.full_data = {}
-        self.clim_subpage = 0
-        self.clim_zoom = 0 # 0: Full, 1: 30d, 2: 7d, 3: 24h, 4: Forecast
+        self.pitch: float = 0.0
+        self.roll: float = 0.0
+        self.yaw: float = 0.0
+        self.alt: float = 0.0
+        self.speed: float = 0.0
+        self.heading: float = 0.0
+        self.lat: float = 0.0
+        self.lon: float = 0.0
+        self.alt_rate: float = 0.0
+        self.mach: float = 0.0
+        self.cpu: float = 0.0
+        self.batt: int = 0
+        self.charging: bool = False
+        self.hid_idle: float = 0.0
 
-        self.targets = {'pitch': 0, 'roll': 0, 'heading': 0, 'alt': 0, 'speed': 0, 'lat': 0, 'lon': 0}
-        self.lerp_factor = 0.25
-        self.pitch_sign, self.roll_sign = 1, -1
+        # Power & Energy Stats
+        self.power_rate: float = 0.0
+        self.day_usage_wh: float = 0.0
+        self.month_usage_wh: float = 0.0
+        self.meter_usage_wh: float = 0.0
+        self.est_today_wh: float = 0.0
+        self.battery_bank_wh: float = 0.0
+        self.battery_health: float = 100.0
+        self.battery_full_wh: float = 0.0
+        self.battery_design_wh: float = 0.0
+        self.survive_today: str = "Yes"
+        self.must_hibernate: str = "No"
+        self.pulse_wake: float = 0.0
+        self.pulse_length: float = 0.0
+
+        self.simulated: bool = False
+        self.raw_pitch: float = 0.0
+        self.raw_roll: float = 0.0
+        self.raw_yaw: float = 0.0
+        self.full_data: dict[str, Any] = {}
+        self.clim_subpage: int = 0
+        self.clim_zoom: int = 0 # 0: Full, 1: 30d, 2: 7d, 3: 24h, 4: Forecast
+
+        # Correction Factors (Semantically enriched)
+        self.cf_velocity: float = 1.0
+        self.cf_heading: float = 0.0
+        self.cf_altitude: float = 0.0
+        self.cf_vertical_rate: float = 1.0
+
+        self.targets: dict[str, float] = {
+            'pitch': 0.0, 'roll': 0.0, 'heading': 0.0, 'alt': 0.0, 'speed': 0.0, 'lat': 0.0, 'lon': 0.0,
+            'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0
+        }
+        self.lerp_factor: float = 0.25
+        self.pitch_sign: float = 1.0
+        self.roll_sign: float = -1.0
         
         self.update_data()
         self.animate()
 
-    def set_auto_center(self, val):
-        self.auto_center = val
+    def on_key_press(self, event: tk.Event) -> None:
+        if self.page != 4: return
+        key = event.keysym
+        lower_key = key.lower()
+        
+        # Continuous movement keys
+        if lower_key in ('w', 's', 'a', 'd') or key in ('Up', 'Down', 'Left', 'Right'):
+            self.panning_keys.add(key if key in ('Up', 'Down', 'Left', 'Right') else lower_key)
+            return
 
-    def get_soft_keys(self, w):
+        # One-shot keys
+        if lower_key == 'plus' or lower_key == 'equal': self.zoom_map(1)
+        elif lower_key == 'minus': self.zoom_map(-1)
+        elif lower_key == 'r': self.set_auto_center(True)
+        elif lower_key == 'n': self.map_heading_up = not self.map_heading_up
+
+    def on_key_release(self, event: tk.Event) -> None:
+        key = event.keysym
+        lower_key = key.lower()
+        if lower_key in self.panning_keys: self.panning_keys.remove(lower_key)
+        if key in self.panning_keys: self.panning_keys.remove(key)
+
+    def update_panning(self) -> None:
+        if not self.panning_keys or self.page != 4:
+            self.pan_accel = 1.0
+            return
+        
+        # Accelerate over time (max 12x)
+        self.pan_accel = min(12.0, self.pan_accel + 0.4)
+        base_step = 0.0001 / max(1.0, self.map_zoom - 10.0)
+        step = base_step * self.pan_accel
+        
+        d_lat, d_lon = 0.0, 0.0
+        if 'w' in self.panning_keys or 'Up' in self.panning_keys: d_lat += step
+        if 's' in self.panning_keys or 'Down' in self.panning_keys: d_lat -= step
+        if 'a' in self.panning_keys or 'Left' in self.panning_keys: d_lon -= step
+        if 'd' in self.panning_keys or 'Right' in self.panning_keys: d_lon += step
+        
+        if d_lat != 0.0 or d_lon != 0.0:
+            self.pan_map(d_lat, d_lon)
+
+    def pan_map(self, d_lat: float, d_lon: float) -> None:
+        self.set_auto_center(False)
+        self.pan_lat += d_lat
+        self.pan_lon += d_lon
+        if self.map_widget:
+            self.map_widget.set_position(self.pan_lat, self.pan_lon)
+
+    def zoom_map(self, delta: int) -> None:
+        self.map_zoom = max(1, min(20, self.map_zoom + delta))
+        if self.map_widget:
+            self.map_widget.set_zoom(self.map_zoom)
+
+    def set_auto_center(self, val: bool) -> None:
+        self.auto_center = val
+        if val:
+            self.pan_lat, self.pan_lon = self.lat, self.lon
+            if self.map_widget:
+                self.map_widget.set_position(self.lat, self.lon)
+
+    def get_soft_keys(self, w: int) -> list[dict[str, Any]]:
         btn_w = w // 11
         return [
-            {"label": "SAVT", "page": 0, "rect": (5, 10, 5+btn_w, 50)},
-            {"label": "SYSTEM", "page": 1, "rect": (10+btn_w, 10, 10+2*btn_w, 50)},
-            {"label": "SEISMIC", "page": 2, "rect": (15+2*btn_w, 10, 15+3*btn_w, 50)},
-            {"label": "ADV", "page": 3, "rect": (20+3*btn_w, 10, 20+4*btn_w, 50)},
-            {"label": "NAV", "page": 4, "rect": (25+4*btn_w, 10, 25+5*btn_w, 50)},
-            {"label": "METARLOCSENSOR", "page": 5, "rect": (30+5*btn_w, 10, 30+6*btn_w, 50)},
-            {"label": "WIND", "page": 6, "rect": (35+6*btn_w, 10, 35+7*btn_w, 50)},
-            {"label": "CLIMEXT", "page": 7, "rect": (40+7*btn_w, 10, 40+8*btn_w, 50)},
-            {"label": "LOC", "cmd": "center", "rect": (45+8*btn_w, 10, 45+9*btn_w, 50)},
-            {"label": "PREV", "cmd": "prev", "rect": (w - 2*btn_w - 10, 10, w - btn_w - 10, 50)},
-            {"label": "NEXT", "cmd": "next", "rect": (w - btn_w - 5, 10, w - 5, 50)}
+            {"label": "SAVT", "page": 0, "rect": (5.0, 10.0, float(5+btn_w), 50.0)},
+            {"label": "SYSTEM", "page": 1, "rect": (float(10+btn_w), 10.0, float(10+2*btn_w), 50.0)},
+            {"label": "SEISMIC", "page": 2, "rect": (float(15+2*btn_w), 10.0, float(15+3*btn_w), 50.0)},
+            {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 10.0, float(20+4*btn_w), 50.0)},
+            {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 10.0, float(25+5*btn_w), 50.0)},
+            {"label": "METARLOC", "page": 5, "rect": (float(30+5*btn_w), 10.0, float(30+6*btn_w), 50.0)},
+            {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 10.0, float(35+7*btn_w), 50.0)},
+            {"label": "CLIMEXT", "page": 7, "rect": (float(40+7*btn_w), 10.0, float(40+8*btn_w), 50.0)},
+            {"label": "CENTER", "cmd": "center", "rect": (float(45+8*btn_w), 10.0, float(45+9*btn_w), 50.0)},
+            {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 10.0, float(w - btn_w - 10), 50.0)},
+            {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 10.0, float(w - 5), 50.0)}
         ]
 
-    def on_nav_click(self, event):
+    def on_nav_click(self, event: tk.Event) -> None:
         w = self.nav_canvas.winfo_width()
         for key in self.get_soft_keys(w):
-            x1, y1, x2, y2 = key["rect"]
+            rect = key.get("rect")
+            if not isinstance(rect, (list, tuple)) or len(rect) < 4: continue
+            x1, y1, x2, y2 = rect
             if x1 <= event.x <= x2 and y1 <= event.y <= y2:
-                if "page" in key: 
-                    if self.page == 7 and key["page"] == 7:
+                page_val = key.get("page")
+                if isinstance(page_val, int):
+                    if self.page == 7 and page_val == 7:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
-                    self.page = key["page"]
+                    self.page = page_val
                 elif key.get("cmd") == "next": self.page = (self.page + 1) % 8
                 elif key.get("cmd") == "prev": self.page = (self.page - 1) % 8
-                elif key.get("cmd") == "center": 
-                    self.auto_center = True
-                    if self.map_widget: self.map_widget.set_position(self.lat, self.lon)
+                elif key.get("cmd") == "center": self.set_auto_center(True)
                 self.switch_page_view()
                 return
 
         if self.page == 7 and event.y > 150:
             self.clim_zoom = (self.clim_zoom + 1) % 5
 
-    def switch_page_view(self):
+    def switch_page_view(self) -> None:
         if self.page == 4 and self.map_widget:
             self.canvas.pack_forget()
             self.map_widget.pack(fill=tk.BOTH, expand=True)
@@ -127,7 +256,7 @@ class PrimaryFlightDisplay:
             if self.map_widget: self.map_widget.pack_forget()
             self.canvas.pack(fill=tk.BOTH, expand=True)
 
-    def update_data(self):
+    def update_data(self) -> None:
         try:
             if os.path.exists(self.data_path):
                 with open(self.data_path, 'r') as f:
@@ -137,31 +266,75 @@ class PrimaryFlightDisplay:
                         data = json.loads(line)
                         self.full_data = data
                         orient = data.get('orientation', {})
-                        self.raw_pitch, self.raw_roll, self.raw_yaw = orient.get('pitch', 0), orient.get('roll', 0), orient.get('yaw', 0)
-                        self.targets['pitch'], self.targets['roll'] = self.raw_pitch * self.pitch_sign, self.raw_roll * self.roll_sign
+                        self.raw_pitch = float(orient.get('pitch', 0.0))
+                        self.raw_roll = float(orient.get('roll', 0.0))
+                        self.targets['pitch'] = self.raw_pitch * self.pitch_sign
+                        self.targets['roll'] = self.raw_roll * self.roll_sign
+                        
                         loc = data.get('location', {})
-                        self.targets['alt'], self.targets['speed'], self.targets['heading'] = loc.get('alt', 0), loc.get('v_mag', 0) * 1.94384, loc.get('heading', 0)
-                        self.targets['lat'], self.targets['lon'] = loc.get('lat', 0), loc.get('lon', 0)
-                        self.alt_rate, self.mach = loc.get('alt_rate', 0) * 196.85, loc.get('mach', 0)
-                        sys = data.get('system', {}); self.cpu, self.batt, self.charging = sys.get('cpu_usage', 0), sys.get('battery_percent', 0), sys.get('battery_charging', False)
+                        self.targets['alt'] = float(loc.get('alt', 0.0))
+                        self.targets['speed'] = float(loc.get('v_mag', 0.0) * 1.94384)
+                        self.targets['heading'] = float(loc.get('heading', 0.0))
+                        self.targets['lat'] = float(loc.get('lat', 0.0))
+                        self.targets['lon'] = float(loc.get('lon', 0.0))
+                        self.alt_rate = float(loc.get('alt_rate', 0.0) * 196.85)
+                        self.mach = float(loc.get('mach', 0.0))
+                        
+                        # Corrected values from EARU
+                        self.targets['cf_velocity'] = float(loc.get('CorrectionFactor_Reckoning_Velocity', 1.0))
+                        self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
+                        self.targets['cf_altitude'] = float(loc.get('CorrectionFactor_Reckoning_Altitude', 0.0))
+                        self.targets['cf_vertical_rate'] = float(loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0))
+                        
+                        sys_d = data.get('system', {})
+                        self.cpu = float(sys_d.get('cpu_usage', 0.0))
+                        self.batt = int(sys_d.get('battery_percent', 0))
+                        self.charging = bool(sys_d.get('battery_charging', False))
+                        self.hid_idle = float(sys_d.get('nonHumanInputHIDIdle', 0.0))
+
+                        self.battery_bank_wh = float(sys_d.get('BatteryEnergyBankWh', 0.0))
+                        self.battery_health = float(sys_d.get('BatteryHealthPct', 100.0))
+                        self.battery_full_wh = float(sys_d.get('BatteryFullChargeCapacityWh', 0.0))
+                        self.battery_design_wh = float(sys_d.get('BatteryDesignCapacityWh', 0.0))
+
+                        smc = data.get('smc', {})
+                        self.power_rate = float(smc.get('PowerRateUsage', 0.0))
+                        self.day_usage_wh = float(smc.get('DayPowerUsage_Wh', 0.0))
+                        self.month_usage_wh = float(smc.get('AccumulativePowerUsageThisMonth_Wh', 0.0))
+                        self.meter_usage_wh = float(smc.get('AccumulativePowerUsageMeter_Wh', 0.0))
+                        self.est_today_wh = float(smc.get('EstimatedTodayPowerUsage_Wh', 0.0))
+                        self.survive_today = str(smc.get('WillBatterySurviveOneDay', "Yes"))
+                        self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
+                        self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
+                        self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
+
                         self.simulated = False
+
+                if os.path.exists(self.weather_history_path):
+                    with open(self.weather_history_path, 'r') as f:
+                        try:
+                            w_data = json.load(f)
+                            if 'ecosystem_weather' not in self.full_data:
+                                self.full_data['ecosystem_weather'] = {}
+                            self.full_data['ecosystem_weather']['3rdparty_meteo'] = w_data.get('meteo', {})
+                        except Exception: pass
             else:
                 self.simulated = True
                 t = time.time()
-                self.targets['pitch'], self.targets['roll'], self.targets['heading'] = 5*math.sin(t*0.5), 15*math.cos(t*0.3), (t*5)%360
-                self.targets['alt'], self.targets['speed'] = 1000 + 100*math.sin(t*0.1), 120 + 10*math.sin(t*0.2)
-                self.targets['lat'], self.targets['lon'] = -6.175, 106.827
-                self.cpu, self.batt = 25+5*math.sin(t), 85
+                self.targets['pitch'], self.targets['roll'] = 5*math.sin(t*0.5), 15*math.cos(t*0.3)
+                self.targets['heading'], self.targets['alt'] = (t*5)%360, 1000 + 100*math.sin(t*0.1)
+                self.targets['speed'], self.targets['lat'], self.targets['lon'] = 120 + 10*math.sin(t*0.2), -6.175, 106.827
+                self.cpu, self.batt, self.hid_idle = 25+5*math.sin(t), 85, (t % 60)
         except Exception: pass
 
-    def lerp_angle(self, cur, tgt, f):
+    def lerp_angle(self, cur: float, tgt: float, f: float) -> float:
         d = (tgt - cur + 180) % 360 - 180
         return cur + d * f
 
-    def draw_glass_cockpit(self):
+    def draw_glass_cockpit(self) -> None:
         self.canvas.delete("all")
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        if w < 100: w, h = 1000, 700
+        if w < 100: w, h = 1000, 800
         cx, cy = w/2, h/2
         if self.page == 0: self.draw_pfd_page(cx, cy, w, h)
         elif self.page == 1: self.draw_system_page(w, h)
@@ -173,161 +346,522 @@ class PrimaryFlightDisplay:
         elif self.page == 7: self.draw_weather_page(w, h)
         self.draw_nav_keys()
 
-    def draw_nav_keys(self):
+    def draw_nav_keys(self) -> None:
         self.nav_canvas.delete("all")
         w = self.nav_canvas.winfo_width()
         for key in self.get_soft_keys(w):
-            x1, y1, x2, y2 = key["rect"]
+            rect = key.get("rect")
+            if not isinstance(rect, (list, tuple)) or len(rect) < 4: continue
+            x1, y1, x2, y2 = rect
             active = (self.page == key.get("page"))
             color = "#444" if not active else "#0077be"
             self.nav_canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="white", width=1)
-            self.nav_canvas.create_text((x1+x2)/2, (y1+y2)/2, text=key["label"], fill="white", font=("Monaco", 8, "bold"))
+            label = str(key.get("label", ""))
+            self.nav_canvas.create_text((x1+x2)/2, (y1+y2)/2, text=label, fill="white", font=("Monaco", 8, "bold"))
 
-    def draw_pfd_page(self, cx, cy, w, h):
+    def draw_pfd_page(self, cx: float, cy: float, w: float, h: float) -> None:
         self.draw_horizon(cx, cy, w, h)
-        self.draw_tape(w*0.1, cy, 80, h*0.6, self.speed, "SPD", "KTS", 10, 2, "cyan")
-        self.draw_tape(w*0.9, cy, 80, h*0.6, self.alt * 3.28084, "ALT", "FT", 100, 20, "green")
-        self.draw_heading_vector(cx, cy + 240, 400, 40, self.heading)
+        # Corrected Speed Tape (High Precision Knots: 7 decimals)
+        corr_speed = self.speed * self.cf_velocity
+        self.draw_tape(w*0.1, cy, 100, h*0.6, self.speed, "SPD", "KTS", 10, 2, "cyan", target_val=corr_speed, precision=7)
+        
+        # Corrected Altitude Tape
+        corr_alt = (self.alt + self.cf_altitude) * 3.28084
+        self.draw_tape(w*0.9, cy, 80, h*0.6, self.alt * 3.28084, "ALT", "FT", 100, 20, "green", target_val=corr_alt, precision=0)
+        
+        # Heading Vector with Correction
+        corr_hdg = (self.heading + self.cf_heading) % 360
+        self.draw_heading_vector(cx, cy + 240, 400, 40, self.heading, target_hdg=corr_hdg)
+        
         self.draw_center_symbol(cx, cy)
         self.draw_bank_scale(cx, cy)
         self.draw_status_vector(w, h)
+        
+        # VSI with Correction
+        vsi_fpm = self.alt_rate * 60 # feet per minute approx
+        corr_vsi = self.alt_rate * self.cf_vertical_rate * 60
+        self.canvas.create_text(w - 130, cy - 210, text=f"VSI: {int(vsi_fpm)} FPM", fill="green", font=("Monaco", 10))
+        if abs(self.cf_vertical_rate - 1.0) > 0.01:
+            self.canvas.create_text(w - 130, cy - 195, text=f"CORR: {int(corr_vsi)}", fill="#00ccff", font=("Monaco", 8))
+
         self.canvas.create_text(cx - 150, cy + 180, text=f"MACH: {self.mach:.3f}", fill="white", font=("Monaco", 10, "bold"))
-        self.canvas.create_text(w - 130, cy - 210, text=f"VSI: {int(self.alt_rate)} FPM", fill="green", font=("Monaco", 10))
 
-    def draw_status_vector(self, w, h):
-        self.canvas.create_text(10, 10, anchor="nw", text=f"CPU: {self.cpu:.1f}% | BATT: {self.batt}%{' (CHG)' if self.charging else ''}", fill="green", font=("Monaco", 10))
-        self.canvas.create_text(10, h-40, anchor="sw", text=f"R: {self.roll:>+5.1f}\u00b0 P: {self.pitch:>+5.1f}\u00b0 | LAT: {self.lat:.5f} LON: {self.lon:.5f}", fill="white", font=("Monaco", 10, "bold"))
+    def draw_status_vector(self, w: float, h: float) -> None:
+        self.canvas.create_text(10, 10, anchor="nw", text=f"CPU: {self.cpu:.1f}% | BATT: {self.batt}%{' (CHG)' if self.charging else ''} | PWR: {self.power_rate:.1f}W | HID IDLE: {self.hid_idle:.1f}s", fill="green", font=("Monaco", 10))
+        status = f"R: {self.roll:>+5.1f}\u00b0 P: {self.pitch:>+5.1f}\u00b0 | LAT: {self.lat:.5f} LON: {self.lon:.5f}"
+        self.canvas.create_text(10, h-40, anchor="sw", text=status, fill="white", font=("Monaco", 10, "bold"))
 
-    def draw_map_overlay(self, w, h):
+    def get_canvas_pos(self, lat: float, lon: float) -> tuple[float, float]:
+        if not self.map_widget: return 0.0, 0.0
+        # Use the actual widget zoom to stay in sync during animations
+        current_zoom = self.map_widget.zoom
+        tile_position = decimal_to_osm(lat, lon, current_zoom)
+        
+        ul = self.map_widget.upper_left_tile_pos
+        lr = self.map_widget.lower_right_tile_pos
+        
+        w_tile_w = lr[0] - ul[0]
+        w_tile_h = lr[1] - ul[1]
+        
+        if abs(w_tile_w) < 1e-9 or abs(w_tile_h) < 1e-9: return -100.0, -100.0
+        
+        canvas_x = ((tile_position[0] - ul[0]) / w_tile_w) * self.map_widget.width
+        canvas_y = ((tile_position[1] - ul[1]) / w_tile_h) * self.map_widget.height
+        
+        # Ensure finite numbers
+        if not (math.isfinite(canvas_x) and math.isfinite(canvas_y)):
+            return -100.0, -100.0
+            
+        return float(canvas_x), float(canvas_y)
+
+    def draw_text_with_halo(self, canvas: tk.Canvas, x: float, y: float, text: str, fill: str, font: Any, 
+                            anchor: Literal['center', 'e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w'] = "nw", 
+                            tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
+        # Draw shadow/halo in 4 directions for maximum contrast (negative effect)
+        for dx, dy in [(-1, -1), (1, -1), (-1, 1), (1, 1), (0, 2)]:
+            canvas.create_text(x + dx, y + dy, text=text, fill="black", font=font, anchor=anchor, tags=tags)
+        # Main text
+        canvas.create_text(x, y, text=text, fill=fill, font=font, anchor=anchor, tags=tags)
+
+    def on_map_click(self, event: tk.Event) -> None:
+        # Check if clicked the on-screen "Current Location" button (bottom-left area)
+        if 20 <= event.x <= 70 and self.canvas.winfo_height() - 70 <= event.y <= self.canvas.winfo_height() - 20:
+            self.set_auto_center(True)
+        else:
+            # Otherwise, disable auto-center to allow panning
+            self.set_auto_center(False)
+
+    def draw_loc_button(self, canvas: tk.Canvas, x: float, y: float, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
+        # Professional "Center on Location" icon
+        r = 20.0
+        # Halo
+        canvas.create_oval(x-r-2, y-r-2, x+r+2, y+r+2, fill="black", outline="white", width=1, tags=tags)
+        # Icon (Target symbol)
+        canvas.create_oval(x-r, y-r, x+r, y+r, outline="#00ccff", width=2, tags=tags)
+        canvas.create_line(x-r-5, y, x+r+5, y, fill="#00ccff", width=2, tags=tags)
+        canvas.create_line(x, y-r-5, x, y+r+5, fill="#00ccff", width=2, tags=tags)
+        canvas.create_oval(x-5, y-5, x+5, y+5, fill="#00ff00", outline="black", tags=tags)
+
+    def draw_map_overlay(self, w: float, h: float) -> None:
         if self.map_widget:
-            label = f"\u25b2 {int(self.alt*3.28)}ft"
-            if not self.user_marker:
-                self.user_marker = self.map_widget.set_marker(self.lat, self.lon, text=label)
-            else:
-                self.user_marker.set_position(self.lat, self.lon)
-                self.user_marker.set_text(label)
+            if self.user_marker:
+                self.user_marker.delete()
+                self.user_marker = None
+            
             if self.auto_center:
                 self.map_widget.set_position(self.lat, self.lon)
-            self.canvas.create_text(10, 10, anchor="nw", text=f"AUTO-CENTER: {'ON' if self.auto_center else 'OFF (Panning)'}", fill="yellow", font=("Monaco", 10, "bold"))
+                self.pan_lat, self.pan_lon = self.lat, self.lon
+            
+            self.map_widget.canvas.delete("user_nav", "overlay_info", "map_controls", "loc_btn")
+            
+            # 3D Nav Symbol
+            pos_x, pos_y = self.get_canvas_pos(self.lat, self.lon)
+            if pos_x > -50 and pos_y > -50:
+                # In North-Up mode, the symbol always points North (0 deg)
+                symbol_hdg = self.heading if self.map_heading_up else 0.0
+                self.draw_3d_nav_symbol(self.map_widget.canvas, pos_x, pos_y, symbol_hdg, size=22, tags="user_nav")
+                self.map_widget.canvas.tag_raise("user_nav")
+
+            # Left Overlays: Vertical Domain
+            self.draw_text_with_halo(self.map_widget.canvas, 20, h - 80, f"ALT: {int(self.alt*3.28084)} FT / {int(self.alt)}M MSL", "#00ff00", ("Monaco", 16, "bold"), "sw", "overlay_info")
+            self.draw_text_with_halo(self.map_widget.canvas, 20, h - 105, f"TRIANG_ALT_OFF: {self.cf_altitude:+.1f}m", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
+            self.draw_text_with_halo(self.map_widget.canvas, 20, h - 120, f"TRIANG_VSI_GAIN: {self.cf_vertical_rate:.2f}x", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
+            
+            # Right Overlays: Horizontal Domain
+            self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 80, f"SPD: {self.speed:.1f} KTS / {self.speed*1.852:.1f} KPH", "#00ff00", ("Monaco", 16, "bold"), "se", "overlay_info")
+            self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 105, f"TRIANG_SPD_GAIN: {self.cf_velocity:.2f}x", "#00ccff", ("Monaco", 9), "se", "overlay_info")
+            self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 120, f"TRIANG_HDG_OFF:  {self.cf_heading:+.1f}\u00b0", "#00ccff", ("Monaco", 9), "se", "overlay_info")
+            
+            # Status and Controls
+            status_col = "yellow" if self.auto_center else "#ff6600"
+            orient_text = "HEAD-UP" if self.map_heading_up else "NORTH-UP"
+            status_text = f"MODE: {'AUTO-CENTER' if self.auto_center else 'MANUAL PAN'} | {orient_text}"
+            self.draw_text_with_halo(self.map_widget.canvas, 20, 20, status_text, status_col, ("Monaco", 10, "bold"), "nw", "overlay_info")
+            
+            # Draw Avionics Icons
+            arrow_hdg = self.heading if self.map_heading_up else 0.0
+            self.draw_north_arrow(self.map_widget.canvas, w - 60, 60, arrow_hdg, tags="overlay_info")
+            self.draw_zoom_scale(self.map_widget.canvas, 20, h - 150, tags="overlay_info")
+            self.draw_loc_button(self.map_widget.canvas, 45, h - 45, tags="loc_btn")
+            
+            if not self.auto_center:
+                self.draw_map_target(self.map_widget.canvas, w/2, h/2, tags="overlay_info")
+                # Move panning controls to middle-right
+                self.draw_panning_controls(self.map_widget.canvas, w - 100, h/2, tags="map_controls")
+            
+            self.map_widget.canvas.tag_raise("overlay_info")
+            self.map_widget.canvas.tag_raise("map_controls")
+            self.map_widget.canvas.tag_raise("loc_btn")
+
         else:
             self.canvas.create_text(w/2, h/2, text="tkintermapview missing", fill="red")
 
-    def draw_system_page(self, w, h):
+    def draw_3d_nav_symbol(self, canvas: tk.Canvas, x: float, y: float, hdg: float, size: float = 20.0, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
+        if tags is None: tags = ""
+        rad = math.radians(hdg)
+        pts = [(0.0, 1.2), (-0.7, -1.0), (0.7, -1.0), (0.0, -0.4)]
+        
+        def transform(px: float, py: float) -> tuple[float, float]:
+            tx = x + (px * math.cos(rad) + py * math.sin(rad)) * size
+            ty = y - (-px * math.sin(rad) + py * math.cos(rad)) * size
+            return tx, ty
+
+        p1, p2, p3, p4 = [transform(p[0], p[1]) for p in pts]
+        
+        # Enhanced Shadow
+        off = size * 0.18
+        canvas.create_polygon([p1[0]+off, p1[1]+off, p2[0]+off, p2[1]+off, p3[0]+off, p3[1]+off], fill="#080808", stipple="gray50", tags=tags)
+        
+        # Modern 3D Look
+        canvas.create_polygon([p1[0], p1[1], p2[0], p2[1], p4[0], p4[1]], fill="#00aaff", outline="white", width=1, tags=tags)
+        canvas.create_polygon([p1[0], p1[1], p3[0], p3[1], p4[0], p4[1]], fill="#004488", outline="white", width=1, tags=tags)
+
+    def draw_north_arrow(self, canvas: tk.Canvas, x: float, y: float, hdg: float, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
+        if tags is None: tags = ""
+        # Garmin Style North Arrow
+        size = 25.0
+        rad = math.radians(-hdg) # North points up when heading is 0
+        
+        def transform(px: float, py: float) -> tuple[float, float]:
+            tx = x + (px * math.cos(rad) - py * math.sin(rad)) * size
+            ty = y + (px * math.sin(rad) + py * math.cos(rad)) * size
+            return tx, ty
+
+        # Red arrow for North
+        p_tip = transform(0, -1.2)
+        p_l = transform(-0.6, 0)
+        p_r = transform(0.6, 0)
+        p_mid = transform(0, -0.2)
+        canvas.create_polygon([p_tip[0], p_tip[1], p_l[0], p_l[1], p_mid[0], p_mid[1]], fill="#ff0000", outline="white", tags=tags)
+        canvas.create_polygon([p_tip[0], p_tip[1], p_r[0], p_r[1], p_mid[0], p_mid[1]], fill="#aa0000", outline="white", tags=tags)
+        
+        # White tail
+        p_tail = transform(0, 1.0)
+        canvas.create_polygon([p_mid[0], p_mid[1], p_l[0], p_l[1], p_tail[0], p_tail[1]], fill="#eeeeee", outline="white", tags=tags)
+        canvas.create_polygon([p_mid[0], p_mid[1], p_r[0], p_r[1], p_tail[0], p_tail[1]], fill="#bbbbbb", outline="white", tags=tags)
+        
+        canvas.create_text(x, y + 2, text="N", fill="white", font=("Monaco", 10, "bold"), tags=tags)
+
+    def draw_map_target(self, canvas: tk.Canvas, x: float, y: float, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
+        # Crosshair target with halo (negative contrast)
+        r = 20.0
+        # Halo/Shadow
+        canvas.create_oval(x-r-1, y-r-1, x+r+1, y+r+1, outline="black", width=3, tags=tags)
+        canvas.create_line(x-r-11, y, x+r+11, y, fill="black", width=3, tags=tags)
+        canvas.create_line(x, y-r-11, x, y+r+11, fill="black", width=3, tags=tags)
+        # Main Crosshair
+        canvas.create_oval(x-r, y-r, x+r, y+r, outline="white", width=1, tags=tags)
+        canvas.create_line(x-r-10, y, x+r+10, y, fill="white", width=1, tags=tags)
+        canvas.create_line(x, y-r-10, x, y+r+10, fill="white", width=1, tags=tags)
+        canvas.create_oval(x-2, y-2, x+2, y+2, fill="white", outline="black", tags=tags)
+
+    def draw_zoom_scale(self, canvas: tk.Canvas, x: float, y: float, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
+        # Dynamic zoom scale indicator with halo (negative contrast)
+        meters_per_px = 156543.03392 * math.cos(math.radians(self.lat)) / math.pow(2, self.map_zoom)
+        width_px = 100.0
+        total_m = width_px * meters_per_px
+        label = f"{int(total_m)}m" if total_m < 1000 else f"{total_m/1000:.1f}km"
+        
+        # Halo (Black shadow)
+        canvas.create_line(x-1, y+1, x + width_px+1, y+1, fill="black", width=4, tags=tags)
+        canvas.create_line(x-1, y - 6, x-1, y + 6, fill="black", width=4, tags=tags)
+        canvas.create_line(x + width_px+1, y - 6, x + width_px+1, y + 6, fill="black", width=4, tags=tags)
+        
+        # Main Line (White)
+        canvas.create_line(x, y, x + width_px, y, fill="white", width=2, tags=tags)
+        canvas.create_line(x, y - 5, x, y + 5, fill="white", width=2, tags=tags)
+        canvas.create_line(x + width_px, y - 5, x + width_px, y + 5, fill="white", width=2, tags=tags)
+        
+        # Haloed Label
+        self.draw_text_with_halo(canvas, x + width_px/2, y - 12, label, "white", ("Monaco", 8), "n", tags)
+
+    def draw_panning_controls(self, canvas: tk.Canvas, x: float, y: float, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
+        # Control labels with halo for visibility (negative contrast)
+        self.draw_text_with_halo(canvas, x, y, "WASD: PAN", "#aaaaaa", ("Monaco", 8), "nw", tags)
+        self.draw_text_with_halo(canvas, x, y+15, "+/-: ZOOM", "#aaaaaa", ("Monaco", 8), "nw", tags)
+        self.draw_text_with_halo(canvas, x, y+30, "R: RESET", "#aaaaaa", ("Monaco", 8), "nw", tags)
+        
+        # Dots with black outlines for contrast
+        for i, col in enumerate(["white", "#555555", "#555555"]):
+            dx = x - 30 + i*15
+            canvas.create_oval(dx, y+50, dx+6, y+56, fill=col, outline="black", width=1, tags=tags)
+
+    def draw_system_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="SYSTEM CORE & ENVIRONMENT", fill="cyan", font=("Monaco", 20, "bold"))
         smc = self.full_data.get('smc', {})
         temps = smc.get('temps', {})
+        
+        def sf(val: Any) -> float:
+            try: return float(val)
+            except: return 0.0
+
         for i, (name, val) in enumerate(temps.items()):
             col, row = 50 + (i // 15) * 150, 100 + (i % 15) * 20
-            self.canvas.create_text(col, row, anchor="nw", text=f"{name}: {val:>5.1f}", fill="orange" if val > 60 else "green", font=("Monaco", 9))
+            v_f = sf(val)
+            self.canvas.create_text(col, row, anchor="nw", text=f"{name}: {v_f:>5.1f}", fill="orange" if v_f > 60 else "green", font=("Monaco", 9))
+        
         weather = self.full_data.get('ecosystem_weather', {})
         x_env, y_env = 500, 100
-        env_metrics = [("CATEGORY", weather.get('category','-')), ("DENSITY", f"{weather.get('air_fluid_density',0):.4f} kg/m3"), ("DEW POINT", f"{weather.get('dew_point_k',0):.1f} K"), ("HUMIDITY", f"{smc.get('humidity_pct',0):.1f} %"), ("P. TEND", f"{weather.get('pressure_tendency_hpa',0):.2f} hPa/hr"), ("LID", f"{self.full_data.get('lid_angle',0):.1f}\u00b0")]
-        for i, (n, v) in enumerate(env_metrics): self.canvas.create_text(x_env, y_env + i*30, anchor="nw", text=f"{n:12}: {v}", fill="white", font=("Monaco", 10))
+        env_metrics = [
+            ("CATEGORY", str(weather.get('category','-'))),
+            ("DENSITY", f"{sf(weather.get('air_fluid_density',0)):.4f} kg/m3"),
+            ("DEW POINT", f"{sf(weather.get('dew_point_k',0)):.1f} K"),
+            ("HUMIDITY", f"{sf(smc.get('humidity_pct',0)):.1f} %"),
+            ("P. TEND", f"{sf(weather.get('pressure_tendency_hpa',0)):.2f} hPa/hr"),
+            ("RECKON_VEL", f"{self.cf_velocity:.3f}x"),
+            ("RECKON_HDG", f"{self.cf_heading:+.2f}\u00b0"),
+            ("RECKON_ALT", f"{self.cf_altitude:+.1f} m"),
+            ("RECKON_VSI", f"{self.cf_vertical_rate:.3f}x"),
+            ("HID IDLE", f"{self.hid_idle:.1f} s")
+        ]
+        for i, (n, v) in enumerate(env_metrics):
+            col = "#00ccff" if "RECKON" in n else "white"
+            self.canvas.create_text(x_env, y_env + i*30, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
 
-    def draw_seismic_page(self, w, h):
+        # Power & Energy Column
+        x_pwr, y_pwr = 750, 100
+        pwr_metrics = [
+            ("POWER RATE", f"{self.power_rate:.2f} W"),
+            ("DAY USAGE", f"{self.day_usage_wh:.2f} Wh"),
+            ("EST. TODAY", f"{self.est_today_wh:.2f} Wh"),
+            ("MONTH USE", f"{self.month_usage_wh:.2f} Wh"),
+            ("METER USE", f"{self.meter_usage_wh:.2f} Wh"),
+            ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
+            ("BATT HEALTH", f"{self.battery_health:.1f} %"),
+            ("FULL CAP", f"{self.battery_full_wh:.2f} Wh"),
+            ("SURVIVE", self.survive_today),
+            ("HIBERNATE", self.must_hibernate),
+            ("PULSE SUG", f"{self.pulse_wake:.0f}/{self.pulse_length:.0f}s")
+        ]
+        self.canvas.create_text(x_pwr, y_pwr - 30, anchor="nw", text="ENERGY & POWER", fill="yellow", font=("Monaco", 12, "bold"))
+        for i, (n, v) in enumerate(pwr_metrics):
+            col = "green" if (n == "SURVIVE" and v == "Yes") or (n == "HIBERNATE" and v == "No") else ("red" if (n == "SURVIVE" and v == "No") or (n == "HIBERNATE" and v == "Yes") else "white")
+            if n == "BATT HEALTH": col = "green" if self.battery_health > 80 else "yellow"
+            self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
+
+    def draw_graph(self, x: float, y: float, w: float, h: float, data: list[Any], label: str, color: str, mark_idx: Optional[int] = None, times: Optional[list[float]] = None, extra_markers: Optional[list[tuple[int, str, str]]] = None) -> None:
+        self.canvas.create_rectangle(x, y, x+w, y+h, fill="#050505", outline="#333")
+        self.canvas.create_text(x, y-10, anchor="sw", text=label, fill=color, font=("Monaco", 9, "bold"))
+        def is_fin(v: Any) -> bool:
+            try: return v is not None and math.isfinite(float(v))
+            except: return False
+        baseline = 0.0
+        for v in data:
+            if is_fin(v): baseline = float(v); break
+        clean = [float(d) if is_fin(d) else baseline for d in data]
+        if not clean: return
+        n, d_min, d_max = len(clean), min(clean), max(clean)
+        if d_max == d_min: d_max += 1
+        pts = [(x + (i / max(1, n-1)) * w, y + h - ((v - d_min) / (d_max - d_min)) * h) for i, v in enumerate(clean)]
+        if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1 if n > 500 else 2)
+        
+        if mark_idx is not None and 0 <= mark_idx < n:
+            mx = x + (mark_idx / max(1, n-1)) * w
+            self.canvas.create_line(mx, y, mx, y+h, fill="yellow", dash=(4,4))
+            self.canvas.create_text(mx, y+h+5, anchor="n", text="NOW", fill="yellow", font=("Monaco", 7))
+        
+        if times and len(times) == n:
+            num = 8; idxs = sorted(list(set([int(i * (n-1) / (num-1)) for i in range(num)] + ([mark_idx] if mark_idx is not None else []))))
+            for idx in idxs:
+                if 0 <= idx < n:
+                    tx = x + (idx / max(1, n-1)) * w; dt = datetime.datetime.fromtimestamp(times[idx])
+                    anchor = "nw" if idx == 0 else ("ne" if idx == n-1 else "n")
+                    self.canvas.create_line(tx, y+h, tx, y+h+5, fill="#666")
+                    self.canvas.create_text(tx, y+h+8, anchor=anchor, text=dt.strftime("%d/%m %Hh"), fill="#999", font=("Monaco", 7))
+        self.canvas.create_text(x-5, y, anchor="ne", text=f"{d_max:.1f}", fill="white", font=("Monaco", 7))
+        self.canvas.create_text(x-5, y+h, anchor="se", text=f"{d_min:.1f}", fill="white", font=("Monaco", 7))
+
+    def project_3d(self, lat_deg: float, lon_deg: float, roll_rad: float, pitch_rad: float, yaw_rad: float, radius: float) -> tuple[float, float, float]:
+        lat, lon = math.radians(lat_deg), math.radians(lon_deg)
+        x, y, z = math.cos(lat)*math.sin(lon), math.sin(lat), math.cos(lat)*math.cos(lon)
+        tx = x*math.cos(yaw_rad) + z*math.sin(yaw_rad); tz = -x*math.sin(yaw_rad) + z*math.cos(yaw_rad); x, z = tx, tz
+        ty = y*math.cos(pitch_rad) - z*math.sin(pitch_rad); tz = y*math.sin(pitch_rad) + z*math.cos(pitch_rad); y, z = ty, tz
+        tx = x*math.cos(roll_rad) - y*math.sin(roll_rad); ty = x*math.sin(roll_rad) + y*math.cos(roll_rad); x, y = tx, ty
+        return x*radius, y*radius, z
+
+    def draw_horizon(self, cx: float, cy: float, w: float, h: float) -> None:
+        r = min(w, h) * 0.25
+        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill="#1a1a1a", outline="white", width=2)
+        roll_rad, pitch_rad, yaw_rad = math.radians(self.roll), math.radians(self.pitch), math.radians(self.heading)
+        for lat in range(-90, 91, 15):
+            pts, color = [], ("white" if lat == 0 else ("#4b2503" if lat < 0 else "#004477"))
+            for lon in range(0, 361, 5):
+                px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
+                if pz > 0: pts.append((cx + px, cy + py))
+                else:
+                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=2 if lat==0 else 1)
+                    pts = []
+            if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=2 if lat==0 else 1)
+        for lon in range(0, 360, 30):
+            pts, color = [], ("#666" if lon % 90 == 0 else "#333")
+            for lat in range(-90, 91, 5):
+                px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
+                if pz > 0: pts.append((cx + px, cy + py))
+                else:
+                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
+                    pts = []
+            if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
+        m_pts = [(-10.0,-10.0), (w+10.0,-10.0), (w+10.0,h+10.0), (-10.0,h+10.0), (-10.0,-10.0)]
+        for i in range(41):
+            a = 2*math.pi*i/40; m_pts.append((cx + r*math.cos(-a), cy + r*math.sin(-a)))
+        self.canvas.create_polygon(m_pts, fill="black")
+        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, outline="white", width=3)
+
+    def draw_tape(self, x: float, y: float, w: float, h: float, val: float, lbl: str, unit: str, major: int, minor: int, color: str, target_val: Optional[float] = None, precision: int = 0) -> None:
+        self.canvas.create_rectangle(x-w/2, y-h/2, x+w/2, y+h/2, fill="#111", outline="white")
+        px = h/100
+        for v in range(int(val-50), int(val+50)):
+            if v % minor == 0:
+                vy = y + (val - v) * px
+                if y-h/2 < vy < y+h/2:
+                    self.canvas.create_line(x+w/2-10, vy, x+w/2, vy, fill="white")
+                    if v % major == 0: self.canvas.create_text(x-20, vy, text=str(v), fill="white", font=("Monaco", 8))
+        
+        # Shadow Needle for Correction
+        if target_val is not None:
+            t_vy = y + (val - target_val) * px
+            if y-h/2 < t_vy < y+h/2:
+                self.canvas.create_line(x-w/2, t_vy, x+w/2, t_vy, fill="#00ccff", width=2, dash=(4,2))
+                fmt_str = f"{{:.{precision}f}}"
+                self.canvas.create_text(x+w/2+45, t_vy, text=fmt_str.format(target_val), fill="#00ccff", font=("Monaco", 7, "bold"))
+
+        self.canvas.create_rectangle(x-w/2-10, y-15, x+w/2+25, y+15, fill="black", outline=color, width=2)
+        fmt_str = f"{{:.{precision}f}}"
+        self.canvas.create_text(x+5, y, text=fmt_str.format(val), fill=color, font=("Monaco", 12 if precision == 0 else 8, "bold"))
+        self.canvas.create_text(x, y-h/2-15, text=lbl, fill="white", font=("Monaco", 10, "bold"))
+
+    def draw_heading_vector(self, x: float, y: float, w: float, h: float, hdg: float, target_hdg: Optional[float] = None) -> None:
+        self.canvas.create_rectangle(x-w/2, y-h/2, x+w/2, y+h/2, fill="#111", outline="white")
+        px = w/60
+        for a in range(int(hdg-35), int(hdg+35)):
+            if a % 5 == 0:
+                hx = x + (a - hdg) * px
+                if x-w/2 < hx < x+w/2:
+                    self.canvas.create_line(hx, y-h/2, hx, y-h/2+10, fill="white")
+                    if a % 10 == 0: self.canvas.create_text(hx, y+20, text=str(a%360//10), fill="white", font=("Monaco", 8))
+        
+        # Correction Needle
+        if target_hdg is not None:
+            tx = x + ((target_hdg - hdg + 180) % 360 - 180) * px
+            if x-w/2 < tx < x+w/2:
+                self.canvas.create_line(tx, y-h/2, tx, y+h/2, fill="#00ccff", width=2)
+
+        self.canvas.create_polygon(x-10, y-h/2, x+10, y-h/2, x, y-h/2+10, fill="yellow")
+        self.canvas.create_text(x, y+35, text=f"{int(hdg%360):03d}", fill="yellow", font=("Monaco", 10, "bold"))
+
+    def draw_bank_scale(self, cx: float, cy: float) -> None:
+        w, h = float(self.canvas.winfo_width()), float(self.canvas.winfo_height())
+        if w < 100: w, h = 1000.0, 800.0
+        r = min(w, h) * 0.23
+        self.canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=30, extent=120, style=tk.ARC, outline="white", width=2)
+        r_rad = math.radians(self.roll-90); px, py = cx+(r-5)*math.cos(r_rad), cy+(r-5)*math.sin(r_rad)
+        self.canvas.create_oval(px-5, py-5, px+5, py+5, fill="white", outline="black")
+
+    def draw_center_symbol(self, cx: float, cy: float) -> None:
+        self.canvas.create_rectangle(cx-5, cy-5, cx+5, cy+5, fill="yellow", outline="black")
+        self.canvas.create_line(cx-100, cy, cx-30, cy, fill="yellow", width=5)
+        self.canvas.create_line(cx+30, cy, cx+100, cy, fill="yellow", width=5)
+
+    def animate(self) -> None:
+        self.update_data()
+        self.pitch += (self.targets['pitch'] - self.pitch) * self.lerp_factor
+        self.roll += (self.targets['roll'] - self.roll) * self.lerp_factor
+        self.alt += (self.targets['alt'] - self.alt) * self.lerp_factor
+        self.speed += (self.targets['speed'] - self.speed) * self.lerp_factor
+        self.heading = self.lerp_angle(self.heading, self.targets['heading'], self.lerp_factor)
+        self.lat += (self.targets['lat'] - self.lat) * 0.05
+        self.lon += (self.targets['lon'] - self.lon) * 0.05
+        
+        # Correction Factors LERP
+        self.cf_velocity += (self.targets['cf_velocity'] - self.cf_velocity) * 0.1
+        self.cf_heading += (self.targets['cf_heading'] - self.cf_heading) * 0.1
+        self.cf_altitude += (self.targets['cf_altitude'] - self.cf_altitude) * 0.1
+        self.cf_vertical_rate += (self.targets['cf_vertical_rate'] - self.cf_vertical_rate) * 0.1
+
+        # Continuous Map Interaction
+        if self.page == 4:
+            self.update_panning()
+
+        self.draw_glass_cockpit()
+        # Limit display update to 15Hz (1000ms / 15 approx 67ms)
+        self.root.after(67, self.animate)
+
+    def draw_seismic_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="SEISMIC & FATIGUE ANALYSIS", fill="yellow", font=("Monaco", 20, "bold"))
         seis = self.full_data.get('seismic_activity', {})
         self.canvas.create_text(50, 100, anchor="nw", text=f"MOTION: {seis.get('motion_type','-')}\nPEAK: {seis.get('peak_g',0):.4f} G", fill="white", font=("Monaco", 14, "bold"))
         fatigue = seis.get('damage_fatigue', {})
-        y = 250
+        y = 250.0
         for name, key in [("SOLDER FATIGUE", 'solder_fatigue_prob'), ("MECH FAILURE", 'electromech_fatigue_prob'), ("AGGREGATED RISK", 'aggregated_risk')]:
-            val = fatigue.get(key, 0)
+            val = float(fatigue.get(key, 0.0))
             self.canvas.create_text(50, y, anchor="nw", text=f"{name}: {val*100:.2f}%", fill="white", font=("Monaco", 10))
             self.canvas.create_rectangle(200, y, 200 + val*400, y+15, fill="red" if val > 0.5 else "green", outline="white")
             y += 40
         self.canvas.create_text(50, y + 20, anchor="nw", text=f"ALT STRESS MULT: {fatigue.get('alt_stress_multiplier',1):.3f}x\nSEU RISK MULT:  {fatigue.get('seu_risk_multiplier',1):.3f}x", fill="orange", font=("Monaco", 10))
 
-    def draw_advanced_page(self, w, h):
+    def draw_advanced_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ADVANCED DETECTION & LOOP", fill="#ff00ff", font=("Monaco", 20, "bold"))
         user = self.full_data.get('user_entity_detection', {})
         self.canvas.create_text(50, 100, anchor="nw", text=f"USER ENTITY COUNT: {user.get('count', 0)}", fill="cyan", font=("Monaco", 12, "bold"))
         mood = user.get('inferred_mood', {})
-        my = 140
+        my = 140.0
         for m, val in mood.items():
-            self.canvas.create_text(70, my, anchor="nw", text=f"{m:18}: {val*100:5.1f}%", fill="yellow", font=("Monaco", 9)); my += 20
+            self.canvas.create_text(70, my, anchor="nw", text=f"{m:18}: {float(val)*100:5.1f}%", fill="yellow", font=("Monaco", 9)); my += 20
         loop = self.full_data.get('loop_consistency', {})
         self.canvas.create_text(450, 100, anchor="nw", text=f"LOOP AVG: {loop.get('avg_ms',0):.2f}ms\nSTUTTERS: {loop.get('stutters',0)}", fill="white", font=("Monaco", 10))
         smc = self.full_data.get('smc', {}); gas = smc.get('gas_constants', {})
         self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {smc.get('massflow_kg_s',0):.4f}kg/s", fill="cyan", font=("Monaco", 10))
 
-    def draw_metar_page(self, w, h):
+    def draw_metar_page(self, w: float, h: float) -> None:
         weather = self.full_data.get('ecosystem_weather', {})
         smc = self.full_data.get('smc', {})
         loc = self.full_data.get('location', {})
-        spread = weather.get('dew_point_spread', 10.0)
-        t_c = smc.get('ambient_temp_k', 293.15) - 273.15
-        dp_c = weather.get('dew_point_k', 283.15) - 273.15
-        press = loc.get('pressure_hpa', 1013.25)
+        spread = float(weather.get('dew_point_spread', 10.0))
+        t_c = float(smc.get('ambient_temp_k', 293.15)) - 273.15
+        dp_c = float(weather.get('dew_point_k', 283.15)) - 273.15
+        press = float(loc.get('pressure_hpa', 1013.25))
         altim = press / 33.8639
-        tendency = weather.get('pressure_tendency_hpa', 0.0)
-        hum = smc.get('humidity_pct', 0.0)
+        tendency = float(weather.get('pressure_tendency_hpa', 0.0))
+        hum = float(smc.get('humidity_pct', 0.0))
         curr_t = time.time()
         if t_c < 2 and spread < 3:
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
-            for i in range(100):
-                rx, ry = (i * 137) % w, (i * 253 + curr_t * 50) % h
-                size = (i % 3) + 1
-                self.canvas.create_oval(rx, ry, rx+size, ry+size, fill="white", outline="")
             cond_icon = "SNOWING"
         elif spread < 2.0 and tendency < -0.2:
             self.canvas.create_rectangle(0, 0, w, h, fill="#0a1a2a", outline="")
-            for i in range(80):
-                rx, ry = (i * 157) % w, (i * 353 + curr_t * 300) % h
-                self.canvas.create_line(rx, ry, rx-2, ry+15, fill="#4a90e2", width=1)
             cond_icon = "RAINING"
         elif spread < 1.5:
             self.canvas.create_rectangle(0, 0, w, h, fill="#2c2c2c", outline="")
-            for i in range(40):
-                rx, ry = (i*97)%w, (i*131)%h
-                self.canvas.create_oval(rx, ry, rx+150, ry+60, fill="#3d3d3d", outline="")
             cond_icon = "FOGGY"
         elif spread < 5.0:
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a3a5a", outline="")
-            for i in range(6):
-                cx, cy = (i*200 + curr_t*5) % (w+200) - 100, 100 + (i*31)%150
-                self.canvas.create_oval(cx, cy, cx+150, cy+70, fill="#555", outline="")
             cond_icon = "CLOUDY"
         else:
             self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
-            sun_x, sun_y = w-100, 100
-            glow = (math.sin(curr_t * 2) + 1) * 5
-            self.canvas.create_oval(sun_x-60-glow, sun_y-60-glow, sun_x+60+glow, sun_y+60+glow, fill="#332200", outline="")
-            self.canvas.create_oval(sun_x-40, sun_y-40, sun_x+40, sun_y+40, fill="#ffaa00", outline="")
-            if spread > 8.0:
-                for i in range(12):
-                    ang = math.radians(i*30 + curr_t*10)
-                    self.canvas.create_line(sun_x, sun_y, sun_x+120*math.cos(ang), sun_y+120*math.sin(ang), fill="#443300", width=2)
             cond_icon = "SHINY"
-        self.canvas.create_text(w/2, 40, text=f"METEAR/TAF - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
-        now = datetime.datetime.utcnow(); time_str = now.strftime("%d%H%MZ")
+        self.canvas.create_text(w/2, 40, text=f"METAR/TAF - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
+        now = datetime.datetime.now(datetime.timezone.utc); time_str = now.strftime("%d%H%MZ")
         vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
         clouds = "CLR"
         if spread < 2: clouds = "VV001"
         elif spread < 5: clouds = "BKN015"
         elif spread < 10: clouds = "SCT035"
-        temp_part = f"{int(round(t_c)):02d}/{int(round(dp_c)):02d}"
+        temp_part = f"{round(t_c):02d}/{round(dp_c):02d}"
         if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
         metar = f"METAR EARU {time_str} 00000KT {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
-        cond = f"{cond_icon}"; (cond := cond + " (DETERIORATING)") if tendency < -0.5 else ((cond := cond + " (IMPROVING)") if tendency > 0.5 else None)
-        taf = f"TAF EARU {time_str} {now.strftime('%d%H/%e%H')} 00000KT {vis_val} {clouds} {'TEMPO SHRA' if tendency < -0.5 else 'SKC'}"
-        y = 100
+        y = 100.0
         self.canvas.create_text(50, y, anchor="nw", text="CURRENT REPORT (METAR):", fill="cyan", font=("Monaco", 12, "bold"))
         self.canvas.create_text(50, y+30, anchor="nw", text=metar, fill="white", font=("Monaco", 14, "bold"), width=w-100)
-        self.canvas.create_text(50, y+60, anchor="nw", text=f"DECODED: {cond}", fill="yellow", font=("Monaco", 10))
         y += 120
-        self.canvas.create_text(50, y, anchor="nw", text="FORECAST (TAF):", fill="cyan", font=("Monaco", 12, "bold"))
-        self.canvas.create_text(50, y+30, anchor="nw", text=taf, fill="white", font=("Monaco", 12), width=w-100)
-        y += 100
         self.canvas.create_text(50, y, anchor="nw", text="PHYSICAL BASIS DATA:", fill="cyan", font=("Monaco", 12, "bold"))
-        basis = [f"STATION PRESSURE: {press:.2f} hPa", f"DEWPOINT SPREAD:  {spread:.2f} K", f"AIR DENSITY:      {weather.get('air_fluid_density',0):.4f} kg/m3", f"BARO TENDENCY:    {tendency:+.4f} hPa/hr", f"REL. HUMIDITY:    {hum:.1f} %"]
+        basis = [f"STATION PRESSURE: {press:.2f} hPa", f"DEWPOINT SPREAD:  {spread:.2f} K", f"AIR DENSITY:      {float(weather.get('air_fluid_density',0.0)):.4f} kg/m3", f"BARO TENDENCY:    {tendency:+.4f} hPa/hr", f"REL. HUMIDITY:    {hum:.1f} %"]
         for i, b in enumerate(basis): self.canvas.create_text(70, y+30+i*25, anchor="nw", text=b, fill="white", font=("Monaco", 10))
 
-    def draw_wind_page(self, w, h):
+    def draw_wind_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="FLUID DYNAMICS: WIND MAPPING", fill="#00ffff", font=("Monaco", 20, "bold"))
         weather = self.full_data.get('ecosystem_weather', {}); grid = weather.get('wind_map', {}).get('grid_7x7_10m', [])
         if not grid: self.canvas.create_text(w/2, h/2, text="NO WIND GRID", fill="red"); return
         gs, cs = 7, min(w, h) // 12; sx, sy = w/2-(gs*cs)/2, h/2-(gs*cs)/2
-        self.canvas.create_text(w/2, sy - 30, text="TOP-DOWN 7x7 GRID (10m STEP)", fill="white", font=("Monaco", 10))
         for r in range(gs):
             for c in range(gs):
                 if r < len(grid) and c < len(grid[r]):
@@ -336,11 +870,8 @@ class PrimaryFlightDisplay:
                     if abs(vx)>0.1 or abs(vy)>0.1:
                         ml, ang = min(cs/2, math.sqrt(vx**2+vy**2)*2), math.atan2(vy, vx)
                         self.canvas.create_line(x,y,x+ml*math.cos(ang),y+ml*math.sin(ang),fill="white",arrow=tk.LAST)
-                    if r == 3 and c == 3:
-                        self.canvas.create_text(w/2, sy + gs*cs + 60, text=f"STATION: {grid[r][c][2]:.2f} hPa | {grid[r][c][3]:.2f} K", fill="white", font=("Monaco", 10))
-        self.canvas.create_text(w/2, sy + gs*cs + 30, text="GRID CENTER: AT SENSOR LOCATION", fill="cyan", font=("Monaco", 10))
 
-    def draw_weather_page(self, w, h):
+    def draw_weather_page(self, w: float, h: float) -> None:
         sub_t = ["SUMMARY & TRENDS", "SURFACE & SOIL", "SOLAR RADIATION", "AVIATION & STABILITY", "HUMIDITY & VAPOUR"]
         z_lbl = ["FULL (3mo+16d)", "LAST 30 DAYS", "LAST 7 DAYS", "LAST 24 HOURS", "16-DAY FORECAST"]
         self.canvas.create_text(w/2, 25, text=f"METEO: {sub_t[self.clim_subpage]}", fill="#00ff7f", font=("Monaco", 18, "bold"))
@@ -529,127 +1060,6 @@ class PrimaryFlightDisplay:
         ft = meteo.get('fetch_time', 0)
         ago = int(time.time() - ft)
         self.canvas.create_text(w-50, h-40, anchor="se", text=f"LAST FETCH: {ago}s AGO", fill="#555", font=("Monaco", 8))
-
-    def draw_graph(self, x, y, w, h, data, label, color, mark_idx=None, times=None, extra_markers=None):
-        self.canvas.create_rectangle(x, y, x+w, y+h, fill="#050505", outline="#333")
-        self.canvas.create_text(x, y-10, anchor="sw", text=label, fill=color, font=("Monaco", 9, "bold"))
-        def is_fin(v):
-            try: return v is not None and math.isfinite(float(v))
-            except: return False
-        baseline = 0.0
-        for v in data:
-            if is_fin(v): baseline = float(v); break
-        clean = [float(d) if is_fin(d) else baseline for d in data]
-        if not clean: return
-        n, d_min, d_max = len(clean), min(clean), max(clean)
-        if d_max == d_min: d_max += 1
-        pts = [(x + (i / max(1, n-1)) * w, y + h - ((v - d_min) / (d_max - d_min)) * h) for i, v in enumerate(clean)]
-        if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1 if n > 500 else 2)
-        if mark_idx is not None and 0 <= mark_idx < n:
-            mx = x + (mark_idx / max(1, n-1)) * w
-            self.canvas.create_line(mx, y, mx, y+h, fill="yellow", dash=(4,4))
-            self.canvas.create_text(mx, y+h+5, anchor="n", text="NOW", fill="yellow", font=("Monaco", 7))
-        if extra_markers:
-            for m_idx, m_lbl, m_col in extra_markers:
-                if 0 <= m_idx < n:
-                    mx = x + (m_idx / max(1, n-1)) * w
-                    self.canvas.create_line(mx, y, mx, y+h, fill=m_col, dash=(2,2))
-                    self.canvas.create_text(mx, y-5, anchor="s", text=m_lbl, fill=m_col, font=("Monaco", 6))
-        if times and len(times) == n:
-            num = 8; idxs = sorted(list(set([int(i * (n-1) / (num-1)) for i in range(num)] + ([mark_idx] if mark_idx is not None else []))))
-            for idx in idxs:
-                if 0 <= idx < n:
-                    tx = x + (idx / max(1, n-1)) * w; dt = datetime.datetime.fromtimestamp(float(times[idx]))
-                    anchor = "nw" if idx == 0 else ("ne" if idx == n-1 else "n")
-                    self.canvas.create_line(tx, y+h, tx, y+h+5, fill="#666")
-                    self.canvas.create_text(tx, y+h+8, anchor=anchor, text=dt.strftime("%d/%m %Hh"), fill="#999", font=("Monaco", 7))
-        self.canvas.create_text(x-5, y, anchor="ne", text=f"{d_max:.1f}", fill="white", font=("Monaco", 7))
-        self.canvas.create_text(x-5, y+h, anchor="se", text=f"{d_min:.1f}", fill="white", font=("Monaco", 7))
-
-    def project_3d(self, lat_deg, lon_deg, roll_rad, pitch_rad, yaw_rad, radius):
-        lat, lon = math.radians(lat_deg), math.radians(lon_deg)
-        x, y, z = math.cos(lat)*math.sin(lon), math.sin(lat), math.cos(lat)*math.cos(lon)
-        tx = x*math.cos(yaw_rad) + z*math.sin(yaw_rad); tz = -x*math.sin(yaw_rad) + z*math.cos(yaw_rad); x, z = tx, tz
-        ty = y*math.cos(pitch_rad) - z*math.sin(pitch_rad); tz = y*math.sin(pitch_rad) + z*math.cos(pitch_rad); y, z = ty, tz
-        tx = x*math.cos(roll_rad) - y*math.sin(roll_rad); ty = x*math.sin(roll_rad) + y*math.cos(roll_rad); x, y = tx, ty
-        return x*radius, y*radius, z
-
-    def draw_horizon(self, cx, cy, w, h):
-        r = min(w, h) * 0.25
-        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill="#1a1a1a", outline="white", width=2)
-        roll_rad, pitch_rad, yaw_rad = math.radians(self.roll), math.radians(self.pitch), math.radians(self.heading)
-        for lat in range(-90, 91, 15):
-            pts, color = [], ("white" if lat == 0 else ("#4b2503" if lat < 0 else "#004477"))
-            for lon in range(0, 361, 5):
-                px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
-                if pz > 0: pts.append((cx + px, cy + py))
-                else:
-                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=2 if lat==0 else 1)
-                    pts = []
-            if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=2 if lat==0 else 1)
-        for lon in range(0, 360, 30):
-            pts, color = [], ("#666" if lon % 90 == 0 else "#333")
-            for lat in range(-90, 91, 5):
-                px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
-                if pz > 0: pts.append((cx + px, cy + py))
-                else:
-                    if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
-                    pts = []
-            if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
-        m_pts = [(-10,-10), (w+10,-10), (w+10,h+10), (-10,h+10), (-10,-10)]
-        for i in range(41):
-            a = 2*math.pi*i/40; m_pts.append((cx + r*math.cos(-a), cy + r*math.sin(-a)))
-        self.canvas.create_polygon(m_pts, fill="black")
-        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, outline="white", width=3)
-
-    def draw_tape(self, x, y, w, h, val, lbl, unit, major, minor, color):
-        self.canvas.create_rectangle(x-w/2, y-h/2, x+w/2, y+h/2, fill="#111", outline="white")
-        px = h/100
-        for v in range(int(val-50), int(val+50)):
-            if v % minor == 0:
-                vy = y + (val - v) * px
-                if y-h/2 < vy < y+h/2:
-                    self.canvas.create_line(x+w/2-10, vy, x+w/2, vy, fill="white")
-                    if v % major == 0: self.canvas.create_text(x-20, vy, text=str(v), fill="white", font=("Monaco", 8))
-        self.canvas.create_rectangle(x-w/2, y-15, x+w/2+10, y+15, fill="black", outline=color, width=2)
-        self.canvas.create_text(x, y, text=f"{int(val)}", fill=color, font=("Monaco", 12, "bold"))
-        self.canvas.create_text(x, y-h/2-15, text=lbl, fill="white", font=("Monaco", 10, "bold"))
-
-    def draw_heading_vector(self, x, y, w, h, hdg):
-        self.canvas.create_rectangle(x-w/2, y-h/2, x+w/2, y+h/2, fill="#111", outline="white")
-        px = w/60
-        for a in range(int(hdg-35), int(hdg+35)):
-            if a % 5 == 0:
-                hx = x + (a - hdg) * px
-                if x-w/2 < hx < x+w/2:
-                    self.canvas.create_line(hx, y-h/2, hx, y-h/2+10, fill="white")
-                    if a % 10 == 0: self.canvas.create_text(hx, y+20, text=str(a%360//10), fill="white", font=("Monaco", 8))
-        self.canvas.create_polygon(x-10, y-h/2, x+10, y-h/2, x, y-h/2+10, fill="yellow")
-        self.canvas.create_text(x, y+35, text=f"{int(hdg%360):03d}", fill="yellow", font=("Monaco", 10, "bold"))
-
-    def draw_bank_scale(self, cx, cy):
-        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        r = min(w, h) * 0.23
-        self.canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=30, extent=120, style=tk.ARC, outline="white", width=2)
-        r_rad = math.radians(self.roll-90); px, py = cx+(r-5)*math.cos(r_rad), cy+(r-5)*math.sin(r_rad)
-        self.canvas.create_oval(px-5, py-5, px+5, py+5, fill="white", outline="black")
-
-    def draw_center_symbol(self, cx, cy):
-        self.canvas.create_rectangle(cx-5, cy-5, cx+5, cy+5, fill="yellow", outline="black")
-        self.canvas.create_line(cx-100, cy, cx-30, cy, fill="yellow", width=5)
-        self.canvas.create_line(cx+30, cy, cx+100, cy, fill="yellow", width=5)
-
-    def animate(self):
-        self.update_data()
-        self.pitch += (self.targets['pitch'] - self.pitch) * self.lerp_factor
-        self.roll += (self.targets['roll'] - self.roll) * self.lerp_factor
-        self.alt += (self.targets['alt'] - self.alt) * self.lerp_factor
-        self.speed += (self.targets['speed'] - self.speed) * self.lerp_factor
-        self.heading = self.lerp_angle(self.heading, self.targets['heading'], self.lerp_factor)
-        self.lat += (self.targets['lat'] - self.lat) * 0.05
-        self.lon += (self.targets['lon'] - self.lon) * 0.05
-        self.draw_glass_cockpit()
-        self.root.after(30, self.animate)
 
 if __name__ == "__main__":
     root = tk.Tk()
