@@ -151,6 +151,18 @@ Detects physiological signals through the chassis using the IMU.
 
 ---
 
+## WifiLogger API Access
+The same data structure found in `EARU_data.dat` is also available in real-time via the built-in async API.
+
+| Method | Endpoint | Port | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/` | `3270` | Returns the latest full system state JSON. |
+
+### Usage Example (cURL)
+```bash
+curl http://localhost:3270/
+```
+
 ## Technical Implementation Notes
 - **JSON Encoding:** Numpy integers and floats are converted to standard JSON types. Binary `als` data is hex-encoded.
 - **Data Integrity:** The `parity` field inside the JSON and the `RECOVERY_V1` footer allow for validation of every write operation.

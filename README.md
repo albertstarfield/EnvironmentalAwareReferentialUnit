@@ -60,6 +60,25 @@ you can verify the device exists on your machine with:
 
     ioreg -l -w0 | grep -A5 AppleSPUHIDDevice
 
+## hybrid weather station & wifilogger api
+
+EARU acts as a **Hybrid Weather Station**, combining local high-frequency hardware sensors with global meteorological data. It exposes this unified state via a high-performance **WifiLogger API** (Quart/REST).
+
+- **Local Analytics:** Real-time estimation of **Dew Point**, **Air Density**, and **Pressure Tendency** derived from internal SMC thermodynamics and the Bosch pressure sensor.
+- **Fluid Dynamics:** 7x7 grid of **Wind Mapping** vectors interpolated from device motion and pressure differentials.
+- **Weather History:** Integration with external APIs (OpenMeteo) for historical trends and 16-day forecasting.
+- **WifiLogger API:** High-concurrency async REST API serving the full system state in JSON format.
+  - **Port:** `3270`
+  - **Endpoint:** `GET /`
+  - **Latency:** < 2ms (served from thread-safe global memory)
+
+### self-bootstrapping
+
+EARU features a built-in bootstrapping system. On first run, it automatically:
+1. Creates a local virtual environment (`.venv`).
+2. Installs and synchronizes all dependencies (`Quart`, `Hypercorn`, `Numba`, `OpenMeteo`, etc.).
+3. Restores state from `save_state/` and initializes the RAM disk.
+
 ## physics and assumptions
 
 This project employs various physical models for environmental and inertial tracking. For a detailed breakdown of the constants, hardware proxies, and mathematical assumptions (ISA, Bolton Equation, Heatflux, etc.), see [PHYSICS_AND_ASSUMPTIONS.md](PHYSICS_AND_ASSUMPTIONS.md).
