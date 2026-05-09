@@ -5582,10 +5582,10 @@ if HAS_QUART:
             w_spd_mps = float(wind_data[0]) if isinstance(wind_data, (list, tuple)) else 0.0
             w_dir_deg = float(wind_data[3]) if isinstance(wind_data, (list, tuple)) else 0.0
 
-            # Davis/WiFiLogger style mapping
+            # Davis/WiFiLogger style mapping - Strictly formatted for clients
             wfl = {
-                "stnmod": 17, # VP2 mode
-                "ver": "2.12-EARU",
+                "stnmod": 17, 
+                "ver": "2.12",
                 "loctime": int(d.get('time', time.time())), # pyrefly: ignore
                 "utctime": int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
                 "tempout": f"{k_to_f(smc.get('ambient_temp_k', 293.15)):.1f}", # pyrefly: ignore
@@ -5607,14 +5607,9 @@ if HAS_QUART:
             return wfl
 
     @app.route("/")
-    async def get_raw_data():
-        with latest_earu_data_lock:
-            data_str = json.dumps(latest_earu_data, cls=NpEncoder)
-            return data_str, 200, {'Content-Type': 'application/json'}
-
     @app.route("/wflexp.json")
     @app.route("/wflexpj.json")
-    async def get_wifilogger_data():
+    async def get_weather_only():
         return jsonify(get_wifilogger_json())
 
     async def run_quart_api():
