@@ -156,18 +156,19 @@ EARU emulates the **WiFiLogger 2** (Davis Instruments) local API. This allows th
 
 | Method | Endpoint | Port | Format | Units |
 | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/wflexp.json` | `3270` | Davis JSON | Imperial (F, inHg, mph) |
-| `GET` | `/wflexpj.json` | `3270` | Davis JSON | Imperial (F, inHg, mph) |
-| `GET` | `/` | `3270` | Full System | SI / Metric (K, hPa, m/s) |
+| `GET` | `/wflexpj.json` | `3270` | Davis JSON (Strict) | Metric (C, hPa, mps) |
+| `GET` | `/wflarch.json` | `3270` | Archive JSON (5 entries) | Metric (C, hPa, mps) |
+| `GET` | `/` | `3270` | Davis JSON | Metric (C, hPa, mps) |
 
 ### Davis Field Mapping
 | Davis Key | EARU Source |
 | :--- | :--- |
-| `tempout` | Ambient temperature from SMC (`ambient_temp_k`) |
-| `bar` | Local barometric pressure (`pressure_hpa`) |
-| `windspd` | Current ground speed / motion vector (`v_mag`) |
-| `dew` | Calculated dew point (`dew_point_k`) |
-| `solrad` | External 3rd party shortwave radiation |
+| `OT` / `IT` | Outdoor / Indoor Temp (Celsius) |
+| `OH` / `IH` | Outdoor / Indoor Humidity (%) |
+| `AP` | Atmospheric Pressure (hPa) |
+| `WS` / `WD` | Wind Speed (mps) / Direction (deg) from WindMap |
+| `RR` | Rain Rate proxy from dew point risk |
+| `raind` / `rainmon`| Daily / Monthly Rain (accumulated) |
 
 ### Integration Example (Home Assistant)
 Configure your Davis integration to point to `http://[YOUR_IP]:3270/wflexp.json`.

@@ -85,7 +85,8 @@ from earu.pedometer import Pedometer
 
 # Global store for API
 latest_earu_data = {}
-latest_earu_data_lock = threading.Lock()
+latest_earu_data_lock = threading.RLock()
+wifilogger_archive = deque(maxlen=5) # Last 5 archive entries
 from earu._spu import (
     ALS_REPORT_LEN,
     SHM_ALS_SIZE,
@@ -4862,6 +4863,7 @@ def main(stdscr=None):
     last_integrity_check = 0.0
     last_write_t = 0.0
     last_state_save_t = time.time()  # Initialize with current time to start 600s timer
+    last_archive_t = 0.0
     last_aug_parity_t = 0.0
     last_ext_parity_t = 0.0
     last_int_parity_t = 0.0
@@ -5335,6 +5337,10 @@ def main(stdscr=None):
                 # Update global store for API
                 with latest_earu_data_lock:
                     latest_earu_data.update(data)
+                    # Archive snapshot (Every 60s)
+                    if now - last_archive_t >= 60.0:
+                        wifilogger_archive.append(get_wifilogger_json())
+                        last_archive_t = now
 
                 # Data Integrity / Anomaly Event Upset Detection (Lightweight part)
                 profiler.start_block("data_integrity_check")
@@ -5607,6 +5613,8 @@ if HAS_QUART:
                 "WS": round(w_spd, 1),
                 "WD": int(w_dir),
                 "RR": round(rr_val, 1),
+                "raind": "0.00",
+                "rainmon": "0.00",
                 "BT": bt_code,
                 "utctime": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
@@ -5617,6 +5625,11 @@ if HAS_QUART:
     @app.route("/wflexpj.json")
     async def get_weather_only():
         return jsonify(get_wifilogger_json())
+
+    @app.route("/wflarch.json")
+    async def get_archive():
+        with latest_earu_data_lock:
+            return jsonify(list(wifilogger_archive))
 
     async def run_quart_api():
         config = Config() # pyrefly: ignore
