@@ -69,10 +69,16 @@ if curr_dir not in sys.path:
 import numpy as np
 import psutil  # pyrefly: ignore
 import requests
-import asyncio
-from quart import Quart, jsonify
-from hypercorn.config import Config
-from hypercorn.asyncio import serve
+
+try:
+    import asyncio
+    from quart import Quart, jsonify # pyrefly: ignore
+    from hypercorn.config import Config # pyrefly: ignore
+    from hypercorn.asyncio import serve # pyrefly: ignore
+    HAS_QUART = True
+except ImportError:
+    HAS_QUART = False
+
 from numba import njit  # pyrefly: ignore
 
 from earu.pedometer import Pedometer
@@ -5551,26 +5557,30 @@ def main(stdscr=None):
                 pass
 
 
-app = Quart(__name__)
+if HAS_QUART:
+    app = Quart(__name__) # pyrefly: ignore
 
-@app.route("/")
-async def get_data():
-    with latest_earu_data_lock:
-        return jsonify(latest_earu_data)
+    @app.route("/")
+    async def get_data():
+        with latest_earu_data_lock:
+            return jsonify(latest_earu_data) # pyrefly: ignore
 
-async def run_quart_api():
-    config = Config()
-    config.bind = ["0.0.0.0:3270"]
-    await serve(app, config)
+    async def run_quart_api():
+        config = Config() # pyrefly: ignore
+        config.bind = ["0.0.0.0:3270"]
+        await serve(app, config) # pyrefly: ignore
 
-def start_api_thread():
-    def _run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_quart_api())
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    print(f"\033[92m[ok] EARU WifiLogger API starting on port 3270\033[0m")
+    def start_api_thread():
+        def _run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(run_quart_api())
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        print(f"\033[92m[ok] EARU WifiLogger API starting on port 3270\033[0m")
+else:
+    def start_api_thread():
+        print(f"\033[33m[!] Quart API disabled: dependencies not found.\033[0m")
 
 if __name__ == "__main__":
     # Set working directory once
