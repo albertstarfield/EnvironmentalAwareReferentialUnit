@@ -388,6 +388,14 @@ class PrimaryFlightDisplay:
 
     def draw_status_vector(self, w: float, h: float) -> None:
         self.canvas.create_text(10, 10, anchor="nw", text=f"CPU: {self.cpu:.1f}% | BATT: {self.batt}%{' (CHG)' if self.charging else ''} | PWR: {self.power_rate:.1f}W | HID IDLE: {self.hid_idle:.1f}s", fill="green", font=("Monaco", 10))
+        
+        als = self.full_data.get('als', {})
+        if als:
+            lux = als.get('lux_factor', 0.0)
+            spec = als.get('spectral', [0,0,0,0])
+            spec_str = " ".join([str(s) for s in spec])
+            self.canvas.create_text(10, 25, anchor="nw", text=f"ALS LUX: {lux:.3f} | SPEC: [{spec_str}]", fill="yellow", font=("Monaco", 10))
+
         status = f"R: {self.roll:>+5.1f}\u00b0 P: {self.pitch:>+5.1f}\u00b0 | LAT: {self.lat:.5f} LON: {self.lon:.5f}"
         self.canvas.create_text(10, h-40, anchor="sw", text=status, fill="white", font=("Monaco", 10, "bold"))
 
@@ -809,6 +817,25 @@ class PrimaryFlightDisplay:
             self.canvas.create_text(70, my, anchor="nw", text=f"{m:18}: {float(val)*100:5.1f}%", fill="yellow", font=("Monaco", 9)); my += 20
         loop = self.full_data.get('loop_consistency', {})
         self.canvas.create_text(450, 100, anchor="nw", text=f"LOOP AVG: {loop.get('avg_ms',0):.2f}ms\nSTUTTERS: {loop.get('stutters',0)}", fill="white", font=("Monaco", 10))
+        
+        # ALS Detail
+        als = self.full_data.get('als', {})
+        if als:
+            lx, ly = 50, 320
+            lux = als.get('lux_factor', 0.0)
+            self.canvas.create_text(lx, ly, anchor="nw", text=f"ALS INTENSITY (LUX FACTOR): {lux:.4f}", fill="white", font=("Monaco", 10, "bold"))
+            self.canvas.create_rectangle(lx, ly+20, lx+300, ly+35, fill="#111", outline="white")
+            self.canvas.create_rectangle(lx, ly+20, lx + lux*300, ly+35, fill="yellow", outline="")
+            
+            spec = als.get('spectral', [0,0,0,0])
+            self.canvas.create_text(lx, ly+50, anchor="nw", text="SPECTRAL CHANNELS:", fill="white", font=("Monaco", 10, "bold"))
+            s_max = max(spec) if max(spec) > 0 else 1
+            colors = ["#ff4444", "#44ff44", "#4444ff", "#ffffff"]
+            for i, val in enumerate(spec):
+                bh = (val / s_max) * 100
+                self.canvas.create_rectangle(lx + i*40, ly+170, lx + i*40 + 30, ly+170-bh, fill=colors[i], outline="white")
+                self.canvas.create_text(lx + i*40 + 15, ly+180, text=str(val), fill="white", font=("Monaco", 7), anchor="n")
+
         smc = self.full_data.get('smc', {}); gas = smc.get('gas_constants', {})
         self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {smc.get('massflow_kg_s',0):.4f}kg/s", fill="cyan", font=("Monaco", 10))
 

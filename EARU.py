@@ -4880,12 +4880,27 @@ def main(stdscr=None):
     last_enforced_scan = 0.0
     last_ramdisk_check_t = 0.0
 
+    als_processed = {"lux_factor": 0.0, "spectral": [0, 0, 0, 0]}
+
     def _bg_analysis_task():
-        nonlocal last_dwt, last_period, last_kys_check, last_enforced_scan, last_ramdisk_check_t
+        nonlocal last_dwt, last_period, last_kys_check, last_enforced_scan, last_ramdisk_check_t, als_processed, last_als_count
+        last_als_fetch_t = 0.0
         while running[0]:
             try:
                 now = time.time()
                 
+                # Async ALS Fetch (Every 4.0s)
+                if now - last_als_fetch_t >= 4.0:
+                    als_data, last_als_count = shm_snap_read(
+                        shm_als.buf, last_als_count, ALS_REPORT_LEN
+                    )
+                    if als_data and len(als_data) >= 44:
+                        als_processed = {
+                            "lux_factor": max(0.0, min(1.0, struct.unpack_from("<f", als_data, _ALS_LUX_OFF)[0])),
+                            "spectral": [struct.unpack_from("<I", als_data, o)[0] for o in _ALS_SPEC_OFFSETS]
+                        }
+                    last_als_fetch_t = now
+
                 # Internal data refresh (Every 100ms approx via loop sleep)
                 location.check_hid_idle_async()
 
@@ -5087,12 +5102,6 @@ def main(stdscr=None):
             profiler.end_block() # process_gyro
 
             profiler.start_block("process_als_lid")
-            als_data, last_als_count = shm_snap_read(
-                shm_als.buf, last_als_count, ALS_REPORT_LEN
-            )
-            if als_data is not None:
-                als_raw = als_data
-
             lid_data, last_lid_count = shm_snap_read(shm_lid.buf, last_lid_count, 4)
             if lid_data is not None:
                 lid_angle = struct.unpack("<f", lid_data)[0]
@@ -5320,7 +5329,7 @@ def main(stdscr=None):
                     },
                     "lid_angle": lid_angle,
                     "lid_speed": det.lid_speed,
-                    "als": als_raw,  # raw bytes
+                    "als": als_processed,
                     "user_entity_detection": {
                         "detected": det.ent_detected,
                         "count": det.ent_count,
@@ -5393,7 +5402,7 @@ def main(stdscr=None):
                                 "orientation": json_data_copy["orientation"],
                                 "lid_angle": json_data_copy["lid_angle"],
                                 "lid_speed": json_data_copy["lid_speed"],
-                                "als": json_data_copy["als"].hex() if isinstance(json_data_copy["als"], bytes) else json_data_copy["als"]
+                                "als": json.dumps(json_data_copy["als"], default=str, sort_keys=True) if json_data_copy["als"] else None
                             }
                             p_int_payload = json.dumps(int_subset, default=str, sort_keys=True)
                             cached_int_parity = hashlib.sha256(p_int_payload.encode()).hexdigest()
@@ -5415,9 +5424,6 @@ def main(stdscr=None):
 
                         profiler.start_block("disk_io")
                         with open("EARU_data.dat", "w") as f:
-                            if json_data_copy["als"] and isinstance(json_data_copy["als"], bytes):
-                                json_data_copy["als"] = json_data_copy["als"].hex()
-
                             full_json_str = json.dumps(json_data_copy, cls=NpEncoder, sort_keys=True)
                             f.write(full_json_str)
 

@@ -21,7 +21,7 @@ The file consists of two parts:
 | `time` | Seconds | Unix timestamp of the data sample. |
 | `lid_angle` | Degrees | The current angle of the laptop lid (0° = closed). |
 | `lid_speed` | deg/s | Angular velocity of the lid movement. |
-| `als` | Hex String | Raw bytes from the Ambient Light Sensor. |
+| `als` | Object | Dictionary containing `lux_factor` (0.0 to 1.0) and `spectral` (List of 4 integer RGB-proxy channels). |
 | `high_res_drift` | Mixed | High-resolution clock drift monitoring data. |
 | `events` | List | Recent significant environmental or system events. |
 
