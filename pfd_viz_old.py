@@ -23,7 +23,7 @@ def bootstrap() -> None:
     python_exe = os.path.join(venv_dir, "Scripts" if os.name == 'nt' else "bin", "python")
     pip_exe = os.path.join(venv_dir, "Scripts" if os.name == 'nt' else "bin", "pip")
     try:
-        subprocess.check_call([pip_exe, "install", "tkintermapview", "Pillow", "numpy", "pyrefly", "PyOpenGL", "pyopengltk"])
+        subprocess.check_call([pip_exe, "install", "tkintermapview", "Pillow", "numpy", "pyrefly"])
     except Exception: pass
     os.execv(python_exe, [python_exe] + sys.argv)
 
@@ -56,92 +56,6 @@ except ImportError:
     tkintermapview = None
     def decimal_to_osm(*args: Any) -> tuple[float, float]: return (0.0, 0.0)
 
-try:
-    from OpenGL.GL import *
-    from OpenGL.GLU import *
-    import pyopengltk # pyrefly: ignore
-    HAS_OPENGL = True
-except ImportError:
-    HAS_OPENGL = False
-
-class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly: ignore
-    def __init__(self, *args, **kwargs):
-        if HAS_OPENGL:
-            super().__init__(*args, **kwargs)
-        self.pitch = 0.0
-        self.roll = 0.0
-        self.heading = 0.0
-        self.visible = False
-
-    def initgl(self):
-        glClearColor(0.0, 0.0, 0.0, 1.0)
-        glEnable(GL_DEPTH_TEST)
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
-    def redraw(self):
-        if not self.visible: return
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) # pyrefly: ignore
-        glLoadIdentity()
-        
-        # Set up perspective
-        w, h = self.winfo_width(), self.winfo_height()
-        if h == 0: h = 1
-        glViewport(0, 0, w, h)
-        gluPerspective(45, (w / h), 0.1, 100.0)
-        
-        # Camera
-        gluLookAt(0, 0, 2.5, 0, 0, 0, 0, 1, 0)
-        
-        # Apply Pitch and Roll
-        glRotatef(self.roll, 0, 0, 1)
-        glRotatef(self.pitch, 1, 0, 0)
-        
-        # Draw Sphere/Horizon
-        self.draw_sphere(1.0, 32, 32)
-        
-        # Draw 0-degree line (Horizon)
-        self.draw_horizon_line()
-
-    def draw_sphere(self, radius, lats, longs):
-        for i in range(lats + 1):
-            lat0 = math.pi * (-0.5 + float(i - 1) / lats)
-            z0 = math.sin(lat0)
-            zr0 = math.cos(lat0)
-
-            lat1 = math.pi * (-0.5 + float(i) / lats)
-            z1 = math.sin(lat1)
-            zr1 = math.cos(lat1)
-
-            glBegin(GL_QUAD_STRIP)
-            for j in range(longs + 1):
-                lng = 2 * math.pi * float(j - 1) / longs
-                x = math.cos(lng)
-                y = math.sin(lng)
-                
-                # Color based on latitude (Sky/Ground)
-                if lat1 > 0:
-                    glColor4f(0.0, 0.2, 0.5, 0.8) # Blue sky
-                else:
-                    glColor4f(0.3, 0.15, 0.0, 0.8) # Brown ground
-                
-                glNormal3f(x * zr0, y * zr0, z0)
-                glVertex3f(x * zr0 * radius, y * zr0 * radius, z0 * radius)
-                glNormal3f(x * zr1, y * zr1, z1)
-                glVertex3f(x * zr1 * radius, y * zr1 * radius, z1 * radius)
-            glEnd()
-
-    def draw_horizon_line(self):
-        glColor3f(1.0, 1.0, 1.0)
-        glLineWidth(3)
-        glBegin(GL_LINE_LOOP)
-        for i in range(100):
-            theta = 2.0 * math.pi * i / 100.0
-            x = math.cos(theta)
-            y = math.sin(theta)
-            glVertex3f(x * 1.01, y * 1.01, 0.0)
-        glEnd()
-
 class PrimaryFlightDisplay:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -172,14 +86,8 @@ class PrimaryFlightDisplay:
         self.nav_canvas.bind("<Button-1>", self.on_nav_click)
 
         self.canvas = tk.Canvas(self.content_frame, bg='black', highlightthickness=0)
-        self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self.on_canvas_click)
-
-        self.opengl_pfd = None
-        if HAS_OPENGL:
-            # Place OpenGL in the center-ish area where the horizon usually is
-            self.opengl_pfd = OpenGLHorizon(self.content_frame, width=600, height=400)
-            self.opengl_pfd.visible = False
 
         self.map_widget: Any = None
         if tkintermapview:
@@ -336,22 +244,20 @@ class PrimaryFlightDisplay:
         self.is_searching = focused
 
     def get_soft_keys(self, w: int) -> list[dict[str, Any]]:
-        # Ensure w is at least a reasonable value for calculation
-        if w < 100: w = 1000
         btn_w = w // 12
         return [
-            {"label": "SAVT", "page": 0, "rect": (5.0, 5.0, float(5+btn_w), 55.0)},
-            {"label": "SYSTEM", "page": 1, "rect": (float(10+btn_w), 5.0, float(10+2*btn_w), 55.0)},
-            {"label": "SEISMIC", "page": 2, "rect": (float(15+2*btn_w), 5.0, float(15+3*btn_w), 55.0)},
-            {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
-            {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
-            {"label": "METAR", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
-            {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
-            {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
-            {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
-            {"label": "CENTER", "cmd": "center", "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
-            {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 5.0, float(w - btn_w - 10), 55.0)},
-            {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 5.0, float(w - 5), 55.0)}
+            {"label": "SAVT", "page": 0, "rect": (5.0, 10.0, float(5+btn_w), 50.0)},
+            {"label": "SYSTEM", "page": 1, "rect": (float(10+btn_w), 10.0, float(10+2*btn_w), 50.0)},
+            {"label": "SEISMIC", "page": 2, "rect": (float(15+2*btn_w), 10.0, float(15+3*btn_w), 50.0)},
+            {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 10.0, float(20+4*btn_w), 50.0)},
+            {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 10.0, float(25+5*btn_w), 50.0)},
+            {"label": "METAR", "page": 5, "rect": (float(30+5*btn_w), 10.0, float(30+6*btn_w), 50.0)},
+            {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 10.0, float(35+7*btn_w), 50.0)},
+            {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 10.0, float(40+8*btn_w), 50.0)},
+            {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 10.0, float(45+9*btn_w), 50.0)},
+            {"label": "CENTER", "cmd": "center", "rect": (float(50+9*btn_w), 10.0, float(50+10*btn_w), 50.0)},
+            {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 10.0, float(w - btn_w - 10), 50.0)},
+            {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 10.0, float(w - 5), 50.0)}
         ]
 
     def on_nav_click(self, event: tk.Event) -> None:
@@ -361,19 +267,14 @@ class PrimaryFlightDisplay:
             if not isinstance(rect, (list, tuple)) or len(rect) < 4: continue
             x1, y1, x2, y2 = rect
             if x1 <= event.x <= x2 and y1 <= event.y <= y2:
-                # Debug print to verify click detection
-                # print(f"Clicked {key['label']} at ({event.x}, {event.y})")
                 page_val = key.get("page")
                 if isinstance(page_val, int):
                     if self.page == 7 and page_val == 7:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
                     self.page = page_val
-                elif key.get("cmd") == "next":
-                    self.page = (self.page + 1) % 9
-                elif key.get("cmd") == "prev":
-                    self.page = (self.page - 1) % 9
-                elif key.get("cmd") == "center":
-                    self.set_auto_center(True)
+                elif key.get("cmd") == "next": self.page = (self.page + 1) % 9
+                elif key.get("cmd") == "prev": self.page = (self.page - 1) % 9
+                elif key.get("cmd") == "center": self.set_auto_center(True)
                 self.switch_page_view()
                 return
 
@@ -545,36 +446,21 @@ class PrimaryFlightDisplay:
         canvas.create_polygon([p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]], fill=color, outline="white", tags=tags)
 
     def switch_page_view(self) -> None:
-        if self.page == 0:
-            if self.map_widget: self.map_widget.pack_forget()
+        if self.page == 4 and self.map_widget:
             self.search_frame.pack_forget()
-            if self.opengl_pfd:
-                self.opengl_pfd.visible = True
-                # Place it in the center background
-                self.opengl_pfd.place(relx=0.2, rely=0.1, relwidth=0.6, relheight=0.6)
-                self.opengl_pfd.tkraise()
-            self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
-            # Ensure canvas overlays are still visible
-            tk.Misc.tkraise(self.canvas) # pyrefly: ignore
-            if self.opengl_pfd: tk.Misc.tkraise(self.opengl_pfd) # pyrefly: ignore
-        elif self.page == 4 and self.map_widget:
-            if self.opengl_pfd: self.opengl_pfd.place_forget(); self.opengl_pfd.visible = False
-            self.search_frame.pack_forget()
-            self.canvas.place_forget()
+            self.canvas.pack_forget()
             self.map_widget.pack(fill=tk.BOTH, expand=True)
             if self.auto_center:
                 self.map_widget.set_position(self.lat, self.lon)
         elif self.page == 8:
-            if self.opengl_pfd: self.opengl_pfd.place_forget(); self.opengl_pfd.visible = False
             if self.map_widget: self.map_widget.pack_forget()
-            self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
+            self.canvas.pack(fill=tk.BOTH, expand=True)
             self.search_frame.pack(side=tk.TOP, fill=tk.X)
             self.search_entry.focus_set()
         else:
-            if self.opengl_pfd: self.opengl_pfd.place_forget(); self.opengl_pfd.visible = False
             self.search_frame.pack_forget()
             if self.map_widget: self.map_widget.pack_forget()
-            self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
+            self.canvas.pack(fill=tk.BOTH, expand=True)
 
     def update_data(self) -> None:
         try:
@@ -707,13 +593,7 @@ class PrimaryFlightDisplay:
             self.nav_canvas.create_text((x1+x2)/2, (y1+y2)/2, text=label, fill="white", font=("Monaco", 8, "bold"))
 
     def draw_pfd_page(self, cx: float, cy: float, w: float, h: float) -> None:
-        if not HAS_OPENGL:
-            self.draw_horizon(cx, cy, w, h)
-        else:
-            # We skip the heavy 3D drawing on the CPU canvas
-            # but we still draw the 2D overlays (tapes, status)
-            pass
-            
+        self.draw_horizon(cx, cy, w, h)
         # Corrected Speed Tape (High Precision Knots: 7 decimals)
         corr_speed = self.speed * self.cf_velocity
         self.draw_tape(w*0.1, cy, 100, h*0.6, self.speed, "SPD", "KTS", 10, 2, "cyan", target_val=corr_speed, precision=7)
@@ -1334,12 +1214,6 @@ class PrimaryFlightDisplay:
         if self.page == 4:
             self.update_panning()
             self.update_navigation_path()
-
-        if self.page == 0 and self.opengl_pfd:
-            self.opengl_pfd.pitch = self.pitch
-            self.opengl_pfd.roll = self.roll
-            self.opengl_pfd.heading = self.heading
-            self.opengl_pfd.tkExpose(None) # Trigger redraw
 
         self.draw_glass_cockpit()
         # Limit display update to 15Hz (1000ms / 15 approx 67ms)

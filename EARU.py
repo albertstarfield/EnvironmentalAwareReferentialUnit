@@ -2230,10 +2230,10 @@ class LocationTracker:
         self._meteo_running = False
         self._load_meteo_cache()
 
-        # Pre-calculated damping factors for performance
-        self._damping_stationary = math.pow(0.1, 1.0 / fs)
-        self._damping_uniform = math.pow(0.95, 1.0 / fs)
-        self._damping_jitter = math.pow(0.7, 1.0 / fs)
+        # Pre-calculated damping factors for performance (adjusted for vehicle speeds)
+        self._damping_stationary = math.pow(0.5, 1.0 / fs) # 50% loss per second when stationary
+        self._damping_uniform = math.pow(0.995, 1.0 / fs) # 0.5% loss per second when moving
+        self._damping_jitter = math.pow(0.9, 1.0 / fs)  # 10% loss per second during jitter
 
     def _check_torch_available(self):
         try:
@@ -3251,7 +3251,7 @@ class LocationTracker:
             pass
         return None
 
-    def update_imu(self, ax, ay, az, t_now, q, raw_accel=None, gyro_mag=0.0):
+    def update_imu(self, ax, ay, az, t_now, q, raw_accel=None, gyro_mag=0.0, motion_type="Stationary"):
         """Update position using dead reckoning from IMU acceleration."""
         if self.last_t is None:
             self.last_t = t_now
@@ -3305,15 +3305,21 @@ class LocationTracker:
         self.vel[2] += wz * dt * self.CorrectionFactor_Reckoning_VerticalRate
 
         # 3. Dynamic Velocity Damping (Advanced ZUPT)
+        # We now incorporate the VibrationDetector's motion_type for smarter damping
+        is_moving_type = motion_type not in ["Stationary", "Stowed / Passive Motion"]
+        
         if gyro_mag < 0.8:
             rax, ray, raz = raw_accel if raw_accel is not None else (ax, ay, az)
             raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
-            if abs(raw_mag - self.calibrated_g) < 0.05:
-                # Stationary: Aggressive damping to kill drift
+            
+            # Condition for ZUPT (Zero Velocity Update)
+            # Must have no rotation AND no net acceleration AND vibration detector says stationary
+            if abs(raw_mag - self.calibrated_g) < 0.05 and not is_moving_type:
+                # Truly Stationary: Aggressive damping to kill drift
                 for i in range(3):
                     self.vel[i] *= self._damping_stationary
             else:
-                # Uniform motion: Slight damping
+                # Uniform motion: Very slight damping to allow constant velocity to persist
                 for i in range(3):
                     self.vel[i] *= self._damping_uniform
         else:
@@ -3552,6 +3558,13 @@ class LocationTracker:
                                             if self.v_mag > 0.1 and cl_v_mag > 0.1:
                                                 # Proportional-only "gain" adjustment (PID-like anchor)
                                                 error_ratio = cl_v_mag / self.v_mag
+                                                
+                                                # If discrepancy is huge (> 50% error), nudge velocity vector
+                                                # to immediately align with GPS reality
+                                                if error_ratio > 1.5 or error_ratio < 0.5:
+                                                    self.vel *= error_ratio
+                                                    self.v_mag = cl_v_mag
+
                                                 # Dampen the gain change to avoid oscillations (alpha=0.2)
                                                 self.CorrectionFactor_Reckoning_Velocity = self.CorrectionFactor_Reckoning_Velocity * 0.8 + (self.CorrectionFactor_Reckoning_Velocity * error_ratio) * 0.2
                                                 # Clamp gain to sane limits
@@ -5087,6 +5100,7 @@ def main(stdscr=None):
                     det._q,
                     raw_accel=(sx, sy, sz),
                     gyro_mag=gyro_mag,
+                    motion_type=det.motion_type,
                 )
                 profiler.end_block() # pa_loc_update_imu
             profiler.end_block() # process_accel
