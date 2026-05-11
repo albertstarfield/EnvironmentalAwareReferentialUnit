@@ -1147,11 +1147,15 @@ class PrimaryFlightDisplay:
         self.canvas.create_line(cx+30, cy, cx+100, cy, fill="yellow", width=5)
 
     def detect_environment(self) -> None:
-        if self.alt > 50:
+        # Convert thresholds: 10000ft = 3048m
+        alt_m = self.alt
+        speed_kts = self.speed
+        
+        if alt_m >= 3048 or speed_kts >= 90:
             self.env_mode = "AIRWAY"
-        elif self.alt < 2:
+        elif alt_m < 2:
             self.env_mode = "WATERWAY"
-        elif self.speed > 35:
+        elif speed_kts > 35:
             self.env_mode = "HIGHWAY"
         else:
             self.env_mode = "STANDARD ROAD"
