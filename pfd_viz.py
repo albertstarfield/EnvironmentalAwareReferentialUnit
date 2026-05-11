@@ -86,6 +86,7 @@ class PrimaryFlightDisplay:
 
         self.canvas = tk.Canvas(self.content_frame, bg='black', highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
 
         self.map_widget: Any = None
         if tkintermapview:
@@ -141,14 +142,19 @@ class PrimaryFlightDisplay:
         self.dest_lon: Optional[float] = None
         self.waypoints: list[dict[str, Any]] = []
         self.waypoint_markers: list[Any] = []
+        self.search_results: list[dict[str, Any]] = []
+        self.search_status: str = "READY"
         
-        # Search UI (hidden by default)
+        # Search UI
         self.search_frame = tk.Frame(self.content_frame, bg='#111')
         self.search_entry = tk.Entry(self.search_frame, bg='black', fg='white', insertbackground='white', font=("Monaco", 12))
         self.search_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
         self.search_entry.bind("<Return>", lambda e: self.perform_search())
         search_btn = tk.Button(self.search_frame, text="SEARCH", command=self.perform_search, bg='#0077be', fg='white', font=("Monaco", 10, "bold"))
         search_btn.pack(side=tk.RIGHT, padx=5, pady=5)
+        self.search_entry.bind("<FocusIn>", lambda e: self.on_search_focus(True))
+        self.search_entry.bind("<FocusOut>", lambda e: self.on_search_focus(False))
+        self.is_searching: bool = False
 
         # Correction Factors (Semantically enriched)
         self.cf_velocity: float = 1.0
@@ -230,18 +236,22 @@ class PrimaryFlightDisplay:
             if self.map_widget:
                 self.map_widget.set_position(self.lat, self.lon)
 
+    def on_search_focus(self, focused: bool) -> None:
+        self.is_searching = focused
+
     def get_soft_keys(self, w: int) -> list[dict[str, Any]]:
-        btn_w = w // 11
+        btn_w = w // 12
         return [
             {"label": "SAVT", "page": 0, "rect": (5.0, 10.0, float(5+btn_w), 50.0)},
             {"label": "SYSTEM", "page": 1, "rect": (float(10+btn_w), 10.0, float(10+2*btn_w), 50.0)},
             {"label": "SEISMIC", "page": 2, "rect": (float(15+2*btn_w), 10.0, float(15+3*btn_w), 50.0)},
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 10.0, float(20+4*btn_w), 50.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 10.0, float(25+5*btn_w), 50.0)},
-            {"label": "METARLOC", "page": 5, "rect": (float(30+5*btn_w), 10.0, float(30+6*btn_w), 50.0)},
+            {"label": "METAR", "page": 5, "rect": (float(30+5*btn_w), 10.0, float(30+6*btn_w), 50.0)},
             {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 10.0, float(35+7*btn_w), 50.0)},
-            {"label": "CLIMEXT", "page": 7, "rect": (float(40+7*btn_w), 10.0, float(40+8*btn_w), 50.0)},
-            {"label": "CENTER", "cmd": "center", "rect": (float(45+8*btn_w), 10.0, float(45+9*btn_w), 50.0)},
+            {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 10.0, float(40+8*btn_w), 50.0)},
+            {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 10.0, float(45+9*btn_w), 50.0)},
+            {"label": "CENTER", "cmd": "center", "rect": (float(50+9*btn_w), 10.0, float(50+10*btn_w), 50.0)},
             {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 10.0, float(w - btn_w - 10), 50.0)},
             {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 10.0, float(w - 5), 50.0)}
         ]
@@ -258,8 +268,8 @@ class PrimaryFlightDisplay:
                     if self.page == 7 and page_val == 7:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
                     self.page = page_val
-                elif key.get("cmd") == "next": self.page = (self.page + 1) % 8
-                elif key.get("cmd") == "prev": self.page = (self.page - 1) % 8
+                elif key.get("cmd") == "next": self.page = (self.page + 1) % 9
+                elif key.get("cmd") == "prev": self.page = (self.page - 1) % 9
                 elif key.get("cmd") == "center": self.set_auto_center(True)
                 self.switch_page_view()
                 return
@@ -272,33 +282,29 @@ class PrimaryFlightDisplay:
         addr = self.search_entry.get()
         if not addr: return
         
+        self.search_status = "SEARCHING..."
+        self.search_results = []
         try:
             # Manual search with User-Agent to avoid Nominatim 403 Forbidden error
             # as required by OSM usage policy.
-            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=1"
+            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=10"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0 (contact: albertstarfield)'})
             
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode())
                 if data:
-                    lat = float(data[0]['lat'])
-                    lon = float(data[0]['lon'])
-                    if self.map_widget:
-                        self.map_widget.set_position(lat, lon)
-                        self.set_destination(lat, lon)
+                    for item in data:
+                        self.search_results.append({
+                            'lat': float(item['lat']),
+                            'lon': float(item['lon']),
+                            'display_name': item.get('display_name', 'Unknown')
+                        })
+                    self.search_status = f"FOUND {len(self.search_results)} RESULTS. CLICK TO SELECT."
                 else:
-                    print(f"No results for: {addr}")
+                    self.search_status = "NO RESULTS FOUND."
                     
         except Exception as e:
-            # Fallback to internal if manual fails (might still 403)
-            try:
-                self.map_widget.set_address(addr, marker=True)
-                for marker in self.map_widget.canvas_marker_list:
-                    if marker.text == addr:
-                        self.set_destination(marker.position[0], marker.position[1])
-                        break
-            except Exception:
-                print(f"Search failed: {e}")
+            self.search_status = f"SEARCH ERROR: {e}"
 
     def set_destination(self, lat: float, lon: float) -> None:
         self.dest_lat, self.dest_lon = lat, lon
@@ -367,11 +373,16 @@ class PrimaryFlightDisplay:
 
     def switch_page_view(self) -> None:
         if self.page == 4 and self.map_widget:
+            self.search_frame.pack_forget()
             self.canvas.pack_forget()
             self.map_widget.pack(fill=tk.BOTH, expand=True)
-            self.search_frame.pack(side=tk.TOP, fill=tk.X)
             if self.auto_center:
                 self.map_widget.set_position(self.lat, self.lon)
+        elif self.page == 8:
+            if self.map_widget: self.map_widget.pack_forget()
+            self.canvas.pack(fill=tk.BOTH, expand=True)
+            self.search_frame.pack(side=tk.TOP, fill=tk.X)
+            self.search_entry.focus_set()
         else:
             self.search_frame.pack_forget()
             if self.map_widget: self.map_widget.pack_forget()
@@ -465,7 +476,34 @@ class PrimaryFlightDisplay:
         elif self.page == 5: self.draw_metar_page(w, h)
         elif self.page == 6: self.draw_wind_page(w, h)
         elif self.page == 7: self.draw_weather_page(w, h)
+        elif self.page == 8: self.draw_search_page(w, h)
         self.draw_nav_keys()
+
+    def draw_search_page(self, w: float, h: float) -> None:
+        self.canvas.create_text(w/2, 40, text="DESTINATION SEARCH & SELECTION", fill="#0077be", font=("Monaco", 20, "bold"))
+        self.canvas.create_text(50, 100, anchor="nw", text=f"STATUS: {self.search_status}", fill="white", font=("Monaco", 10))
+        
+        y = 150.0
+        for i, res in enumerate(self.search_results):
+            txt = f"{i+1}. {res['display_name'][:120]}"
+            self.canvas.create_text(50, y, anchor="nw", text=txt, fill="cyan", font=("Monaco", 10))
+            y += 30
+            if y > h - 100: break
+
+    def on_canvas_click(self, event: tk.Event) -> None:
+        if self.page == 8:
+            # Check if clicked on a search result
+            y = 150.0
+            w = self.canvas.winfo_width()
+            for i, res in enumerate(self.search_results):
+                if 50 <= event.x <= w-50 and y - 10 <= event.y <= y + 20:
+                    self.set_destination(res['lat'], res['lon'])
+                    if self.map_widget:
+                        self.map_widget.set_position(res['lat'], res['lon'])
+                    self.page = 4
+                    self.switch_page_view()
+                    return
+                y += 30
 
     def draw_nav_keys(self) -> None:
         self.nav_canvas.delete("all")
@@ -595,7 +633,22 @@ class PrimaryFlightDisplay:
         if self.dest_lat is not None:
             self.draw_text_with_halo(canvas, x + 10, y + y_off, f"DEST: {self.dest_lat:.4f}, {self.dest_lon:.4f}", "magenta", ("Monaco", 8), "nw", tags)
 
+    def draw_search_trigger(self, canvas: tk.Canvas, x: float, y: float, tags: str) -> None:
+        r = 20.0
+        # Halo
+        canvas.create_oval(x-r-2, y-r-2, x+r+2, y+r+2, fill="black", outline="white", width=1, tags=tags)
+        # Search Icon (Magnifying glass)
+        canvas.create_oval(x-10, y-10, x+4, y+4, outline="#00ccff", width=2, tags=tags)
+        canvas.create_line(x+2, y+2, x+12, y+12, fill="#00ccff", width=3, tags=tags)
+
     def on_map_click(self, event: tk.Event) -> None:
+        # Check if clicked search button
+        w, h = self.map_widget.width, self.map_widget.height
+        if w-70 <= event.x <= w-20 and h-70 <= event.y <= h-20:
+            self.page = 8
+            self.switch_page_view()
+            return
+            
         # Shift-Click to add waypoint
         try:
             state = int(event.state)
@@ -688,6 +741,7 @@ class PrimaryFlightDisplay:
             self.draw_north_arrow(self.map_widget.canvas, w - 60, 60, arrow_hdg, tags="overlay_info")
             self.draw_zoom_scale(self.map_widget.canvas, 20, h - 150, tags="overlay_info")
             self.draw_loc_button(self.map_widget.canvas, 45, h - 45, tags="loc_btn")
+            self.draw_search_trigger(self.map_widget.canvas, w - 45, h - 45, tags="search_btn")
             
             if not self.auto_center:
                 self.draw_map_target(self.map_widget.canvas, w/2, h/2, tags="overlay_info")
