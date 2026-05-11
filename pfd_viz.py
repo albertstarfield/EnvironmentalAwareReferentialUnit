@@ -374,6 +374,7 @@ class PrimaryFlightDisplay:
         self.draw_heading_vector(cx, cy + 240, 400, 40, self.heading, target_hdg=corr_hdg)
         
         self.draw_center_symbol(cx, cy)
+        self.draw_flight_path_vector(cx, cy, w, h)
         self.draw_bank_scale(cx, cy)
         self.draw_status_vector(w, h)
         
@@ -385,6 +386,29 @@ class PrimaryFlightDisplay:
             self.canvas.create_text(w - 130, cy - 195, text=f"CORR: {int(corr_vsi)}", fill="#00ccff", font=("Monaco", 8))
 
         self.canvas.create_text(cx - 150, cy + 180, text=f"MACH: {self.mach:.3f}", fill="white", font=("Monaco", 10, "bold"))
+
+    def draw_flight_path_vector(self, cx: float, cy: float, w: float, h: float) -> None:
+        # Calculate vertical flight path angle (gamma)
+        # speed is knots, alt_rate is fpm (approx)
+        h_speed_mps = (self.speed / 1.94384)
+        v_speed_mps = (self.alt_rate / 60.0) / 3.28084
+        
+        if h_speed_mps > 1.0:
+            gamma = math.degrees(math.atan2(v_speed_mps, h_speed_mps))
+            # Offset on canvas: 5px per degree approx for visual clarity
+            dy = -gamma * 5.0 
+            dx = 0 # Assume no sideslip
+            
+            # The "Bird" symbol
+            bx, by = cx + dx, cy + dy
+            self.canvas.create_oval(bx-8, by-8, bx+8, by+8, outline="black", width=3)
+            self.canvas.create_oval(bx-8, by-8, bx+8, by+8, outline="#00ff00", width=2)
+            self.canvas.create_line(bx-15, by, bx-8, by, fill="black", width=4)
+            self.canvas.create_line(bx-15, by, bx-8, by, fill="#00ff00", width=2)
+            self.canvas.create_line(bx+8, by, bx+15, by, fill="black", width=4)
+            self.canvas.create_line(bx+8, by, bx+15, by, fill="#00ff00", width=2)
+            self.canvas.create_line(bx, by-8, bx, by-12, fill="black", width=4)
+            self.canvas.create_line(bx, by-8, bx, by-12, fill="#00ff00", width=2)
 
     def draw_status_vector(self, w: float, h: float) -> None:
         self.canvas.create_text(10, 10, anchor="nw", text=f"CPU: {self.cpu:.1f}% | BATT: {self.batt}%{' (CHG)' if self.charging else ''} | PWR: {self.power_rate:.1f}W | HID IDLE: {self.hid_idle:.1f}s", fill="green", font=("Monaco", 10))
@@ -687,6 +711,51 @@ class PrimaryFlightDisplay:
         tx = x*math.cos(roll_rad) - y*math.sin(roll_rad); ty = x*math.sin(roll_rad) + y*math.cos(roll_rad); x, y = tx, ty
         return x*radius, y*radius, z
 
+    def draw_navigation_aids(self, cx: float, cy: float, r: float, roll_rad: float, pitch_rad: float, yaw_rad: float) -> None:
+        # Axis & Cardinal Points
+        axis_points = [
+            (0, 0, "N", "red"), (0, 90, "E", "white"), (0, 180, "S", "white"), (0, 270, "W", "white"),
+            (90, 0, "ZENITH", "cyan"), (-90, 0, "NADIR", "gray"),
+            (89, 0, "* POLARIS", "yellow")
+        ]
+        for lat, lon, lbl, col in axis_points:
+            px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
+            if pz > 0:
+                self.canvas.create_text(cx + px, cy + py, text=lbl, fill=col, font=("Monaco", 9, "bold"))
+                if lat == 0:
+                    self.canvas.create_line(cx+px*0.95, cy+py*0.95, cx+px*1.05, cy+py*1.05, fill=col, width=2)
+
+        # Horizon Bearing Labels
+        for ang in range(0, 360, 30):
+            if ang in [0, 90, 180, 270]: continue
+            px, py, pz = self.project_3d(0, ang, roll_rad, pitch_rad, yaw_rad, r)
+            if pz > 0:
+                self.canvas.create_text(cx + px, cy + py, text=f"{ang:03d}", fill="#666", font=("Monaco", 7))
+
+        # Constellations (Simplified for Nav)
+        consts = [
+            # Big Dipper (Ursa Major)
+            [(49.3, 106.8), (53.3, 105.1), (55.9, 120.3), (58.1, 135.2), (53.7, 150.5), (56.4, 165.2), (61.7, 165.7)],
+            # Orion
+            [(7.4, 83.8), (-8.2, 85.1), (6.3, 89.1), (-0.2, 85.7), (0.0, 84.0), (-1.2, 82.3), (-9.7, 78.6), (9.9, 88.8)],
+            # Southern Cross (Crux)
+            [(-63.1, 185.3), (-57.1, 183.1), (-60.2, 180.4), (-59.7, 188.4)],
+            # Cassiopeia
+            [(59.1, 10.0), (60.7, 20.0), (58.8, 30.0), (60.1, 40.0), (54.0, 50.0)]
+        ]
+        
+        for stars in consts:
+            pts = []
+            for lat, lon in stars:
+                px, py, pz = self.project_3d(lat, lon, roll_rad, pitch_rad, yaw_rad, r)
+                if pz > 0:
+                    self.canvas.create_oval(cx+px-1, cy+py-1, cx+px+1, cy+py+1, fill="white", outline="")
+                    pts.append((cx+px, cy+py))
+                else:
+                    if len(pts) >= 2: self.canvas.create_line(pts, fill="#444", dash=(2,2))
+                    pts = []
+            if len(pts) >= 2: self.canvas.create_line(pts, fill="#444", dash=(2,2))
+
     def draw_horizon(self, cx: float, cy: float, w: float, h: float) -> None:
         r = min(w, h) * 0.25
         self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill="#1a1a1a", outline="white", width=2)
@@ -709,6 +778,10 @@ class PrimaryFlightDisplay:
                     if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
                     pts = []
             if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1)
+
+        # Draw Zenith, Axis, and Constellations
+        self.draw_navigation_aids(cx, cy, r, roll_rad, pitch_rad, yaw_rad)
+
         m_pts = [(-10.0,-10.0), (w+10.0,-10.0), (w+10.0,h+10.0), (-10.0,h+10.0), (-10.0,-10.0)]
         for i in range(41):
             a = 2*math.pi*i/40; m_pts.append((cx + r*math.cos(-a), cy + r*math.sin(-a)))
