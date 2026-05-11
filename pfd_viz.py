@@ -137,6 +137,8 @@ class PrimaryFlightDisplay:
         self.dest_path: Any = None
         self.dest_lat: Optional[float] = None
         self.dest_lon: Optional[float] = None
+        self.waypoints: list[dict[str, Any]] = []
+        self.waypoint_markers: list[Any] = []
         
         # Search UI (hidden by default)
         self.search_frame = tk.Frame(self.content_frame, bg='#111')
@@ -286,32 +288,54 @@ class PrimaryFlightDisplay:
             self.dest_marker = self.map_widget.set_marker(lat, lon, text="DESTINATION")
             self.update_navigation_path()
 
+    def add_waypoint(self, lat: float, lon: float, label: Optional[str] = None) -> None:
+        if not self.map_widget: return
+        idx = len(self.waypoints) + 1
+        name = label if label else f"WP{idx:02d}"
+        marker = self.map_widget.set_marker(lat, lon, text=name)
+        self.waypoints.append({"lat": lat, "lon": lon, "name": name})
+        self.waypoint_markers.append(marker)
+        self.update_navigation_path()
+
+    def clear_waypoints(self) -> None:
+        for m in self.waypoint_markers: m.delete()
+        self.waypoints = []
+        self.waypoint_markers = []
+        if self.dest_marker: self.dest_marker.delete(); self.dest_marker = None
+        self.dest_lat, self.dest_lon = None, None
+        if self.dest_path: self.dest_path.delete(); self.dest_path = None
+        self.update_navigation_path()
+
     def update_navigation_path(self) -> None:
-        if not self.map_widget or self.dest_lat is None: return
-        if self.dest_path: self.dest_path.delete()
+        if not self.map_widget: return
+        if self.dest_path: self.dest_path.delete(); self.dest_path = None
         
-        # Path segments for potential multi-leg or directional indicators
-        # For now, a magenta line with a "direction-aware" style
-        path_pts = [(self.lat, self.lon), (self.dest_lat, self.dest_lon)]
+        # Build path: Current -> WP1 -> WP2 ... -> Destination
+        pts = [(self.lat, self.lon)]
+        for wp in self.waypoints:
+            pts.append((wp["lat"], wp["lon"]))
         
-        # Special rendering for AIRWAY (High contrast)
+        if self.dest_lat is not None and self.dest_lon is not None:
+            pts.append((self.dest_lat, self.dest_lon))
+            
+        if len(pts) < 2: 
+            self.map_widget.canvas.delete("path_dir")
+            return
+        
         path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
-        self.dest_path = self.map_widget.set_path(path_pts, color=path_color, width=3)
+        self.dest_path = self.map_widget.set_path(pts, color=path_color, width=3)
         
-        # Draw a small heading arrow on the map to indicate path direction
+        # Draw directional arrow towards NEXT point
         self.map_widget.canvas.delete("path_dir")
         pos_x, pos_y = self.get_canvas_pos(self.lat, self.lon)
         if pos_x > -50 and pos_y > -50:
-            d_lat = self.dest_lat - self.lat
-            d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
+            next_pt = pts[1]
+            d_lat = next_pt[0] - self.lat
+            d_lon = (next_pt[1] - self.lon) * math.cos(math.radians(self.lat))
             path_brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
-            
-            # Offset the arrow slightly along the path
             rad = math.radians(path_brg)
             off = 40
             ax, ay = pos_x + math.sin(rad)*off, pos_y - math.cos(rad)*off
-            
-            # Draw directional arrow
             self.draw_path_arrow(self.map_widget.canvas, ax, ay, path_brg, color=path_color, tags="path_dir")
 
     def draw_path_arrow(self, canvas: tk.Canvas, x: float, y: float, hdg: float, color: str, tags: str) -> None:
@@ -533,7 +557,37 @@ class PrimaryFlightDisplay:
         # Main text
         canvas.create_text(x, y, text=text, fill=fill, font=font, anchor=anchor, tags=tags)
 
+    def draw_waypoint_preview(self, canvas: tk.Canvas, x: float, y: float, tags: str) -> None:
+        # Title
+        self.draw_text_with_halo(canvas, x, y, "DIRECTION PREVIEW", "white", ("Monaco", 10, "bold"), "nw", tags)
+        
+        y_off = 25.0
+        # Current Pos
+        self.draw_text_with_halo(canvas, x + 10, y + y_off, f"STRT: {self.lat:.4f}, {self.lon:.4f}", "#00ff00", ("Monaco", 8), "nw", tags)
+        y_off += 15
+        
+        # Waypoints
+        for i, wp in enumerate(self.waypoints):
+            col = "white"
+            self.draw_text_with_halo(canvas, x + 10, y + y_off, f"{wp['name']}: {wp['lat']:.4f}, {wp['lon']:.4f}", col, ("Monaco", 8), "nw", tags)
+            y_off += 15
+            
+        # Destination
+        if self.dest_lat is not None:
+            self.draw_text_with_halo(canvas, x + 10, y + y_off, f"DEST: {self.dest_lat:.4f}, {self.dest_lon:.4f}", "magenta", ("Monaco", 8), "nw", tags)
+
     def on_map_click(self, event: tk.Event) -> None:
+        # Shift-Click to add waypoint
+        try:
+            state = int(event.state)
+        except (ValueError, TypeError):
+            state = 0
+            
+        if state & 0x0001: # Shift key
+            pos = self.map_widget.get_decimal(event.x, event.y)
+            if pos: self.add_waypoint(pos[0], pos[1])
+            return
+
         # Check if clicked the on-screen "Current Location" button (bottom-left area)
         if 20 <= event.x <= 70 and self.canvas.winfo_height() - 70 <= event.y <= self.canvas.winfo_height() - 20:
             self.set_auto_center(True)
@@ -562,8 +616,11 @@ class PrimaryFlightDisplay:
                 self.map_widget.set_position(self.lat, self.lon)
                 self.pan_lat, self.pan_lon = self.lat, self.lon
             
-            self.map_widget.canvas.delete("user_nav", "overlay_info", "map_controls", "loc_btn")
+            self.map_widget.canvas.delete("user_nav", "overlay_info", "map_controls", "loc_btn", "wp_list")
             
+            # Direction Preview List
+            self.draw_waypoint_preview(self.map_widget.canvas, 20, 100, tags="wp_list")
+
             # 3D Nav Symbol
             pos_x, pos_y = self.get_canvas_pos(self.lat, self.lon)
             if pos_x > -50 and pos_y > -50:
@@ -583,7 +640,7 @@ class PrimaryFlightDisplay:
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 120, f"TRIANG_HDG_OFF:  {self.cf_heading:+.1f}\u00b0", "#00ccff", ("Monaco", 9), "se", "overlay_info")
             
             # Destination Info
-            if self.dest_lat is not None:
+            if self.dest_lat is not None and self.dest_lon is not None:
                 d_lat = self.dest_lat - self.lat
                 d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
                 dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
