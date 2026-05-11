@@ -392,7 +392,7 @@ class PrimaryFlightDisplay:
             'pitch': 0.0, 'roll': 0.0, 'heading': 0.0, 'alt': 0.0, 'speed': 0.0, 'lat': 0.0, 'lon': 0.0,
             'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0
         }
-        self.lerp_factor: float = 1.0
+        self.lerp_factor: float = 0.1
         self.pitch_sign: float = 1.0
         self.roll_sign: float = -1.0
         
@@ -1465,6 +1465,9 @@ class PrimaryFlightDisplay:
         self.cf_altitude += (self.targets['cf_altitude'] - self.cf_altitude) * self.lerp_factor
         self.cf_vertical_rate += (self.targets['cf_vertical_rate'] - self.cf_vertical_rate) * self.lerp_factor
 
+        # Smoothed high-resolution metrics
+        self.alt_rate += (self.targets.get('alt_rate', 0.0) - self.alt_rate) * self.lerp_factor
+        self.mach += (self.targets.get('mach', 0.0) - self.mach) * self.lerp_factor
 
         # Continuous Map Interaction
         if self.page == 4:
