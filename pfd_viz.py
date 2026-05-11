@@ -342,10 +342,22 @@ class PrimaryFlightDisplay:
         if self.env_mode == "AIRWAY":
             self.draw_straight_path()
         else:
+            # Check for deviation if path exists
+            deviated = False
+            if self.road_path_coords:
+                # Check distance to the first few coordinates of the current road path
+                # to see if we've moved significantly away from the start/planned line
+                start_lat, start_lon = self.road_path_coords[0]
+                d_lat = start_lat - self.lat
+                d_lon = (start_lon - self.lon) * math.cos(math.radians(self.lat))
+                dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+                if dist_m > 50.0: # 50m deviation threshold
+                    deviated = True
+
             # For ROAD/HIGHWAY, try to use road-adhered coordinates
-            # Throttled update (every 5 seconds) or if path is missing
+            # Update if: throttled (5s), path missing, or deviated
             now = time.time()
-            if not self.is_fetching_road and (now - self.last_road_update > 5.0 or not self.road_path_coords):
+            if not self.is_fetching_road and (now - self.last_road_update > 5.0 or not self.road_path_coords or deviated):
                 threading.Thread(target=self.fetch_road_routing, daemon=True).start()
             
             if self.road_path_coords:
@@ -787,6 +799,17 @@ class PrimaryFlightDisplay:
             status_col = "yellow" if self.auto_center else "#ff6600"
             orient_text = "HEAD-UP" if self.map_heading_up else "NORTH-UP"
             status_text = f"MODE: {'AUTO-CENTER' if self.auto_center else 'MANUAL PAN'} | {orient_text}"
+            
+            # Deviation / Off Course Warning
+            if self.road_path_coords:
+                start_lat, start_lon = self.road_path_coords[0]
+                d_lat = start_lat - self.lat
+                d_lon = (start_lon - self.lon) * math.cos(math.radians(self.lat))
+                xtk_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+                if xtk_m > 50.0:
+                    status_text += f" | OFF COURSE: {int(xtk_m)}m"
+                    status_col = "red"
+            
             self.draw_text_with_halo(self.map_widget.canvas, 20, 20, status_text, status_col, ("Monaco", 10, "bold"), "nw", "overlay_info")
             
             # Draw Avionics Icons
