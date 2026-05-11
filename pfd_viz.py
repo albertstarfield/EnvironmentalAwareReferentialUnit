@@ -152,6 +152,9 @@ class PrimaryFlightDisplay:
         self.cf_altitude: float = 0.0
         self.cf_vertical_rate: float = 1.0
 
+        self.env_mode: str = "STANDARD ROAD"
+        self.last_env_mode: str = ""
+
         self.targets: dict[str, float] = {
             'pitch': 0.0, 'roll': 0.0, 'heading': 0.0, 'alt': 0.0, 'speed': 0.0, 'lat': 0.0, 'lon': 0.0,
             'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0
@@ -286,8 +289,38 @@ class PrimaryFlightDisplay:
     def update_navigation_path(self) -> None:
         if not self.map_widget or self.dest_lat is None: return
         if self.dest_path: self.dest_path.delete()
-        # Draw a direct path line from current position to destination
-        self.dest_path = self.map_widget.set_path([(self.lat, self.lon), (self.dest_lat, self.dest_lon)], color="magenta", width=3)
+        
+        # Path segments for potential multi-leg or directional indicators
+        # For now, a magenta line with a "direction-aware" style
+        path_pts = [(self.lat, self.lon), (self.dest_lat, self.dest_lon)]
+        
+        # Special rendering for AIRWAY (High contrast)
+        path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
+        self.dest_path = self.map_widget.set_path(path_pts, color=path_color, width=3)
+        
+        # Draw a small heading arrow on the map to indicate path direction
+        self.map_widget.canvas.delete("path_dir")
+        pos_x, pos_y = self.get_canvas_pos(self.lat, self.lon)
+        if pos_x > -50 and pos_y > -50:
+            d_lat = self.dest_lat - self.lat
+            d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
+            path_brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
+            
+            # Offset the arrow slightly along the path
+            rad = math.radians(path_brg)
+            off = 40
+            ax, ay = pos_x + math.sin(rad)*off, pos_y - math.cos(rad)*off
+            
+            # Draw directional arrow
+            self.draw_path_arrow(self.map_widget.canvas, ax, ay, path_brg, color=path_color, tags="path_dir")
+
+    def draw_path_arrow(self, canvas: tk.Canvas, x: float, y: float, hdg: float, color: str, tags: str) -> None:
+        size = 10.0
+        rad = math.radians(hdg)
+        p1 = (x + math.sin(rad)*size, y - math.cos(rad)*size)
+        p2 = (x + math.sin(rad+2.5)*size, y - math.cos(rad+2.5)*size)
+        p3 = (x + math.sin(rad-2.5)*size, y - math.cos(rad-2.5)*size)
+        canvas.create_polygon([p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]], fill=color, outline="white", tags=tags)
 
     def switch_page_view(self) -> None:
         if self.page == 4 and self.map_widget:
@@ -559,30 +592,13 @@ class PrimaryFlightDisplay:
                 dist_nm = dist_m / 1852.0
                 dist_lbl = f"{dist_m:.0f}m" if dist_m < 1000 else (f"{dist_m/1000:.2f}km" if dist_m < 18520 else f"{dist_nm:.2f}NM")
                 
-                # Heuristic Environment Classification
-                # Standard Road: < 15m alt, < 30 knots
-                # Highway: < 15m alt, > 30 knots
-                # Waterway: near sea level (alt < 5m) + specific regions (simplified here as alt < 2m)
-                # Airway: alt > 50m
-                env_type = "STANDARD ROAD"
                 speed_limit = "50 KPH"
-                unit = "KPH"
-                
-                if self.alt > 50:
-                    env_type = "AIRWAY"
-                    speed_limit = "Vmo/Mmo"
-                    unit = "KNOTS"
-                elif self.alt < 2:
-                    env_type = "WATERWAY"
-                    speed_limit = "5-12 KNOTS"
-                    unit = "KNOTS"
-                elif self.speed > 35: # approx 65 kph
-                    env_type = "HIGHWAY"
-                    speed_limit = "110 KPH"
-                    unit = "KPH"
+                if self.env_mode == "AIRWAY": speed_limit = "Vmo/Mmo"
+                elif self.env_mode == "WATERWAY": speed_limit = "5-12 KTS"
+                elif self.env_mode == "HIGHWAY": speed_limit = "110 KPH"
                 
                 brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
-                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0 | {env_type} | LMT: {speed_limit}"
+                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0 | {self.env_mode} | LMT: {speed_limit}"
                 self.draw_text_with_halo(self.map_widget.canvas, w/2, 60, dest_info, "magenta", ("Monaco", 12, "bold"), "center", "overlay_info")
 
             # Status and Controls
@@ -924,8 +940,43 @@ class PrimaryFlightDisplay:
         self.canvas.create_line(cx-100, cy, cx-30, cy, fill="yellow", width=5)
         self.canvas.create_line(cx+30, cy, cx+100, cy, fill="yellow", width=5)
 
+    def detect_environment(self) -> None:
+        if self.alt > 50:
+            self.env_mode = "AIRWAY"
+        elif self.alt < 2:
+            self.env_mode = "WATERWAY"
+        elif self.speed > 35:
+            self.env_mode = "HIGHWAY"
+        else:
+            self.env_mode = "STANDARD ROAD"
+            
+        if self.env_mode != self.last_env_mode:
+            self.update_map_theme()
+            self.last_env_mode = self.env_mode
+
+    def update_map_theme(self) -> None:
+        if not self.map_widget: return
+        # Standard OSM
+        osm_url = "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        # OpenSeaMap (often used as overlay, but here as base for simplicity if possible, 
+        # or we use a dark theme for maritime/aero)
+        maritime_url = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"
+        # Aerospace: We'll use a high-contrast dark theme if specialized servers are restricted
+        aero_url = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+        
+        try:
+            if self.env_mode == "AIRWAY":
+                self.map_widget.set_tile_server(aero_url)
+            elif self.env_mode == "WATERWAY":
+                # OpenSeaMap marks only, might need a base. Using a blue-ish base for now.
+                self.map_widget.set_tile_server("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png")
+            else:
+                self.map_widget.set_tile_server(osm_url)
+        except Exception: pass
+
     def animate(self) -> None:
         self.update_data()
+        self.detect_environment()
         self.pitch += (self.targets['pitch'] - self.pitch) * self.lerp_factor
         self.roll += (self.targets['roll'] - self.roll) * self.lerp_factor
         self.alt += (self.targets['alt'] - self.alt) * self.lerp_factor
