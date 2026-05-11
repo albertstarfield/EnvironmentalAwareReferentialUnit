@@ -5,6 +5,8 @@ import venv
 import json
 import math
 import time
+import urllib.request
+import urllib.parse
 import tkinter as tk
 from collections import deque
 import datetime
@@ -271,15 +273,32 @@ class PrimaryFlightDisplay:
         if not addr: return
         
         try:
-            # tkintermapview has a built-in address search
-            self.map_widget.set_address(addr, marker=True)
-            # Find the marker that was just created to set it as destination
-            for marker in self.map_widget.canvas_marker_list:
-                if marker.text == addr:
-                    self.set_destination(marker.position[0], marker.position[1])
-                    break
+            # Manual search with User-Agent to avoid Nominatim 403 Forbidden error
+            # as required by OSM usage policy.
+            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=1"
+            req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0 (contact: albertstarfield)'})
+            
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+                if data:
+                    lat = float(data[0]['lat'])
+                    lon = float(data[0]['lon'])
+                    if self.map_widget:
+                        self.map_widget.set_position(lat, lon)
+                        self.set_destination(lat, lon)
+                else:
+                    print(f"No results for: {addr}")
+                    
         except Exception as e:
-            print(f"Search failed: {e}")
+            # Fallback to internal if manual fails (might still 403)
+            try:
+                self.map_widget.set_address(addr, marker=True)
+                for marker in self.map_widget.canvas_marker_list:
+                    if marker.text == addr:
+                        self.set_destination(marker.position[0], marker.position[1])
+                        break
+            except Exception:
+                print(f"Search failed: {e}")
 
     def set_destination(self, lat: float, lon: float) -> None:
         self.dest_lat, self.dest_lon = lat, lon
