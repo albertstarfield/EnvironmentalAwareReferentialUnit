@@ -2634,11 +2634,11 @@ class LocationTracker:
             # Features: [smc_p, rpm1, rpm2, temp, cpu, lid, charging]
             features = [
                 self.smc_pressure_hpa if self.smc_pressure_hpa is not None else self.pressure_hpa,
-                float(self.fan_rpms[0]),
-                float(self.fan_rpms[1]),
+                self.fan_rpms[0],
+                self.fan_rpms[1],
                 float(self.smc_temps.get("TCMz", 50.0)),
-                float(self.cpu_usage),
-                float(self.lid_angle),
+                self.cpu_usage,
+                self.lid_angle,
                 1.0 if self.battery_charging else 0.0
             ]
             # Use API pressure as target for training when available
