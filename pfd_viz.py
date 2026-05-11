@@ -289,9 +289,12 @@ class PrimaryFlightDisplay:
         self.search_status = "SEARCHING..."
         self.search_results = []
         try:
-            # Manual search with User-Agent to avoid Nominatim 403 Forbidden error
-            # as required by OSM usage policy.
-            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=10"
+            # 100NM radius search limit (approx 1.66 degrees lat/lon)
+            # Viewbox: [left, top, right, bottom]
+            d = 1.666
+            viewbox = f"{self.lon-d:.4f},{self.lat+d:.4f},{self.lon+d:.4f},{self.lat-d:.4f}"
+            
+            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=10&viewbox={viewbox}&bounded=1"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0 (contact: albertstarfield)'})
             
             with urllib.request.urlopen(req) as response:
@@ -303,9 +306,9 @@ class PrimaryFlightDisplay:
                             'lon': float(item['lon']),
                             'display_name': item.get('display_name', 'Unknown')
                         })
-                    self.search_status = f"FOUND {len(self.search_results)} RESULTS. CLICK TO SELECT."
+                    self.search_status = f"FOUND {len(self.search_results)} RESULTS (100NM RANGE)."
                 else:
-                    self.search_status = "NO RESULTS FOUND."
+                    self.search_status = "NO RESULTS FOUND IN 100NM RANGE."
                     
         except Exception as e:
             self.search_status = f"SEARCH ERROR: {e}"
@@ -385,13 +388,15 @@ class PrimaryFlightDisplay:
         if self.dest_lat is None or self.dest_lon is None: return
         self.is_fetching_road = True
         try:
-            # Build OSRM URL: lon,lat;lon,lat;...
-            coords = [f"{self.lon},{self.lat}"]
+            # Build OSRM URL with precise coordinate formatting
+            # OSRM expects {longitude},{latitude}
+            coords_list = [f"{self.lon:.6f},{self.lat:.6f}"]
             for wp in self.waypoints:
-                coords.append(f"{wp['lon']},{wp['lat']}")
-            coords.append(f"{self.dest_lon},{self.dest_lat}")
+                coords_list.append(f"{wp['lon']:.6f},{wp['lat']:.6f}")
+            coords_list.append(f"{self.dest_lon:.6f},{self.dest_lat:.6f}")
             
-            url = f"http://router.project-osrm.org/route/v1/driving/{';'.join(coords)}?overview=full&geometries=geojson"
+            coords_str = ";".join(coords_list)
+            url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0'})
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode())
