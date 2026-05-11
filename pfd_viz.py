@@ -132,6 +132,20 @@ class PrimaryFlightDisplay:
         self.clim_subpage: int = 0
         self.clim_zoom: int = 0 # 0: Full, 1: 30d, 2: 7d, 3: 24h, 4: Forecast
 
+        # Navigation Search & Destination State
+        self.dest_marker: Any = None
+        self.dest_path: Any = None
+        self.dest_lat: Optional[float] = None
+        self.dest_lon: Optional[float] = None
+        
+        # Search UI (hidden by default)
+        self.search_frame = tk.Frame(self.content_frame, bg='#111')
+        self.search_entry = tk.Entry(self.search_frame, bg='black', fg='white', insertbackground='white', font=("Monaco", 12))
+        self.search_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
+        self.search_entry.bind("<Return>", lambda e: self.perform_search())
+        search_btn = tk.Button(self.search_frame, text="SEARCH", command=self.perform_search, bg='#0077be', fg='white', font=("Monaco", 10, "bold"))
+        search_btn.pack(side=tk.RIGHT, padx=5, pady=5)
+
         # Correction Factors (Semantically enriched)
         self.cf_velocity: float = 1.0
         self.cf_heading: float = 0.0
@@ -246,13 +260,44 @@ class PrimaryFlightDisplay:
         if self.page == 7 and event.y > 150:
             self.clim_zoom = (self.clim_zoom + 1) % 5
 
+    def perform_search(self) -> None:
+        if not self.map_widget: return
+        addr = self.search_entry.get()
+        if not addr: return
+        
+        try:
+            # tkintermapview has a built-in address search
+            self.map_widget.set_address(addr, marker=True)
+            # Find the marker that was just created to set it as destination
+            for marker in self.map_widget.canvas_marker_list:
+                if marker.text == addr:
+                    self.set_destination(marker.position[0], marker.position[1])
+                    break
+        except Exception as e:
+            print(f"Search failed: {e}")
+
+    def set_destination(self, lat: float, lon: float) -> None:
+        self.dest_lat, self.dest_lon = lat, lon
+        if self.dest_marker: self.dest_marker.delete()
+        if self.map_widget:
+            self.dest_marker = self.map_widget.set_marker(lat, lon, text="DESTINATION")
+            self.update_navigation_path()
+
+    def update_navigation_path(self) -> None:
+        if not self.map_widget or self.dest_lat is None: return
+        if self.dest_path: self.dest_path.delete()
+        # Draw a direct path line from current position to destination
+        self.dest_path = self.map_widget.set_path([(self.lat, self.lon), (self.dest_lat, self.dest_lon)], color="magenta", width=3)
+
     def switch_page_view(self) -> None:
         if self.page == 4 and self.map_widget:
             self.canvas.pack_forget()
             self.map_widget.pack(fill=tk.BOTH, expand=True)
+            self.search_frame.pack(side=tk.TOP, fill=tk.X)
             if self.auto_center:
                 self.map_widget.set_position(self.lat, self.lon)
         else:
+            self.search_frame.pack_forget()
             if self.map_widget: self.map_widget.pack_forget()
             self.canvas.pack(fill=tk.BOTH, expand=True)
 
@@ -504,6 +549,16 @@ class PrimaryFlightDisplay:
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 105, f"TRIANG_SPD_GAIN: {self.cf_velocity:.2f}x", "#00ccff", ("Monaco", 9), "se", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 120, f"TRIANG_HDG_OFF:  {self.cf_heading:+.1f}\u00b0", "#00ccff", ("Monaco", 9), "se", "overlay_info")
             
+            # Destination Info
+            if self.dest_lat is not None:
+                d_lat = self.dest_lat - self.lat
+                d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
+                dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+                dist_lbl = f"{dist_m:.0f}m" if dist_m < 1000 else f"{dist_m/1000:.2f}km"
+                brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
+                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0"
+                self.draw_text_with_halo(self.map_widget.canvas, w/2, 60, dest_info, "magenta", ("Monaco", 14, "bold"), "center", "overlay_info")
+
             # Status and Controls
             status_col = "yellow" if self.auto_center else "#ff6600"
             orient_text = "HEAD-UP" if self.map_heading_up else "NORTH-UP"
@@ -862,6 +917,7 @@ class PrimaryFlightDisplay:
         # Continuous Map Interaction
         if self.page == 4:
             self.update_panning()
+            self.update_navigation_path()
 
         self.draw_glass_cockpit()
         # Limit display update to 15Hz (1000ms / 15 approx 67ms)
