@@ -2343,7 +2343,7 @@ class LocationTracker:
         self.last_external_meteo_fetch = 0.0
 
         # CoreLocation Anchor & PID-like Adjustment
-        self.cl_history = deque(maxlen=2)  # Store (time, lat, lon, alt)
+        self.cl_history = deque(maxlen=3)  # Store (time, lat, lon, alt)
         self.CorrectionFactor_Reckoning_Velocity = 1.0  # Multiplier for Dead Reckoning velocity to match CL anchor
         self.CorrectionFactor_Reckoning_VerticalRate = 1.0 # Multiplier for Vertical Rate integration
         self.CorrectionFactor_Reckoning_Altitude = 0.0     # Additive offset for altitude reckoning
@@ -3725,11 +3725,19 @@ class LocationTracker:
                                             f.write(f"Cold Start / Hibernation Recovery: Allowing jump to ({new_lat}, {new_lon})\n")
 
                                     # 2. Update CL history and calculate anchor velocity/heading
+                                    # Discard history older than 90s to ensure gradient is fresh and relevant
+                                    while self.cl_history and (now_cl - self.cl_history[0][0]) > 90.0:
+                                        self.cl_history.popleft()
+
                                     self.cl_history.append((now_cl, new_lat, new_lon, float(new_alt)))
                                     
-                                    if len(self.cl_history) == 2:
-                                        t1, lat1, lon1, alt1 = self.cl_history[0]
-                                        t2, lat2, lon2, alt2 = self.cl_history[1]
+                                    # Use the longest available history span (2 or 3 points) for calibrations
+                                    if len(self.cl_history) >= 2:
+                                        h_start = self.cl_history[0]
+                                        h_end = self.cl_history[-1]
+                                        
+                                        t1, lat1, lon1, alt1 = h_start
+                                        t2, lat2, lon2, alt2 = h_end
                                         dt_cl = t2 - t1
                                         
                                         if dt_cl > 0:
@@ -3740,12 +3748,20 @@ class LocationTracker:
                                             # Vertical distance from CL
                                             cl_v_vert = (alt2 - alt1) / dt_cl
                                             cl_v_mag = math.sqrt(cl_v_ground**2 + cl_v_vert**2)
+
+                                            # Distance-based weighting: we trust the CL anchors more if we've 
+                                            # moved a significant distance (clearer gradient).
+                                            # Scale from 0.0 at 2m to 1.0 at 20m
+                                            dist_confidence = min(1.0, max(0.0, (cl_dist - 2.0) / 18.0))
+                                            
+                                            # Base nudge alpha scales with confidence and point count
+                                            # (3 points = 0.3 max, 2 points = 0.15 max for velocity/vertical)
+                                            max_alpha = 0.3 if len(self.cl_history) == 3 else 0.15
+                                            adj_alpha = max_alpha * dist_confidence
                                             
                                             # Dead Reckoning average v_mag over this window is roughly self.v_mag
                                             # but since CL updates are slow (30s+), we use it as a gain anchor.
-                                            # If CL says we moved 100m and DR says 80m, CorrectionFactor_Reckoning_Velocity should increase.
-                                            if self.v_mag > 0.1 and cl_v_mag > 0.1:
-                                                # Proportional-only "gain" adjustment (PID-like anchor)
+                                            if self.v_mag > 0.1 and cl_v_mag > 0.1 and adj_alpha > 0:
                                                 error_ratio = cl_v_mag / self.v_mag
                                                 
                                                 # If discrepancy is huge (> 50% error), nudge velocity vector
@@ -3754,20 +3770,20 @@ class LocationTracker:
                                                     self.vel *= error_ratio
                                                     self.v_mag = cl_v_mag
 
-                                                # Dampen the gain change to avoid oscillations (alpha=0.2)
-                                                self.CorrectionFactor_Reckoning_Velocity = self.CorrectionFactor_Reckoning_Velocity * 0.8 + (self.CorrectionFactor_Reckoning_Velocity * error_ratio) * 0.2
+                                                # Dampen the gain change based on distance confidence
+                                                self.CorrectionFactor_Reckoning_Velocity = self.CorrectionFactor_Reckoning_Velocity * (1.0 - adj_alpha) + (self.CorrectionFactor_Reckoning_Velocity * error_ratio) * adj_alpha
                                                 # Clamp gain to sane limits
                                                 self.CorrectionFactor_Reckoning_Velocity = max(0.5, min(2.0, self.CorrectionFactor_Reckoning_Velocity))
 
                                             # Vertical Rate Gain Anchor
-                                            if abs(self.altitude_rate_per_second) > 0.05 and abs(cl_v_vert) > 0.05:
+                                            if abs(self.altitude_rate_per_second) > 0.05 and abs(cl_v_vert) > 0.05 and adj_alpha > 0:
                                                 error_ratio_v = cl_v_vert / self.altitude_rate_per_second
-                                                self.CorrectionFactor_Reckoning_VerticalRate = self.CorrectionFactor_Reckoning_VerticalRate * 0.8 + (self.CorrectionFactor_Reckoning_VerticalRate * error_ratio_v) * 0.2
+                                                self.CorrectionFactor_Reckoning_VerticalRate = self.CorrectionFactor_Reckoning_VerticalRate * (1.0 - adj_alpha) + (self.CorrectionFactor_Reckoning_VerticalRate * error_ratio_v) * adj_alpha
                                                 self.CorrectionFactor_Reckoning_VerticalRate = max(0.5, min(2.0, self.CorrectionFactor_Reckoning_VerticalRate))
 
-                                            # Altitude Offset Anchor (PID-like nudge, alpha=0.05 for offsets)
+                                            # Altitude Offset Anchor (PID-like nudge, alpha scales with confidence)
                                             alt_error = float(new_alt) - self.alt
-                                            self.CorrectionFactor_Reckoning_Altitude += alt_error * 0.05
+                                            self.CorrectionFactor_Reckoning_Altitude += alt_error * (adj_alpha * 0.5) # Dampened offset
                                             
                                             # 3. Heading fix from CL gradient
                                             if cl_dist > 2.0: # Only if moved enough to have a reliable bearing
@@ -3780,8 +3796,14 @@ class LocationTracker:
                                                 # Compare current heading vs CL ground track bearing
                                                 # and calculate a correction offset
                                                 bearing_diff = (cl_bearing - self.heading + 180) % 360 - 180
+                                                
+                                                # Heading nudge (3 points = 0.2 max, 2 points = 0.1 max)
+                                                max_nudge = 0.2 if len(self.cl_history) == 3 else 0.1
+                                                nudge_alpha = max_nudge * dist_confidence
+                                                
                                                 # Slowly nudge CorrectionFactor_Reckoning_Heading to align with CL ground track
-                                                self.CorrectionFactor_Reckoning_Heading = (self.CorrectionFactor_Reckoning_Heading + bearing_diff * 0.1) % 360
+                                                if nudge_alpha > 0:
+                                                    self.CorrectionFactor_Reckoning_Heading = (self.CorrectionFactor_Reckoning_Heading + bearing_diff * nudge_alpha) % 360
 
                                     dist = haversine(
                                         self.last_odometer_lat,
