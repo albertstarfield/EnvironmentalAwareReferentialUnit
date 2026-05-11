@@ -7,6 +7,7 @@ import math
 import time
 import urllib.request
 import urllib.parse
+import threading
 import tkinter as tk
 from collections import deque
 import datetime
@@ -144,6 +145,9 @@ class PrimaryFlightDisplay:
         self.waypoint_markers: list[Any] = []
         self.search_results: list[dict[str, Any]] = []
         self.search_status: str = "READY"
+        self.road_path_coords: list[tuple[float, float]] = []
+        self.is_fetching_road: bool = False
+        self.last_road_update: float = 0.0
         
         # Search UI
         self.search_frame = tk.Frame(self.content_frame, bg='#111')
@@ -333,34 +337,83 @@ class PrimaryFlightDisplay:
 
     def update_navigation_path(self) -> None:
         if not self.map_widget: return
-        if self.dest_path: self.dest_path.delete(); self.dest_path = None
         
-        # Build path: Current -> WP1 -> WP2 ... -> Destination
+        # If in AIRWAY mode, just draw straight lines between waypoints
+        if self.env_mode == "AIRWAY":
+            self.draw_straight_path()
+        else:
+            # For ROAD/HIGHWAY, try to use road-adhered coordinates
+            # Throttled update (every 5 seconds) or if path is missing
+            now = time.time()
+            if not self.is_fetching_road and (now - self.last_road_update > 5.0 or not self.road_path_coords):
+                threading.Thread(target=self.fetch_road_routing, daemon=True).start()
+            
+            if self.road_path_coords:
+                if self.dest_path: self.dest_path.delete(); self.dest_path = None
+                path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
+                self.dest_path = self.map_widget.set_path(self.road_path_coords, color=path_color, width=3)
+            else:
+                self.draw_straight_path()
+
+        self.update_path_arrow()
+
+    def draw_straight_path(self) -> None:
+        if self.dest_path: self.dest_path.delete(); self.dest_path = None
         pts = [(self.lat, self.lon)]
         for wp in self.waypoints:
             pts.append((wp["lat"], wp["lon"]))
-        
         if self.dest_lat is not None and self.dest_lon is not None:
             pts.append((self.dest_lat, self.dest_lon))
+        
+        if len(pts) >= 2:
+            path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
+            self.dest_path = self.map_widget.set_path(pts, color=path_color, width=3)
+
+    def fetch_road_routing(self) -> None:
+        if self.dest_lat is None or self.dest_lon is None: return
+        self.is_fetching_road = True
+        try:
+            # Build OSRM URL: lon,lat;lon,lat;...
+            coords = [f"{self.lon},{self.lat}"]
+            for wp in self.waypoints:
+                coords.append(f"{wp['lon']},{wp['lat']}")
+            coords.append(f"{self.dest_lon},{self.dest_lat}")
             
-        if len(pts) < 2: 
-            self.map_widget.canvas.delete("path_dir")
-            return
-        
-        path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
-        self.dest_path = self.map_widget.set_path(pts, color=path_color, width=3)
-        
-        # Draw directional arrow towards NEXT point
+            url = f"http://router.project-osrm.org/route/v1/driving/{';'.join(coords)}?overview=full&geometries=geojson"
+            req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0'})
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+                if data and 'routes' in data and data['routes']:
+                    geom = data['routes'][0]['geometry']['coordinates']
+                    self.road_path_coords = [(float(c[1]), float(c[0])) for c in geom]
+                    self.last_road_update = time.time()
+        except Exception as e:
+            print(f"Road routing failed: {e}")
+        finally:
+            self.is_fetching_road = False
+
+    def update_path_arrow(self) -> None:
+        if not self.map_widget: return
         self.map_widget.canvas.delete("path_dir")
+        
+        # Determine target point for the arrow (first waypoint or destination)
+        target_pt = None
+        if self.waypoints:
+            target_pt = (self.waypoints[0]["lat"], self.waypoints[0]["lon"])
+        elif self.dest_lat is not None and self.dest_lon is not None:
+            target_pt = (self.dest_lat, self.dest_lon)
+
+        if not target_pt: return
+        
         pos_x, pos_y = self.get_canvas_pos(self.lat, self.lon)
         if pos_x > -50 and pos_y > -50:
-            next_pt = pts[1]
-            d_lat = next_pt[0] - self.lat
-            d_lon = (next_pt[1] - self.lon) * math.cos(math.radians(self.lat))
+            d_lat = target_pt[0] - self.lat
+            d_lon = (target_pt[1] - self.lon) * math.cos(math.radians(self.lat))
             path_brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
             rad = math.radians(path_brg)
             off = 40
             ax, ay = pos_x + math.sin(rad)*off, pos_y - math.cos(rad)*off
+            path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
             self.draw_path_arrow(self.map_widget.canvas, ax, ay, path_brg, color=path_color, tags="path_dir")
 
     def draw_path_arrow(self, canvas: tk.Canvas, x: float, y: float, hdg: float, color: str, tags: str) -> None:
