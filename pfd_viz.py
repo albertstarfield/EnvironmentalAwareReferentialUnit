@@ -289,10 +289,14 @@ class PrimaryFlightDisplay:
         self.search_status = "SEARCHING..."
         self.search_results = []
         try:
-            # 100NM radius search limit (approx 1.66 degrees lat/lon)
-            # Viewbox: [left, top, right, bottom]
-            d = 1.666
-            viewbox = f"{self.lon-d:.4f},{self.lat+d:.4f},{self.lon+d:.4f},{self.lat-d:.4f}"
+            # 100NM radius search limit
+            # 1 degree latitude = 60NM
+            d_lat = 100.0 / 60.0 # 1.666... degrees
+            # Longitude adjustment based on latitude
+            d_lon = d_lat / math.cos(math.radians(self.lat))
+            
+            # Viewbox: [left, top, right, bottom] -> [lon1, lat1, lon2, lat2]
+            viewbox = f"{self.lon-d_lon:.4f},{self.lat+d_lat:.4f},{self.lon+d_lon:.4f},{self.lat-d_lat:.4f}"
             
             url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=10&viewbox={viewbox}&bounded=1"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0 (contact: albertstarfield)'})
