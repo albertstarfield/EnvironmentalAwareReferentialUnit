@@ -50,7 +50,7 @@ def bootstrap():
 
     print(f"\033[36m[*] Synchronizing EARU dependencies in venv...\033[0m")
     try:
-        reqs = ["numpy", "psutil", "requests", "openmeteo-requests", "pandas", "requests-cache", "retry-requests", "quart", "hypercorn", "numba"]
+        reqs = ["numpy", "psutil", "requests", "openmeteo-requests", "pandas", "requests-cache", "retry-requests", "quart", "hypercorn", "numba", "torch"]
         subprocess.check_call([pip_exe, "install"] + reqs)
     except Exception as e:
         print(f"\033[31m[!] Bootstrap failed: {e}\033[0m")
@@ -78,6 +78,13 @@ try:
     HAS_QUART = True
 except ImportError:
     HAS_QUART = False
+
+try:
+    import torch # pyrefly: ignore
+    import torch.nn as nn # pyrefly: ignore
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 from numba import njit  # pyrefly: ignore
 
@@ -2056,6 +2063,125 @@ class LoopConsistencyTracker:
         return pct_90, low_1, low_01, avg, self.stutter_count, list(self.hz_history)
 
 
+if HAS_TORCH:
+    class PressureLSTM(nn.Module):
+        def __init__(self, input_size=7, hidden_size=32, num_layers=2):
+            super(PressureLSTM, self).__init__()
+            self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+            self.fc = nn.Sequential(
+                nn.Linear(hidden_size, 16),
+                nn.ReLU(),
+                nn.Linear(16, 1)
+            )
+
+        def forward(self, x):
+            out, _ = self.lstm(x)
+            out = self.fc(out[:, -1, :])
+            return out
+
+    class PressureLSTMManager:
+        """
+        Manages LSTM-based pressure calibration using SMC data, RPMs, and API anchors.
+        """
+        def __init__(self, model_path=None):
+            if model_path is None:
+                model_path = os.path.join(curr_dir, "save_state", "pressure_lstm.pth")
+            self.model_path = model_path
+            self.input_size = 7
+            self.seq_len = 10
+            self.device = torch.device("cpu")
+            self.model = PressureLSTM(input_size=self.input_size).to(self.device)
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
+            self.criterion = nn.MSELoss()
+            self.history = deque(maxlen=2000) # (features_seq, target)
+            self.input_history = deque(maxlen=self.seq_len)
+            self.is_trained = False
+            self._training_in_progress = False
+            self._load_model()
+
+        def _load_model(self):
+            if os.path.exists(self.model_path):
+                try:
+                    self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
+                    self.model.eval()
+                    self.is_trained = True
+                except Exception: pass
+
+        def save_model(self):
+            try:
+                os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+                torch.save(self.model.state_dict(), self.model_path)
+            except Exception: pass
+
+        def add_sample(self, features, target=None):
+            """
+            features: [smc_p, rpm1, rpm2, temp, cpu, lid, charging]
+            target: api_p (optional, used for training)
+            """
+            self.input_history.append(features)
+            if target is not None and len(self.input_history) == self.seq_len:
+                self.history.append((list(self.input_history), target))
+
+        def predict(self):
+            if not self.is_trained or len(self.input_history) < self.seq_len:
+                return None
+            
+            try:
+                self.model.eval()
+                with torch.no_grad():
+                    seq = np.array(list(self.input_history), dtype=np.float32)
+                    seq[:, 0] /= 1000.0
+                    seq[:, 1:3] /= 6000.0
+                    seq[:, 3] /= 100.0
+                    seq[:, 4] /= 100.0
+                    seq[:, 5] /= 90.0
+                    
+                    x = torch.tensor([seq], dtype=torch.float32).to(self.device)
+                    pred = self.model(x)
+                    return float(pred.item() * 1000.0)
+            except Exception:
+                return None
+
+        def train_async(self):
+            if self._training_in_progress or len(self.history) < 200:
+                return
+            self._training_in_progress = True
+            threading.Thread(target=self._train_bg, daemon=True).start()
+
+        def _train_bg(self):
+            try:
+                self.model.train()
+                batch_x = []
+                batch_y = []
+                for x_seq, y in self.history:
+                    xn = np.array(x_seq, dtype=np.float32)
+                    xn[:, 0] /= 1000.0
+                    xn[:, 1:3] /= 6000.0
+                    xn[:, 3] /= 100.0
+                    xn[:, 4] /= 100.0
+                    xn[:, 5] /= 90.0
+                    batch_x.append(xn)
+                    batch_y.append([y / 1000.0])
+                
+                tx = torch.tensor(np.array(batch_x), dtype=torch.float32).to(self.device)
+                ty = torch.tensor(np.array(batch_y), dtype=torch.float32).to(self.device)
+                
+                for _ in range(20):
+                    self.optimizer.zero_grad()
+                    pred = self.model(tx)
+                    loss = self.criterion(pred, ty)
+                    loss.backward()
+                    self.optimizer.step()
+                
+                self.is_trained = True
+                self.save_model()
+            except Exception:
+                pass
+            finally:
+                self._training_in_progress = False
+                self.model.eval()
+
+
 class LocationTracker:
     """
     Handles Dead Reckoning, CoreLocation integration, and Ecosystem Environment physics.
@@ -2229,6 +2355,11 @@ class LocationTracker:
         self.last_weather_history_write = 0.0
         self._meteo_running = False
         self._load_meteo_cache()
+
+        # LSTM Pressure Calibration
+        self.lstm_manager = PressureLSTMManager() if HAS_TORCH else None
+        self.lstm_pressure_hpa = None
+        self.lid_angle = 0.0
 
         # Pre-calculated damping factors for performance (adjusted for vehicle speeds)
         self._damping_stationary = math.pow(0.5, 1.0 / fs) # 50% loss per second when stationary
@@ -2497,6 +2628,26 @@ class LocationTracker:
             self.humidity_pct = (0.8 * self.api_humidity_pct) + (0.2 * calibrated_local_hum)
             # Clamp to physical limits
             self.humidity_pct = max(0.0, min(100.0, self.humidity_pct))
+
+        # LSTM Pressure Calibration Update
+        if self.lstm_manager:
+            # Features: [smc_p, rpm1, rpm2, temp, cpu, lid, charging]
+            features = [
+                self.smc_pressure_hpa if self.smc_pressure_hpa is not None else self.pressure_hpa,
+                float(self.fan_rpms[0]),
+                float(self.fan_rpms[1]),
+                float(self.smc_temps.get("TCMz", 50.0)),
+                float(self.cpu_usage),
+                float(self.lid_angle),
+                1.0 if self.battery_charging else 0.0
+            ]
+            # Use API pressure as target for training when available
+            self.lstm_manager.add_sample(features, target=self.api_pressure_hpa)
+            self.lstm_pressure_hpa = self.lstm_manager.predict()
+            
+            # Periodically trigger async training if we have enough new data
+            if len(self.lstm_manager.history) > 0 and len(self.lstm_manager.history) % 100 == 0:
+                self.lstm_manager.train_async()
 
         # 1b. Dew Point Calculation (Magnus-Tetens)
         # T in Celsius
@@ -3253,167 +3404,178 @@ class LocationTracker:
 
     def update_imu(self, ax, ay, az, t_now, q, raw_accel=None, gyro_mag=0.0, motion_type="Stationary"):
         """Update position using dead reckoning from IMU acceleration."""
-        if self.last_t is None:
+        with self.lock:
+            if self.last_t is None:
+                self.last_t = t_now
+                return
+            dt = t_now - self.last_t
             self.last_t = t_now
-            return
-        dt = t_now - self.last_t
-        self.last_t = t_now
 
-        qw, qx, qy, qz = q
+            qw, qx, qy, qz = q
 
-        # Gravity subtraction and World Frame transformation
-        if raw_accel is not None:
-            wx, wy, wz = njit_imu_rotate_and_subtract_gravity(
-                tuple(q), raw_accel, self.calibrated_g
-            )
-        else:
-            # Fallback to high-pass if raw_accel is missing (less accurate)
-            r11 = 1 - 2 * qy * qy - 2 * qz * qz
-            r12 = 2 * qx * qy - 2 * qz * qw
-            r13 = 2 * qx * qz + 2 * qy * qw
-            r21 = 2 * qx * qy + 2 * qz * qw
-            r22 = 1 - 2 * qx * qx - 2 * qz * qz
-            r23 = 2 * qy * qz - 2 * qx * qw
-            r31 = 2 * qx * qz - 2 * qy * qw
-            r32 = 2 * qy * qz + 2 * qx * qw
-            r33 = 1 - 2 * qx * qx - 2 * qy * qy
-            wx = r11 * ax + r12 * ay + r13 * az
-            wy = r21 * ax + r22 * ay + r23 * az
-            wz = r31 * ax + r32 * ay + r33 * az
-
-        # Convert g to m/s^2 (Standard Gravity)
-        G = 9.80665
-        wx *= G
-        wy *= G
-        wz *= G
-
-        a_dyn_mag = math.sqrt(wx**2 + wy**2 + wz**2)
-
-        # 2. High-Frequency Jitter Filter (Shaking Detection)
-        # If gyro_mag is high but v_mag is low, or if we detect "shaking" 
-        # via high kurtosis/crest factor, we heavily dampen the acceleration input.
-        is_shaking = gyro_mag > 15.0 or a_dyn_mag > 5.0
-        if is_shaking:
-            # Attenuate the input by 90% during violent jitter
-            wx *= 0.1
-            wy *= 0.1
-            wz *= 0.1
-
-        # Integrate velocity
-        self.vel[0] += wx * dt
-        self.vel[1] += wy * dt
-        self.vel[2] += wz * dt * self.CorrectionFactor_Reckoning_VerticalRate
-
-        # 3. Dynamic Velocity Damping (Advanced ZUPT)
-        # We now incorporate the VibrationDetector's motion_type for smarter damping
-        is_moving_type = motion_type not in ["Stationary", "Stowed / Passive Motion"]
-        
-        if gyro_mag < 0.8:
-            rax, ray, raz = raw_accel if raw_accel is not None else (ax, ay, az)
-            raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
-            
-            # Condition for ZUPT (Zero Velocity Update)
-            # Must have no rotation AND no net acceleration AND vibration detector says stationary
-            if abs(raw_mag - self.calibrated_g) < 0.05 and not is_moving_type:
-                # Truly Stationary: Aggressive damping to kill drift
-                for i in range(3):
-                    self.vel[i] *= self._damping_stationary
+            # Gravity subtraction and World Frame transformation
+            if raw_accel is not None:
+                wx, wy, wz = njit_imu_rotate_and_subtract_gravity(
+                    tuple(q), raw_accel, self.calibrated_g
+                )
             else:
-                # Uniform motion: Very slight damping to allow constant velocity to persist
+                # Fallback to high-pass if raw_accel is missing (less accurate)
+                r11 = 1 - 2 * qy * qy - 2 * qz * qz
+                r12 = 2 * qx * qy - 2 * qz * qw
+                r13 = 2 * qx * qz + 2 * qy * qw
+                r21 = 2 * qx * qy + 2 * qz * qw
+                r22 = 1 - 2 * qx * qx - 2 * qz * qz
+                r23 = 2 * qy * qz - 2 * qx * qw
+                r31 = 2 * qx * qz - 2 * qy * qw
+                r32 = 2 * qy * qz + 2 * qx * qw
+                r33 = 1 - 2 * qx * qx - 2 * qy * qy
+                wx = r11 * ax + r12 * ay + r13 * az
+                wy = r21 * ax + r22 * ay + r23 * az
+                wz = r31 * ax + r32 * ay + r33 * az
+
+            # Convert g to m/s^2 (Standard Gravity)
+            G = 9.80665
+            wx *= G
+            wy *= G
+            wz *= G
+
+            a_dyn_mag = math.sqrt(wx**2 + wy**2 + wz**2)
+
+            # 2. High-Frequency Jitter Filter (Shaking Detection)
+            # If gyro_mag is high but v_mag is low, or if we detect "shaking" 
+            # via high kurtosis/crest factor, we heavily dampen the acceleration input.
+            is_shaking = gyro_mag > 15.0 or a_dyn_mag > 5.0
+            if is_shaking:
+                # Attenuate the input by 90% during violent jitter
+                wx *= 0.1
+                wy *= 0.1
+                wz *= 0.1
+
+            # Integrate velocity
+            self.vel[0] += wx * dt
+            self.vel[1] += wy * dt
+            self.vel[2] += wz * dt * self.CorrectionFactor_Reckoning_VerticalRate
+
+            # 3. Dynamic Velocity Damping (Advanced ZUPT)
+            # We now incorporate the VibrationDetector's motion_type for smarter damping
+            is_moving_type = motion_type not in ["Stationary", "Stowed / Passive Motion"]
+            
+            if gyro_mag < 0.8:
+                rax, ray, raz = raw_accel if raw_accel is not None else (ax, ay, az)
+                raw_mag = math.sqrt(rax**2 + ray**2 + raz**2)
+                
+                # Condition for ZUPT (Zero Velocity Update)
+                # Must have no rotation AND no net acceleration AND vibration detector says stationary
+                if abs(raw_mag - self.calibrated_g) < 0.05 and not is_moving_type:
+                    # Truly Stationary: Aggressive damping to kill drift
+                    for i in range(3):
+                        self.vel[i] *= self._damping_stationary
+                else:
+                    # Uniform motion: Very slight damping to allow constant velocity to persist
+                    for i in range(3):
+                        self.vel[i] *= self._damping_uniform
+            else:
+                # Rotating/Shaking: Apply jitter-aware damping
+                # This prevents "centrifugal drift" during shakes
                 for i in range(3):
-                    self.vel[i] *= self._damping_uniform
-        else:
-            # Rotating/Shaking: Apply jitter-aware damping
-            # This prevents "centrifugal drift" during shakes
-            for i in range(3):
-                self.vel[i] *= self._damping_jitter
+                    self.vel[i] *= self._damping_jitter
 
-        self.v_mag = math.sqrt(self.vel[0] ** 2 + self.vel[1] ** 2 + self.vel[2] ** 2)
+            self.v_mag = math.sqrt(self.vel[0] ** 2 + self.vel[1] ** 2 + self.vel[2] ** 2)
 
-        # Augmented Velocity logic
-        meas_p = (
-            self.smc_pressure_hpa
-            if self.smc_pressure_hpa is not None
-            else self.pressure_hpa
-        )
-        # Recalculate airspeed with latest density
-        corrected_delta = meas_p - (
-            self.pressure_hpa + self.wind_mapper.pressure_offset_hpa
-        )
-        q_dyn = max(0.0, corrected_delta) * 100.0
-        va_val = math.sqrt(2 * q_dyn / max(self.air_density, 0.1))
-
-        v_aug = self.wind_mapper.get_augmented_velocity(self.vel, va_val)
-
-        # Calculate Mach number using dynamic gamma, R, and ambient temperature
-        if self.ambient_temp_k > 0:
-            # a = sqrt(gamma * R * T)
-            speed_of_sound = math.sqrt(
-                self.gas_gamma * self.gas_R * self.ambient_temp_k
+            # Augmented Velocity logic
+            meas_p = (
+                self.smc_pressure_hpa
+                if self.smc_pressure_hpa is not None
+                else self.pressure_hpa
             )
-            self.mach = self.v_mag / speed_of_sound
-        else:
-            self.mach = 0.0
+            # Recalculate airspeed with latest density
+            corrected_delta = meas_p - (
+                self.pressure_hpa + self.wind_mapper.pressure_offset_hpa
+            )
+            q_dyn = max(0.0, corrected_delta) * 100.0
+            va_val = math.sqrt(2 * q_dyn / max(self.air_density, 0.1))
 
-        # Update inertial heading (yaw)
-        sin_y = 2.0 * (qw * qz + qx * qy)
-        cos_y = 1.0 - 2.0 * (qy * qy + qz * qz)
-        yaw_d = math.degrees(math.atan2(sin_y, cos_y))
-        self.heading = (yaw_d + self.CorrectionFactor_Reckoning_Heading) % 360.0
+            v_aug = self.wind_mapper.get_augmented_velocity(self.vel, va_val)
 
-        # Integrate position using augmented velocity
-        dx = v_aug[0] * dt
-        dy = v_aug[1] * dt
-        dz = v_aug[2] * dt
+            # Calculate Mach number using dynamic gamma, R, and ambient temperature
+            if self.ambient_temp_k > 0:
+                # a = sqrt(gamma * R * T)
+                speed_of_sound = math.sqrt(
+                    self.gas_gamma * self.gas_R * self.ambient_temp_k
+                )
+                self.mach = self.v_mag / speed_of_sound
+            else:
+                self.mach = 0.0
 
-        # Physical Movement Integration: Use a realistic physical knob (1.0)
-        # We apply CorrectionFactor_Reckoning_Velocity as a PID-like adjustment derived from CoreLocation anchor
-        dyn_accel_mag = math.sqrt(wx**2 + wy**2 + wz**2)
-        moving_g_normalized = dyn_accel_mag / 9.80665
-        
-        # Combined knob: physical responsiveness * CL-anchored gain
-        CorrectionFactor_Reckoning_Movement = self.CorrectionFactor_Reckoning_Velocity * (1.0 + min(0.1, moving_g_normalized))
-        
-        self.pos[0] += dx * CorrectionFactor_Reckoning_Movement
-        self.pos[1] += dy * CorrectionFactor_Reckoning_Movement
-        self.pos[2] += dz * CorrectionFactor_Reckoning_Movement
+            # Update inertial heading (yaw)
+            sin_y = 2.0 * (qw * qz + qx * qy)
+            cos_y = 1.0 - 2.0 * (qy * qy + qz * qz)
+            yaw_d = math.degrees(math.atan2(sin_y, cos_y))
+            self.heading = (yaw_d + self.CorrectionFactor_Reckoning_Heading) % 360.0
 
-        # Environmental Odometer also respects the physical scale
-        weighted_dx = dx * CorrectionFactor_Reckoning_Movement
-        weighted_dy = dy * CorrectionFactor_Reckoning_Movement
-        weighted_dz = dz * CorrectionFactor_Reckoning_Movement
-        dist_inc = math.sqrt(weighted_dx**2 + weighted_dy**2 + weighted_dz**2)
-        self.total_distance_m += dist_inc
-        self.odometer_30m_history.append(
-            (t_now, (self.pos[0], self.pos[1], self.pos[2]))
-        )
-        while (
-            self.odometer_30m_history
-            and self.odometer_30m_history[0][0] < t_now - 1800
-        ):
-            self.odometer_30m_history.popleft()
+            # Integrate position using augmented velocity
+            dx = v_aug[0] * dt
+            dy = v_aug[1] * dt
+            dz = v_aug[2] * dt
 
-        # Update lat/lon/alt
-        self.lat = np.float64(self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT))
-        m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
-        self.lon = np.float64(self.start_lon + (self.pos[0] / m_per_deg_lon))
-        self.alt = np.float64(self.start_alt + self.pos[2] + self.CorrectionFactor_Reckoning_Altitude)
-        self.altitude_rate_per_second = self.vel[2]
+            # Physical Movement Integration: Use a realistic physical knob (1.0)
+            # We apply CorrectionFactor_Reckoning_Velocity as a PID-like adjustment derived from CoreLocation anchor
+            dyn_accel_mag = math.sqrt(wx**2 + wy**2 + wz**2)
+            moving_g_normalized = dyn_accel_mag / 9.80665
+            
+            # Combined knob: physical responsiveness * CL-anchored gain
+            CorrectionFactor_Reckoning_Movement = self.CorrectionFactor_Reckoning_Velocity * (1.0 + min(0.1, moving_g_normalized))
+            
+            self.pos[0] += dx * CorrectionFactor_Reckoning_Movement
+            self.pos[1] += dy * CorrectionFactor_Reckoning_Movement
+            self.pos[2] += dz * CorrectionFactor_Reckoning_Movement
 
-        # Update Wind Map (100Hz)
-        # Use SMC measured pressure vs. altitude-derived static pressure for dynamic pressure (q)
-        meas_p = (
-            self.smc_pressure_hpa
-            if self.smc_pressure_hpa is not None
-            else self.pressure_hpa
-        )
-        self.wind_mapper.add_sample(
-            t_now, self.pos, self.vel, meas_p, self.pressure_hpa, self.air_density, self.ambient_temp_k
-        )
-        self.pressure_hpa = self._calculate_pressure(self.alt)
+            # Environmental Odometer also respects the physical scale
+            weighted_dx = dx * CorrectionFactor_Reckoning_Movement
+            weighted_dy = dy * CorrectionFactor_Reckoning_Movement
+            weighted_dz = dz * CorrectionFactor_Reckoning_Movement
+            dist_inc = math.sqrt(weighted_dx**2 + weighted_dy**2 + weighted_dz**2)
+            self.total_distance_m += dist_inc
+            self.odometer_30m_history.append(
+                (t_now, (self.pos[0], self.pos[1], self.pos[2]))
+            )
+            while (
+                self.odometer_30m_history
+                and self.odometer_30m_history[0][0] < t_now - 1800
+            ):
+                self.odometer_30m_history.popleft()
+
+            # Update lat/lon/alt
+            self.lat = np.float64(self.start_lat + (self.pos[1] / self.M_PER_DEG_LAT))
+            m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
+            self.lon = np.float64(self.start_lon + (self.pos[0] / m_per_deg_lon))
+            self.alt = np.float64(self.start_alt + self.pos[2] + self.CorrectionFactor_Reckoning_Altitude)
+            self.altitude_rate_per_second = self.vel[2]
+
+            # Update Wind Map (100Hz)
+            # Use SMC measured pressure vs. altitude-derived static pressure for dynamic pressure (q)
+            meas_p = (
+                self.smc_pressure_hpa
+                if self.smc_pressure_hpa is not None
+                else self.pressure_hpa
+            )
+            self.wind_mapper.add_sample(
+                t_now, self.pos, self.vel, meas_p, self.pressure_hpa, self.air_density, self.ambient_temp_k
+            )
+            self.pressure_hpa = self._calculate_pressure(self.alt)
+
 
     def check_core_location_async(self, now):
-        if not self.cl_available or now - self.last_cl_check < 30.0:
+        if not self.cl_available:
+            return
+            
+        # Dynamic refresh interval based on velocity with smooth interpolation
+        # 0.0 m/s -> 30.0s
+        # 1.0 m/s -> 15.0s
+        # 2.0 m/s -> 4.0s
+        interval = float(np.interp(self.v_mag, [0.0, 1.0, 2.0], [30.0, 15.0, 4.0]))
+
+        if now - self.last_cl_check < interval:
             return
         if self._cl_running:
             return
@@ -3487,6 +3649,13 @@ class LocationTracker:
                                 new_lat = np.float64(parts[0])
                                 new_lon = np.float64(parts[1])
                                 
+                                # Sanity check: prevent jump to (0,0) which is common on invalid CLI output
+                                if abs(new_lat) < 0.00001 and abs(new_lon) < 0.00001:
+                                    with open("CoreLocationCLI.log", "a") as f:
+                                        f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                                        f.write(f"Rejected (0,0) location update.\n")
+                                    break
+
                                 # Parse Accuracy (Meters; -1 means invalid)
                                 h_acc = float(parts[4])
                                 v_acc = float(parts[5])
@@ -3924,6 +4093,7 @@ def render(
                 location.pressure_hpa,
                 location.smc_pressure_hpa,
                 location.api_pressure_hpa,
+                location.lstm_pressure_hpa,
             ]
             if p is not None
         ]
@@ -3935,6 +4105,14 @@ def render(
                 f"{DIM}Local Pressure:{RST} {BCYN}{avg_pressure:>8.2f} hPa{RST}"
             )
         )
+
+        # LSTM display
+        lstm_p_val = (
+            f"{location.lstm_pressure_hpa:>8.2f} hPa"
+            if location.lstm_pressure_hpa is not None
+            else "Calibrating..." if location.lstm_manager and not location.lstm_manager.is_trained else "N/A"
+        )
+        a(_line(f" {DIM}LSTM Calibrated Pressure:{RST} {BGRN}{lstm_p_val}{RST}"))
 
         # Odometer display
         dist_km = location.total_distance_m / 1000.0
@@ -4928,8 +5106,11 @@ def main(stdscr=None):
                         break
                     last_kys_check = now
 
-                # 0b. Enforced Scanning (Every 15s if moving > 0.5m/s)
-                if now - last_enforced_scan >= 15.0:
+                # 0b. Enforced Scanning (Dynamic based on velocity with smooth interpolation)
+                # Matches CoreLocationCLI refresh curve: 30s @ 0m/s, 15s @ 1m/s, 4s @ 2m/s
+                scan_interval = float(np.interp(location.v_mag, [0.0, 1.0, 2.0], [30.0, 15.0, 4.0]))
+
+                if now - last_enforced_scan >= scan_interval:
                     if location.v_mag > 0.5 and not location._cl_running:
                         try:
                             # Force locationd to refresh its cache
@@ -4969,10 +5150,12 @@ def main(stdscr=None):
                     det.compute_dwt()
                     last_dwt = now
                 
+                # 1b. Frequent Location Check (Every 0.5s check for async triggers)
+                location.check_core_location(now)
+
                 # 2. Ecosystem Analysis (Every 5.0s)
                 if now - last_period >= 5.0:
                     det.detect_periodicity()
-                    location.check_core_location(now)
                     location.check_system_metrics()
                     location.check_smc_sensors()
                     location.check_smc_pressure()
@@ -4988,6 +5171,7 @@ def main(stdscr=None):
                     # Provide lid context if available
                     if 'lid_angle' in locals() or 'lid_angle' in globals():
                         det.current_lid_angle = float(lid_angle) if lid_angle is not None else 0.0
+                    location.lid_angle = det.current_lid_angle
                     det.classify_seismic(location)
                     det.last_seismic_update = now
 
@@ -5151,6 +5335,7 @@ def main(stdscr=None):
                 if is_impact:
                     # Emergency Classification to capture impact damage immediately
                     det.current_lid_angle = float(lid_angle) if lid_angle is not None else 0.0
+                    location.lid_angle = det.current_lid_angle
                     det.classify_seismic(location)
                     last_impact_save = now
                 last_draw = now
@@ -5177,6 +5362,7 @@ def main(stdscr=None):
                         location.pressure_hpa,
                         location.smc_pressure_hpa,
                         location.api_pressure_hpa,
+                        location.lstm_pressure_hpa,
                     ]
                     if p is not None
                 ]

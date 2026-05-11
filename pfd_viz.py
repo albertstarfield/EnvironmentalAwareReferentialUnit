@@ -60,9 +60,80 @@ try:
     from OpenGL.GL import *
     from OpenGL.GLU import *
     import pyopengltk # pyrefly: ignore
+    from PIL import Image # pyrefly: ignore
     HAS_OPENGL = True
 except ImportError:
     HAS_OPENGL = False
+
+class TileManager:
+    """Manages map tiles, downloads, and OpenGL texture creation."""
+    def __init__(self):
+        self.textures = {} # (z, x, y) -> texture_id
+        self.loading = set()
+        self.lock = threading.Lock()
+        self.cache_dir = os.path.join(os.path.dirname(__file__), "tile_cache")
+        if not os.path.exists(self.cache_dir): os.makedirs(self.cache_dir)
+
+    def get_tile_texture(self, z, x, y):
+        key = (z, x, y)
+        with self.lock:
+            if key in self.textures: return self.textures[key]
+            if key in self.loading: return None
+            self.loading.add(key)
+        
+        # Start async download/load
+        threading.Thread(target=self._load_tile, args=(z, x, y), daemon=True).start()
+        return None
+
+    def _load_tile(self, z, x, y):
+        tile_path = os.path.join(self.cache_dir, f"{z}_{x}_{y}.png")
+        if not os.path.exists(tile_path):
+            url = f"https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0'})
+                with urllib.request.urlopen(req) as resp:
+                    with open(tile_path, "wb") as f: f.write(resp.read())
+            except Exception:
+                with self.lock: self.loading.remove((z, x, y))
+                return
+
+        # Load into memory and schedule GL upload
+        try:
+            img = Image.open(tile_path).convert("RGBA")
+            img_data = np.array(img, np.uint8)
+            # We can't call GL from a background thread easily with pyopengltk
+            # So we store the raw data and flag for upload in the main thread
+            self._finalize_tile(z, x, y, img_data)
+        except Exception:
+            with self.lock: self.loading.remove((z, x, y))
+
+    def _finalize_tile(self, z, x, y, data):
+        # This is a bit of a hack for pyopengltk: 
+        # textures must be created in the rendering thread.
+        # We store the data and check for it in the redraw loop.
+        with self.lock:
+            if not hasattr(self, 'pending_uploads'): self.pending_uploads = []
+            self.pending_uploads.append(((z, x, y), data))
+
+    def upload_pending(self):
+        if not hasattr(self, 'pending_uploads'): return
+        with self.lock:
+            while self.pending_uploads:
+                key, data = self.pending_uploads.pop(0)
+                tid = glGenTextures(1)
+                glBindTexture(GL_TEXTURE_2D, tid)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
+                self.textures[key] = tid
+                if key in self.loading: self.loading.remove(key)
+
+def latlon_to_tile(lat, lon, zoom):
+    lat_rad = math.radians(lat)
+    n = 2.0 ** zoom
+    xtile = int((lon + 180.0) / 360.0 * n)
+    ytile = int((1.0 - math.log(math.tan(lat_rad) + (1 / math.cos(lat_rad))) / math.pi) / 2.0 * n)
+    return xtile, ytile
 
 class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly: ignore
     def __init__(self, *args, **kwargs):
@@ -71,37 +142,93 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
         self.pitch = 0.0
         self.roll = 0.0
         self.heading = 0.0
+        self.lat = 0.0
+        self.lon = 0.0
+        self.zoom = 15
         self.visible = False
+        self.mode = "HORIZON" # "HORIZON" or "MAP"
+        self.tile_manager = TileManager()
 
     def initgl(self):
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glEnable(GL_TEXTURE_2D)
 
     def redraw(self):
         if not self.visible: return
+        self.tile_manager.upload_pending()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) # pyrefly: ignore
         glLoadIdentity()
         
+        if self.mode == "HORIZON":
+            self.render_horizon()
+        else:
+            self.render_map()
+
+    def render_horizon(self):
         # Set up perspective
         w, h = self.winfo_width(), self.winfo_height()
         if h == 0: h = 1
         glViewport(0, 0, w, h)
         gluPerspective(45, (w / h), 0.1, 100.0)
-        
-        # Camera
         gluLookAt(0, 0, 2.5, 0, 0, 0, 0, 1, 0)
-        
-        # Apply Pitch and Roll
         glRotatef(self.roll, 0, 0, 1)
         glRotatef(self.pitch, 1, 0, 0)
-        
-        # Draw Sphere/Horizon
         self.draw_sphere(1.0, 32, 32)
-        
-        # Draw 0-degree line (Horizon)
         self.draw_horizon_line()
+
+    def render_map(self):
+        w, h = self.winfo_width(), self.winfo_height()
+        glViewport(0, 0, w, h)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(0, w, h, 0, -1, 1)
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+
+        # Simple 2D tile grid
+        cx, cy = w/2, h/2
+        tx, ty = latlon_to_tile(self.lat, self.lon, self.zoom)
+        
+        # Calculate pixel offset within central tile
+        n = 2.0 ** self.zoom
+        lon_deg_per_tile = 360.0 / n
+        lat_rad = math.radians(self.lat)
+        # Approximate pixel offset (not perfect Mercator but good for rendering center)
+        # Use fractional tile coordinates
+        xt = (self.lon + 180.0) / 360.0 * n
+        yt = (1.0 - math.log(math.tan(lat_rad) + (1 / math.cos(lat_rad))) / math.pi) / 2.0 * n
+        
+        off_x = (xt - tx) * 256
+        off_y = (yt - ty) * 256
+
+        # Draw 3x3 grid around center
+        for dx in range(-2, 3):
+            for dy in range(-2, 3):
+                tid = self.tile_manager.get_tile_texture(self.zoom, tx + dx, ty + dy)
+                if tid:
+                    glBindTexture(GL_TEXTURE_2D, tid)
+                    glColor4f(1, 1, 1, 1)
+                else:
+                    glBindTexture(GL_TEXTURE_2D, 0)
+                    glColor4f(0.1, 0.1, 0.1, 1)
+                
+                x1 = cx + (dx * 256) - off_x
+                y1 = cy + (dy * 256) - off_y
+                
+                glBegin(GL_QUADS)
+                glTexCoord2f(0, 0); glVertex2f(x1, y1)
+                glTexCoord2f(1, 0); glVertex2f(x1 + 256, y1)
+                glTexCoord2f(1, 1); glVertex2f(x1 + 256, y1 + 256)
+                glTexCoord2f(0, 1); glVertex2f(x1, y1 + 256)
+                glEnd()
+
+        # Restore Matrix Mode for horizon
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glMatrixMode(GL_MODELVIEW)
 
     def draw_sphere(self, radius, lats, longs):
         for i in range(lats + 1):
@@ -265,7 +392,7 @@ class PrimaryFlightDisplay:
             'pitch': 0.0, 'roll': 0.0, 'heading': 0.0, 'alt': 0.0, 'speed': 0.0, 'lat': 0.0, 'lon': 0.0,
             'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0
         }
-        self.lerp_factor: float = 0.25
+        self.lerp_factor: float = 1.0
         self.pitch_sign: float = 1.0
         self.roll_sign: float = -1.0
         
@@ -549,6 +676,7 @@ class PrimaryFlightDisplay:
             if self.map_widget: self.map_widget.pack_forget()
             self.search_frame.pack_forget()
             if self.opengl_pfd:
+                self.opengl_pfd.mode = "HORIZON"
                 self.opengl_pfd.visible = True
                 # Place it in the center background
                 self.opengl_pfd.place(relx=0.2, rely=0.1, relwidth=0.6, relheight=0.6)
@@ -557,13 +685,20 @@ class PrimaryFlightDisplay:
             # Ensure canvas overlays are still visible
             tk.Misc.tkraise(self.canvas) # pyrefly: ignore
             if self.opengl_pfd: tk.Misc.tkraise(self.opengl_pfd) # pyrefly: ignore
-        elif self.page == 4 and self.map_widget:
-            if self.opengl_pfd: self.opengl_pfd.place_forget(); self.opengl_pfd.visible = False
-            self.search_frame.pack_forget()
+        elif self.page == 4:
+            if self.search_frame: self.search_frame.pack_forget()
             self.canvas.place_forget()
-            self.map_widget.pack(fill=tk.BOTH, expand=True)
-            if self.auto_center:
-                self.map_widget.set_position(self.lat, self.lon)
+            
+            if HAS_OPENGL and self.opengl_pfd:
+                if self.map_widget: self.map_widget.pack_forget()
+                self.opengl_pfd.mode = "MAP"
+                self.opengl_pfd.visible = True
+                self.opengl_pfd.place(relx=0, rely=0, relwidth=1, relheight=1)
+                self.opengl_pfd.tkraise()
+            elif self.map_widget:
+                self.map_widget.pack(fill=tk.BOTH, expand=True)
+                if self.auto_center:
+                    self.map_widget.set_position(self.lat, self.lon)
         elif self.page == 8:
             if self.opengl_pfd: self.opengl_pfd.place_forget(); self.opengl_pfd.visible = False
             if self.map_widget: self.map_widget.pack_forget()
@@ -1321,14 +1456,15 @@ class PrimaryFlightDisplay:
         self.alt += (self.targets['alt'] - self.alt) * self.lerp_factor
         self.speed += (self.targets['speed'] - self.speed) * self.lerp_factor
         self.heading = self.lerp_angle(self.heading, self.targets['heading'], self.lerp_factor)
-        self.lat += (self.targets['lat'] - self.lat) * 0.05
-        self.lon += (self.targets['lon'] - self.lon) * 0.05
+        self.lat += (self.targets['lat'] - self.lat) * self.lerp_factor
+        self.lon += (self.targets['lon'] - self.lon) * self.lerp_factor
         
         # Correction Factors LERP
-        self.cf_velocity += (self.targets['cf_velocity'] - self.cf_velocity) * 0.1
-        self.cf_heading += (self.targets['cf_heading'] - self.cf_heading) * 0.1
-        self.cf_altitude += (self.targets['cf_altitude'] - self.cf_altitude) * 0.1
-        self.cf_vertical_rate += (self.targets['cf_vertical_rate'] - self.cf_vertical_rate) * 0.1
+        self.cf_velocity += (self.targets['cf_velocity'] - self.cf_velocity) * self.lerp_factor
+        self.cf_heading += (self.targets['cf_heading'] - self.cf_heading) * self.lerp_factor
+        self.cf_altitude += (self.targets['cf_altitude'] - self.cf_altitude) * self.lerp_factor
+        self.cf_vertical_rate += (self.targets['cf_vertical_rate'] - self.cf_vertical_rate) * self.lerp_factor
+
 
         # Continuous Map Interaction
         if self.page == 4:
@@ -1339,6 +1475,16 @@ class PrimaryFlightDisplay:
             self.opengl_pfd.pitch = self.pitch
             self.opengl_pfd.roll = self.roll
             self.opengl_pfd.heading = self.heading
+            self.opengl_pfd.tkExpose(None) # Trigger redraw
+
+        if self.page == 4 and self.opengl_pfd and self.opengl_pfd.mode == "MAP":
+            if self.auto_center:
+                self.opengl_pfd.lat = self.lat
+                self.opengl_pfd.lon = self.lon
+            else:
+                self.opengl_pfd.lat = self.pan_lat
+                self.opengl_pfd.lon = self.pan_lon
+            self.opengl_pfd.zoom = self.map_zoom
             self.opengl_pfd.tkExpose(None) # Trigger redraw
 
         self.draw_glass_cockpit()
