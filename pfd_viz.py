@@ -554,10 +554,36 @@ class PrimaryFlightDisplay:
                 d_lat = self.dest_lat - self.lat
                 d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
                 dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
-                dist_lbl = f"{dist_m:.0f}m" if dist_m < 1000 else f"{dist_m/1000:.2f}km"
+                
+                # Nautical Miles conversion
+                dist_nm = dist_m / 1852.0
+                dist_lbl = f"{dist_m:.0f}m" if dist_m < 1000 else (f"{dist_m/1000:.2f}km" if dist_m < 18520 else f"{dist_nm:.2f}NM")
+                
+                # Heuristic Environment Classification
+                # Standard Road: < 15m alt, < 30 knots
+                # Highway: < 15m alt, > 30 knots
+                # Waterway: near sea level (alt < 5m) + specific regions (simplified here as alt < 2m)
+                # Airway: alt > 50m
+                env_type = "STANDARD ROAD"
+                speed_limit = "50 KPH"
+                unit = "KPH"
+                
+                if self.alt > 50:
+                    env_type = "AIRWAY"
+                    speed_limit = "Vmo/Mmo"
+                    unit = "KNOTS"
+                elif self.alt < 2:
+                    env_type = "WATERWAY"
+                    speed_limit = "5-12 KNOTS"
+                    unit = "KNOTS"
+                elif self.speed > 35: # approx 65 kph
+                    env_type = "HIGHWAY"
+                    speed_limit = "110 KPH"
+                    unit = "KPH"
+                
                 brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
-                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0"
-                self.draw_text_with_halo(self.map_widget.canvas, w/2, 60, dest_info, "magenta", ("Monaco", 14, "bold"), "center", "overlay_info")
+                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0 | {env_type} | LMT: {speed_limit}"
+                self.draw_text_with_halo(self.map_widget.canvas, w/2, 60, dest_info, "magenta", ("Monaco", 12, "bold"), "center", "overlay_info")
 
             # Status and Controls
             status_col = "yellow" if self.auto_center else "#ff6600"
