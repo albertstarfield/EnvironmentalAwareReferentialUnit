@@ -3704,6 +3704,19 @@ class LocationTracker:
 
                                 with self.lock:
                                     now_cl = time.time()
+
+                                    # 1b. Outlier Jump Rejection
+                                    # If we have a previous location, check if this new one is a "teleportation"
+                                    # (e.g. jumping 50km to Bandung).
+                                    if self.lat != 0.0 and self.lon != 0.0:
+                                        jump_dist = haversine(self.lat, self.lon, new_lat, new_lon)
+                                        # If jump > 2000m and accuracy is not extremely good (< 10m), reject as spike
+                                        if jump_dist > 2000.0 and h_acc > 10.0:
+                                            with open("CoreLocationCLI.log", "a") as f:
+                                                f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+                                                f.write(f"Rejected Outlier Jump: {jump_dist:.1f}m to ({new_lat}, {new_lon}) [Acc: {h_acc}m]\n")
+                                            break
+
                                     # 2. Update CL history and calculate anchor velocity/heading
                                     self.cl_history.append((now_cl, new_lat, new_lon, float(new_alt)))
                                     
