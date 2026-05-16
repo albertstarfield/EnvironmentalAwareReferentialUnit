@@ -96,14 +96,148 @@ package body Earu.Math is
    end Rotate_And_Subtract_Gravity;
 
    procedure Update_Weather_Thermodynamics (
-      Location : in out Location_Type;
+      Eco      : in out Ecosystem_Weather_Type;
+      SMC      : in out SMC_Type;
+      Location : in     Location_Type;
       Weather  : in     Weather_Type;
       Ambient_Temp_K : in Real
    ) is
+      TC : Real;
+      RH : Real;
+      B : constant Real := 17.625;
+      C : constant Real := 243.04;
+      Gamma_M : Real;
+      Td_C : Real;
+      P_Pa : Real;
+      V_Dot : Real;
+      Delta_T : Real;
    begin
-      -- NO OP for now, fields moved to Ecosystem_Weather. 
-      -- I'll keep the procedure signature but it won't do anything to Location_Type as it was.
-      null;
+      -- 1. Dew Point Calculation (Magnus-Tetens)
+      TC := Ambient_Temp_K - 273.15;
+      RH := (if Weather.Relative_Humidity_2M < 1.0 then 1.0 
+             else (if Weather.Relative_Humidity_2M > 100.0 then 100.0 else Weather.Relative_Humidity_2M));
+      
+      Gamma_M := (B * TC) / (C + TC) + Log (RH / 100.0);
+      Td_C := (C * Gamma_M) / (B - Gamma_M);
+      
+      Eco.Dew_Point_K := Td_C + 273.15;
+      Eco.Dew_Point_Spread := TC - Td_C;
+      Eco.Humidity_Pct := RH;
+      Eco.API_Humidity_Pct := RH; -- Anchor it for now
+      
+      -- 2. Air Density and Thermodynamics
+      P_Pa := (if Location.Pressure_HPa > 0.0 then Location.Pressure_HPa else 1013.25) * 100.0;
+      
+      -- Dynamic Gas Constants
+      SMC.Gas_Constants.R := 287.058; 
+      SMC.Gas_Constants.Cp := 1005.0 + 0.05 * (Ambient_Temp_K - 300.0);
+      SMC.Gas_Constants.Gamma := SMC.Gas_Constants.Cp / (SMC.Gas_Constants.Cp - SMC.Gas_Constants.R);
+      
+      Eco.Air_Fluid_Density := P_Pa / (SMC.Gas_Constants.R * Ambient_Temp_K);
+      
+      -- 3. Heatflux and Massflow
+      V_Dot := ((SMC.Fan_RPMs(1) + SMC.Fan_RPMs(2)) / 6000.0) * 0.007;
+      SMC.Massflow_Kg_S := Eco.Air_Fluid_Density * V_Dot;
+      
+      Delta_T := SMC.Airflow_Outlet_K - SMC.Airflow_Inlet_K;
+      SMC.Heatflux_J := Real'Max (0.0, Eco.Air_Fluid_Density * V_Dot * SMC.Gas_Constants.Cp * Delta_T);
+      
+      if V_Dot > 0.0 then
+         SMC.Thrust_N := SMC.Massflow_Kg_S * (V_Dot / 0.001);
+      else
+         SMC.Thrust_N := 0.0;
+      end if;
+
+      -- Update category
+      if RH > 95.0 then
+         Eco.Category := (others => ' ');
+         Eco.Category (1 .. 16) := "Moist / Fog Risk";
+      else
+         Eco.Category := (others => ' ');
+         Eco.Category (1 .. 4) := "Safe";
+      end if;
    end Update_Weather_Thermodynamics;
+
+   procedure Update_Vibration_State (
+      V : in out Vibration_State_Type;
+      Mag : Real;
+      FS : Real;
+      Triggered : out Boolean;
+      Trigger_Ratio : out Real
+   ) is
+      E : constant Real := Mag * Mag;
+      Ratio : Real;
+      STA_N : constant array (1 .. 3) of Real := (3.0, 15.0, 50.0);
+      LTA_N : constant array (1 .. 3) of Real := (100.0, 500.0, 2000.0);
+      Thresh_On : constant array (1 .. 3) of Real := (3.0, 2.5, 2.0);
+      Thresh_Off : constant array (1 .. 3) of Real := (1.5, 1.3, 1.2);
+   begin
+      Triggered := False;
+      Trigger_Ratio := 0.0;
+
+      for I in 1 .. 3 loop
+         V.STA(I) := V.STA(I) + (E - V.STA(I)) / STA_N(I);
+         V.LTA(I) := V.LTA(I) + (E - V.LTA(I)) / LTA_N(I);
+         Ratio := V.STA(I) / (V.LTA(I) + 1.0E-30);
+         
+         if Ratio > Thresh_On(I) and not V.STA_Active(I) then
+            V.STA_Active(I) := True;
+            Triggered := True;
+            Trigger_Ratio := Ratio;
+         elsif Ratio < Thresh_Off(I) then
+            V.STA_Active(I) := False;
+         end if;
+      end loop;
+
+      V.CUSUM_Mu := V.CUSUM_Mu + 0.0001 * (Mag - V.CUSUM_Mu);
+      V.CUSUM_Pos := Real'Max (0.0, V.CUSUM_Pos + Mag - V.CUSUM_Mu - 0.0005);
+      V.CUSUM_Neg := Real'Max (0.0, V.CUSUM_Neg - Mag + V.CUSUM_Mu - 0.0005);
+      
+      if V.CUSUM_Pos > 0.01 or V.CUSUM_Neg > 0.01 then
+         Triggered := True;
+         Trigger_Ratio := Real'Max (V.CUSUM_Pos, V.CUSUM_Neg);
+         V.CUSUM_Pos := 0.0;
+         V.CUSUM_Neg := 0.0;
+      end if;
+   end Update_Vibration_State;
+
+   function Classify_Event (
+      Ratio : Real;
+      Amp : Real;
+      NSrc : Integer
+   ) return Event_Type is
+      Ev : Event_Type;
+   begin
+      Ev.Time := 0.0; -- Set by caller
+      Ev.TStr := (others => ' ');
+      Ev.Amp := Amp;
+      Ev.NSrc := NSrc;
+      
+      if NSrc >= 4 and Amp > 0.05 then
+         Ev.Sev := (others => ' '); Ev.Sev (1 .. 11) := "CHOC_MAJEUR";
+         -- UTF-8 for ⚠️ (U+26A0 U+FE0F)
+         Ev.Sym := (others => ' '); 
+         Ev.Sym (1 .. 6) := (Character'Val (16#E2#), Character'Val (16#9A#), Character'Val (16#A0#), 
+                             Character'Val (16#EF#), Character'Val (16#B8#), Character'Val (16#8F#));
+         Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 5) := "MAJOR";
+      elsif NSrc >= 3 and Amp > 0.02 then
+         Ev.Sev := (others => ' '); Ev.Sev (1 .. 10) := "CHOC_MOYEN";
+         -- UTF-8 for ^
+         Ev.Sym := (others => ' '); Ev.Sym (1 .. 1) := "^";
+         Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 5) := "shock";
+      elsif Amp > 0.003 then
+         Ev.Sev := (others => ' '); Ev.Sev (1 .. 9) := "VIBRATION";
+         -- UTF-8 for ● (U+25CF)
+         Ev.Sym := (others => ' '); 
+         Ev.Sym (1 .. 3) := (Character'Val (16#E2#), Character'Val (16#97#), Character'Val (16#8F#));
+         Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 9) := "vibration";
+      else
+         Ev.Sev := (others => ' '); Ev.Sev (1 .. 9) := "MICRO_VIB";
+         -- UTF-8 for .
+         Ev.Sym := (others => ' '); Ev.Sym (1 .. 1) := ".";
+         Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 9) := "micro-vib";
+      end if;
+      return Ev;
+   end Classify_Event;
 
 end Earu.Math;

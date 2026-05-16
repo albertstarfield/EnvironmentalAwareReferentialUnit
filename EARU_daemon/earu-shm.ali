@@ -1,0 +1,300 @@
+V "GNAT Lib v15"
+P ZX
+
+RN
+RV NO_FLOATING_POINT
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_ASPECT_SPECIFICATIONS
+RV NO_IMPLEMENTATION_ATTRIBUTES
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U earu.shm%b		earu-shm.adb		58338efd NE OO PK
+W earu%s		earu.ads		earu.ali
+W interfaces%s		interfac.ads		interfac.ali
+W interfaces.c%s	i-c.adb			i-c.ali
+W interfaces.c.strings%s  i-cstrin.adb		i-cstrin.ali
+W system%s		system.ads		system.ali
+W system.address_to_access_conversions%s
+W system.storage_elements%s  s-stoele.ads	s-stoele.ali
+
+U earu.shm%s		earu-shm.ads		69c62a1e EE NE OO PK
+W earu%s		earu.ads		earu.ali
+W interfaces%s		interfac.ads		interfac.ali
+
+D ada.ads		20250419085653 76789da1 ada%s
+D a-unccon.ads		20250419085653 0e9b276f ada.unchecked_conversion%s
+D earu.ads		20260516151022 d1e616aa earu%s
+D earu-shm.ads		20260516194215 2931c575 earu.shm%s
+D earu-shm.adb		20260516160836 28877040 earu.shm%b
+D interfac.ads		20250419085653 9111f9c1 interfaces%s
+D i-c.ads		20250419085653 e94c966a interfaces.c%s
+D i-cstrin.ads		20250419085653 5409c1a4 interfaces.c.strings%s
+D system.ads		20250419085653 70765b54 system%s
+D s-atacco.ads		20250419085653 5868e3ba system.address_to_access_conversions%s
+D s-exctab.ads		20250419085653 91bef6ef system.exception_table%s
+D s-parame.ads		20250419085653 3597fc11 system.parameters%s
+D s-stalib.ads		20250419085653 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250419085653 ccded4e8 system.storage_elements%s
+G a e
+G c Z s b [open_imu_shm earu__shm 181 13 none]
+G c Z s b [open_stats_shm earu__shm 182 13 none]
+G c Z s b [open_weather_shm earu__shm 183 13 none]
+G c Z s b [open_ml_shm earu__shm 184 13 none]
+G c Z s b [open_lid_shm earu__shm 185 13 none]
+G c Z s b [open_als_shm earu__shm 186 13 none]
+G c Z s s [Tstring_64BIP earu__shm 6 4 none]
+G c Z s s [shm_headerIP earu__shm 8 9 none]
+G c Z s s [imu_entryIP earu__shm 20 9 none]
+G c Z s s [Timu_ringBIP earu__shm 32 4 none]
+G c Z s s [imu_shmIP earu__shm 35 9 none]
+G c Z s s [Tunsigned_32_array_4BIP earu__shm 51 4 none]
+G c Z s s [stats_shmIP earu__shm 54 9 none]
+G c Z s s [wind_point_cIP earu__shm 133 9 none]
+G c Z s s [Twind_grid_cBIP earu__shm 142 4 none]
+G c Z s s [weather_shmIP earu__shm 146 9 none]
+G c Z s s [entity_detection_cIP earu__shm 161 9 none]
+G c Z s s [Tentity_array_cBIP earu__shm 166 4 none]
+G c Z s s [ml_shmIP earu__shm 169 9 none]
+G c Z b b [shm_open earu__shm 9 13 none]
+G c Z b b [mmap earu__shm 12 13 none]
+G c Z b b [to_pointer earu__shm__imu_conv 61 13 19_4]
+G c Z b b [to_address earu__shm__imu_conv 67 13 19_4]
+G c Z b b [to_pointer earu__shm__weather_conv 61 13 20_4]
+G c Z b b [to_address earu__shm__weather_conv 67 13 20_4]
+G c Z b b [to_pointer earu__shm__ml_conv 61 13 21_4]
+G c Z b b [to_address earu__shm__ml_conv 67 13 21_4]
+G c Z b b [to_pointer earu__shm__stats_conv 61 13 22_4]
+G c Z b b [to_address earu__shm__stats_conv 67 13 22_4]
+G c Z b b [to_pointer earu__shm__lid_data_conv 61 13 24_4]
+G c Z b b [to_address earu__shm__lid_data_conv 67 13 24_4]
+G c Z b b [to_pointer earu__shm__als_data_conv 61 13 25_4]
+G c Z b b [to_address earu__shm__als_data_conv 67 13 25_4]
+G c Z b b [map_generic earu__shm 27 13 none]
+X 3 earu.ads
+1K9*Earu 3e9 4|3r9 188r5 5|7r14 87r5
+X 4 earu-shm.ads
+3K14*Shm 3|1k9 4|188l10 188e13 5|7b19 87l10 87t13
+6A9*String_64(6|81M9)<integer> 11r20 12r20 13r20
+8R9*SHM_Header 16e15 55r25 147r30 170r25
+9m7*Update_Count{6|92M9}
+11a7*P_Aug_Hash{6A9}
+12a7*P_Ext_Hash{6A9}
+13a7*P_Int_Hash{6A9}
+15m7*Padding{6|92M9}
+19N4*RING_CAP 32r33 46r35
+20R9*IMU_Entry 23e15 25r8 32r50
+21i7*X{6|65I9} 26r7
+21i10*Y{6|65I9} 27r7
+21i13*Z{6|65I9} 28r7
+22f7*Timestamp{6|234F9} 29r7
+32A9*IMU_Ring(20R9)<integer> 39r19
+35R9*IMU_SHM 40e15 42r8 49r35 5|19r66 46r59
+36m7*Write_Idx{6|92M9} 43r7
+37m7*Total{6|95M9} 44r7
+38m7*Restarts{6|92M9} 45r7
+39a7*Ring{32A9} 46r7
+49P9*IMU_SHM_Ptr(35R9) 181r49 5|45r49 49r14
+51A9*Unsigned_32_Array_4(6|92M9)<integer> 108r27
+54R9*Stats_SHM 130e15 131r37 5|22r68 67r59
+55r7*Header{8R9}
+58f7*CPU_Usage{6|231F9}
+59f7*Mem_Usage{6|231F9}
+60f7*Battery_Percent{6|231F9}
+61m7*Battery_State{6|92M9}
+64f7*Loop_Avg_Ms{6|231F9}
+65m7*Stutters{6|92M9}
+66f7*Low_01_Ms{6|231F9}
+69m7*T_CPU_ns{6|95M9}
+70m7*T_RTC_ns{6|95M9}
+71m7*T_GPU_ns{6|95M9}
+72m7*T_ANE_ns{6|95M9}
+73m7*T_DAT_ns{6|95M9}
+74m7*T_SPU_ns{6|95M9}
+75f7*SPU_Lat_ms{6|231F9}
+76f7*GPU_Lat_ms{6|231F9}
+77f7*ANE_Lat_ms{6|231F9}
+78f7*RTC_Jitter_ms{6|231F9}
+81f7*SMC_PSTR{6|231F9}
+81f17*SMC_TCMz{6|231F9}
+81f27*SMC_TaLP{6|231F9}
+81f37*SMC_TaLT{6|231F9}
+81f47*SMC_TaLW{6|231F9}
+81f57*SMC_TaRF{6|231F9}
+81f67*SMC_TaRT{6|231F9}
+81f77*SMC_TaRW{6|231F9}
+81f87*SMC_Tg0X{6|231F9}
+81f97*SMC_Ts0P{6|231F9}
+81f107*SMC_Ts1P{6|231F9}
+84f7*Power_W{6|231F9}
+85f7*Day_Power_Wh{6|231F9}
+86f7*Est_Today_Wh{6|231F9}
+87f7*Month_Power_Wh{6|231F9}
+88f7*Meter_Power_Wh{6|231F9}
+91f7*Bat_Design_Wh{6|231F9}
+92f7*Bat_Energy_Wh{6|231F9}
+93f7*Bat_Full_Wh{6|231F9}
+94f7*Bat_Health_Pct{6|231F9}
+97f7*Load_Avg_1{6|231F9}
+98f7*Load_Avg_5{6|231F9}
+99f7*Load_Avg_15{6|231F9}
+100m7*HID_Idle_ns{6|95M9}
+101f7*Uptime_System{6|231F9}
+102f7*Uptime_Earu{6|231F9}
+105f7*Lid_Angle{6|231F9}
+106f7*Lid_Speed{6|231F9}
+107f7*Lux_Factor{6|231F9}
+108a7*Spectral{51A9}
+111f7*SMC_Pulse_Wake{6|231F9}
+112f7*SMC_Pulse_Len{6|231F9}
+113f7*SMC_Inlet_K{6|231F9}
+114f7*SMC_Outlet_K{6|231F9}
+115f7*Gas_Cp{6|231F9}
+116f7*Gas_R{6|231F9}
+117f7*Gas_Gamma{6|231F9}
+118f7*Heatflux_J{6|231F9}
+119f7*Fatigue_Cum{6|231F9}
+120f7*Seu_Risk{6|231F9}
+121i7*SMC_Turbo{6|65I9}
+122f7*SMC_Thrust_N{6|231F9}
+123f7*SMC_Ambient_K{6|231F9}
+124f7*SMC_Humidity{6|231F9}
+125f7*SMC_Fan1_RPM{6|231F9}
+126f7*SMC_Fan2_RPM{6|231F9}
+127f7*SMC_Massflow{6|231F9}
+128a7*TS_ISO{string}
+129a7*PMSET_Info{string}
+131P9*Stats_SHM_Ptr(54R9) 182r51 5|66r51 70r14
+133R9*Wind_Point_C 140e15 142r50
+134f7*Speed{6|231F9}
+135f7*Vec_X{6|231F9}
+136f7*Vec_Y{6|231F9}
+137f7*Vec_Z{6|231F9}
+138f7*Press{6|231F9}
+139f7*Temp{6|231F9}
+142A9*Wind_Grid_C(133R9)<integer><integer> 153r30
+146R9*Weather_SHM 157e15 158r39 5|20r70 53r59
+147r7*Header{8R9}
+148f7*Temperature_2M{6|231F9}
+149f7*Relative_Humidity_2M{6|231F9}
+150f7*Pressure_MSL{6|231F9}
+151m7*Weather_Code{6|92M9}
+152f7*Fetch_Time{6|234F9}
+153a7*Grid{142A9}
+154m7*Meteo_Len{6|92M9}
+155m7*Padding{6|92M9}
+156a7*Meteo_JSON{string}
+158P9*Weather_SHM_Ptr(146R9) 183r53 5|52r53 56r14
+161R9*Entity_Detection_C 164e15 166r45
+162f7*BPM{6|231F9}
+163f7*Confidence{6|231F9}
+166A9*Entity_Array_C(161R9)<integer> 176r25
+169R9*ML_SHM 177e15 178r34 5|21r65 60r59
+170r7*Header{8R9}
+171f7*Mood_Anxious{6|231F9}
+172f7*Mood_Calm{6|231F9}
+173f7*Mood_Excited{6|231F9}
+174f7*Mood_Tired{6|231F9}
+175m7*Detection_Count{6|92M9}
+176a7*Detected{166A9}
+178P9*ML_SHM_Ptr(169R9) 184r48 5|59r48 63r14
+181V13*Open_IMU_SHM{49P9} 181>27 5|45b13 50l8 50t20
+181a27 Name{string} 5|45b27 46r45
+182V13*Open_Stats_SHM{131P9} 182>29 5|66b13 71l8 71t22
+182a29 Name{string} 5|66b29 67r45
+183V13*Open_Weather_SHM{158P9} 183>31 5|52b13 57l8 57t24
+183a31 Name{string} 5|52b31 53r45
+184V13*Open_ML_SHM{178P9} 184>26 5|59b13 64l8 64t19
+184a26 Name{string} 5|59b26 60r45
+185V13*Open_Lid_SHM(6|231F9) 185>27 5|73b13 78l8 78t20
+185a27 Name{string} 5|73b27 74r45
+186V13*Open_ALS_SHM(6|92M9) 186>27 5|80b13 85l8 85t20
+186a27 Name{string} 5|80b27 81r45
+X 5 earu-shm.adb
+9V13 shm_open{7|62I9} 9>23 9>41 9>54 10b<c,shm_open>22 29s19
+9p23 name{8|65P9}
+9i41 oflag{7|62I9}
+9i54 mode{7|62I9}
+12V13 mmap{9|67M9} 12>19 12>42 12>56 12>68 12>81 12>91 13b<c,mmap>22 37s15
+12m19 addr{9|67M9}
+12m42 len{7|92M9}
+12i56 prot{7|62I9}
+12i68 flags{7|62I9}
+12i81 fd{7|62I9}
+12i91 offset{7|62I9}
+15i4 O_RDONLY{7|62I9} 29r37
+16i4 PROT_READ{7|62I9} 37r48
+17i4 MAP_SHARED{7|62I9} 37r59
+19K12 IMU_Conv[10|42] 49r27
+20K12 Weather_Conv[10|42] 56r31
+21K12 ML_Conv[10|42] 63r26
+22K12 Stats_Conv[10|42] 70r29
+24K12 Lid_Data_Conv[10|42] 77r14
+25K12 ALS_Data_Conv[10|42] 84r14
+27V13 Map_Generic{9|67M9} 27b13 27>26 27>41 43l8 43t19 46s32 53s32 60s32
+. 67s32 74s32 81s32
+27a26 Name{string} 28r41
+27m41 Size{7|92M9} 37r42
+28p7 C_Name{8|65P9} 29r29 32m13 32r13
+29i7 FD{7|62I9} 33r10 37r71
+30m7 Addr{9|67M9} 37m7 38r10 42r14
+46m7 Addr{9|67M9} 48r10 49r48
+53m7 Addr{9|67M9} 55r10 56r56
+60m7 Addr{9|67M9} 62r10 63r46
+67m7 Addr{9|67M9} 69r10 70r52
+74m7 Addr{9|67M9} 76r10 77r40
+81m7 Addr{9|67M9} 83r10 84r40
+X 6 interfac.ads
+47K9*Interfaces 4|1w6 6r41 9r22 15r17 21r19 22r19 36r19 37r19 38r19 51r50
+. 58r25 59r25 60r25 61r25 64r25 65r25 66r25 69r25 70r25 71r25 72r25 73r25
+. 74r25 75r25 76r25 77r25 78r25 81r118 84r27 85r27 86r27 87r27 88r27 91r27
+. 92r27 93r27 94r27 97r27 98r27 99r27 100r27 101r27 102r27 105r27 106r27
+. 107r27 111r27 112r27 113r27 114r27 115r27 116r27 117r27 118r27 119r27 120r27
+. 121r27 122r27 123r27 124r27 125r27 126r27 127r27 134r15 135r15 136r15 137r15
+. 138r15 139r15 148r30 149r30 150r30 151r30 152r30 154r30 155r30 162r20 163r20
+. 171r25 172r25 173r25 174r25 175r25 185r56 186r56 5|1r6 1r24 2r6 2r32 24r71
+. 25r71 73r56 80r56 6|247e15
+65I9*Integer_32<integer> 4|21r30 121r38
+81M9*Unsigned_8 4|6r52
+92M9*Unsigned_32 4|9r33 15r28 36r30 38r30 51r61 61r36 65r36 151r41 154r41
+. 155r41 175r36 186r67 5|25r82 80r67
+95M9*Unsigned_64 4|37r30 69r36 70r36 71r36 72r36 73r36 74r36 100r38
+231F9*IEEE_Float_32<short_float> 4|58r36 59r36 60r36 64r36 66r36 75r36 76r36
+. 77r36 78r36 81r129 84r38 85r38 86r38 87r38 88r38 91r38 92r38 93r38 94r38
+. 97r38 98r38 99r38 101r38 102r38 105r38 106r38 107r38 111r38 112r38 113r38
+. 114r38 115r38 116r38 117r38 118r38 119r38 120r38 122r38 123r38 124r38 125r38
+. 126r38 127r38 134r26 135r26 136r26 137r26 138r26 139r26 148r41 149r41 150r41
+. 162r31 163r31 171r36 172r36 173r36 174r36 185r67 5|24r82 73r67
+234F9*IEEE_Float_64<long_float> 4|22r30 152r41
+X 7 i-c.ads
+33K20*C 5|1w17 1r35 2r17 2r43 7|601e17
+62I9*int<integer> 5|9r49 9r61 9r73 12r63 12r76 12r86 12r100 15r24 16r25 17r26
+. 29r12
+92M9*size_t 5|12r48 27r48 46r51 53r51 60r51 67r51
+X 8 i-cstrin.ads
+48K22*Strings 5|2w19 2r45 8|171e25
+65P9*chars_ptr 5|9r30 28r16
+86V13*New_String{65P9} 5|28s29
+92U14*Free 5|32s7
+X 9 system.ads
+37K9*System 5|3w6 3r23 4r6 4r35 5r6 12r26 12r112 19r28 20r32 21r27 22r30
+. 24r33 25r33 27r63 30r14 34r17 37r21 39r17 46r14 48r17 53r14 55r17 60r14
+. 62r17 67r14 69r17 74r14 76r17 81r14 83r17 9|173e11
+67M9*Address 5|3r30 12r33 12r119 27r70 30r21 46r21 53r21 60r21 67r21 74r21
+. 81r21
+69m4*Null_Address{67M9} 5|34r24 37r28 39r24 48r24 55r24 62r24 69r24 76r24
+. 83r24
+81V14*"="{boolean} 5|38r15 48r15 55r15 62r15 69r15 76r15 83r15
+X 10 s-atacco.ads
+42k16*Address_To_Access_Conversions 5|5w13 19r35 20r39 21r34 22r37 24r40
+. 25r40 10|76e41
+50P9*Object_Pointer(4|146R9)
+61V13*To_Pointer{50P9[5|19]} 5|49s36[19] 56s44[20] 63s34[21] 70s40[22] 77s28[24]
+. 84s28[25]
+X 14 s-stoele.ads
+43K16*Storage_Elements 5|4w13 4r42 14|104e28
+54I9*Storage_Offset<long_integer> 5|77r47 84r47
+74V14*"+"{9|67M9} 5|77r45 84r45
+92M9*Integer_Address 5|38r29
+96V13*To_Address{9|67M9} 5|38s17
+

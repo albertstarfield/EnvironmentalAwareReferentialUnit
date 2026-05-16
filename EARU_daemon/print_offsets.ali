@@ -1,0 +1,92 @@
+V "GNAT Lib v15"
+M P W=b
+P ZX
+
+RN
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_ATTRIBUTES
+
+U print_offsets%b	print_offsets.adb	9df2d3c0 NE OO SU
+W ada%s			ada.ads			ada.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W earu%s		earu.ads		earu.ali
+W earu.shm%s		earu-shm.adb		earu-shm.ali
+W interfaces%s		interfac.ads		interfac.ali
+Z system.concat_2%s	s-conca2.adb		s-conca2.ali
+Z system.img_llli%s	s-imgllli.ads		s-imgllli.ali
+
+D ada.ads		20250419085653 76789da1 ada%s
+D a-except.ads		20250419085653 e7970cd9 ada.exceptions%s
+D a-ioexce.ads		20250419085653 40018c65 ada.io_exceptions%s
+D a-stream.ads		20250419085653 17477cbd ada.streams%s
+D a-string.ads		20250419085653 90ac6797 ada.strings%s
+D a-sttebu.ads		20250419085653 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20250419085653 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20250419085653 fbca0ad5 ada.tags%s
+D a-textio.ads		20250419085653 34ef47de ada.text_io%s
+D a-unccon.ads		20250419085653 0e9b276f ada.unchecked_conversion%s
+D earu.ads		20260516151022 d1e616aa earu%s
+D earu-shm.ads		20260516194215 2931c575 earu.shm%s
+D interfac.ads		20250419085653 9111f9c1 interfaces%s
+D i-cstrea.ads		20250419085653 ffd01b9d interfaces.c_streams%s
+D print_offsets.adb	20260516194300 113da8aa print_offsets%b
+D system.ads		20250419085653 70765b54 system%s
+D s-conca2.ads		20250419085653 b5fb73f7 system.concat_2%s
+D s-crtl.ads		20250419085653 beb39b9e system.crtl%s
+D s-exctab.ads		20250419085653 91bef6ef system.exception_table%s
+D s-ficobl.ads		20250419085653 dc5161d4 system.file_control_block%s
+D s-imagei.ads		20250419085653 5e131ce0 system.image_i%s
+D s-imgllli.ads		20250419085653 404e72c5 system.img_llli%s
+D s-parame.ads		20250419085653 3597fc11 system.parameters%s
+D s-putima.ads		20250419085653 17291fe4 system.put_images%s
+D s-secsta.ads		20250419085653 578279f5 system.secondary_stack%s
+D s-soflin.ads		20250419085653 5d88fdea system.soft_links%s
+D s-stache.ads		20250419085653 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20250419085653 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250419085653 ccded4e8 system.storage_elements%s
+D s-traent.ads		20250419085653 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250419085653 fa2a7f59 system.unsigned_types%s
+D s-valspe.ads		20250419085653 f810d31c system.val_spec%s
+D s-vaispe.ads		20250419085653 8280550e system.value_i_spec%s
+D s-vauspe.ads		20250419085653 89269ba5 system.value_u_spec%s
+D s-vsllli.ads		20250419085653 3a5ba700 system.vs_llli%s
+D s-vslllu.ads		20250419085653 678200a0 system.vs_lllu%s
+D s-wchcon.ads		20250419085653 d9032363 system.wch_con%s
+G a e
+G c Z b b [print_offsets standard 5 11 none]
+X 1 ada.ads
+18K9*Ada 22e8 15|1r6 1r23
+X 9 a-textio.ads
+58K13*Text_IO 785e16 15|1w10 1r27
+565U14*Put_Line 15|9s4 10s4 11s4 12s4 13s4 14s4 15s4 16s4 17s4 18s4 20s4
+. 21s4 22s4
+X 11 earu.ads
+1K9*Earu 3e9 15|2r6 2r20
+X 12 earu-shm.ads
+3K14*Shm 188e13 15|2w11 2r25
+54R9*Stats_SHM 130e15 15|6r8
+55r7*Header{8R9} 15|10r36
+58f7*CPU_Usage{13|231F9} 15|11r39
+69m7*T_CPU_ns{13|95M9} 15|12r38
+81f7*SMC_PSTR{13|231F9} 15|13r38
+91f7*Bat_Design_Wh{13|231F9} 15|14r43
+97f7*Load_Avg_1{13|231F9} 15|15r40
+100m7*HID_Idle_ns{13|95M9} 15|16r41
+128a7*TS_ISO{string} 15|17r36
+129a7*PMSET_Info{string} 15|18r40
+142A9*Wind_Grid_C(133R9)<integer><integer>
+146R9*Weather_SHM 157e15 15|7r8
+153a7*Grid{142A9} 15|21r34
+156a7*Meteo_JSON{string} 15|22r40
+X 13 interfac.ads
+47K9*Interfaces 247e15 15|3w6
+95M9*Unsigned_64
+231F9*IEEE_Float_32<short_float>
+X 15 print_offsets.adb
+5U11*Print_Offsets 5b11 23l5 23t18
+6r4 S{12|54R9} 9r41 10r34 11r37 12r36 13r36 14r41 15r38 16r39 17r34 18r38
+7r4 W{12|146R9} 20r43 21r32 22r38
+

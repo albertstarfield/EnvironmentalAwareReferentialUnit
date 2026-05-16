@@ -36,8 +36,26 @@ package Earu.Math is
                                          Accel        : Vector3;
                                          Calibrated_G : Real) return Vector3;
 
-   procedure Update_Weather_Thermodynamics (Location : in out Location_Type;
-                                            Weather  : in     Weather_Type;
-                                            Ambient_Temp_K : in Real);
+   procedure Update_Weather_Thermodynamics (
+      Eco      : in out Ecosystem_Weather_Type;
+      SMC      : in out SMC_Type;
+      Location : in     Location_Type;
+      Weather  : in     Weather_Type;
+      Ambient_Temp_K : in Real
+   );
+
+   procedure Update_Vibration_State (
+      V : in out Vibration_State_Type;
+      Mag : Real;
+      FS : Real;
+      Triggered : out Boolean;
+      Trigger_Ratio : out Real
+   );
+
+   function Classify_Event (
+      Ratio : Real;
+      Amp : Real;
+      NSrc : Integer
+   ) return Event_Type;
 
 end Earu.Math;

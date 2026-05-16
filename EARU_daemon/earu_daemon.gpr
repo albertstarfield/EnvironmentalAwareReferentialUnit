@@ -6,7 +6,7 @@ project Earu_Daemon is
    for Object_Dir use "obj/" & Earu_Daemon_Config.Build_Profile;
    for Create_Missing_Dirs use "True";
    for Exec_Dir use "bin";
-   for Main use ("earu_daemon.adb");
+   for Main use ("earu_daemon.adb", "print_offsets.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use ("-g", "-O2", "-gnatwa", "-gnatW8");

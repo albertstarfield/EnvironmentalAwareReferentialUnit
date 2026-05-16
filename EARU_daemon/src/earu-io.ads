@@ -7,7 +7,7 @@ package Earu.IO is
    procedure Write_EARU_Data (
       State : Earu.Types.Earu_State; 
       Path  : String;
-      Weather : Earu.Shm.Weather_SHM_Ptr := null
+      Weather : Earu.Shm.Weather_SHM_Ptr
    );
 
 end Earu.IO;

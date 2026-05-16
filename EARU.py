@@ -257,11 +257,12 @@ def ensure_ramdisk_links(ram_path):
                 print(f"{BRED}[!] Symlink failed for {filename}: {e}{RST}")
 
 # Initialize RAM Disk and Symlink (Force remount on start, skipped for --onlySelfTest)
-if "--onlySelfTest" not in sys.argv:
-    ram_path = setup_ramdisk(force_remount=True)
-    ensure_ramdisk_links(ram_path)
-else:
-    ram_path = "/Volumes/EARU_dataIO" # Dummy path for self-test
+if __name__ == "__main__":
+    if "--onlySelfTest" not in sys.argv:
+        ram_path = setup_ramdisk(force_remount=True)
+        ensure_ramdisk_links(ram_path)
+    else:
+        ram_path = "/Volumes/EARU_dataIO" # Dummy path for self-test
 
 # 3rd party meteo requirements
 try:
