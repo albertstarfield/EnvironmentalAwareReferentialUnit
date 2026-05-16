@@ -396,6 +396,8 @@ class PrimaryFlightDisplay:
         self.pitch_sign: float = 1.0
         self.roll_sign: float = -1.0
         
+        self.show_profile: bool = False
+        
         self.update_data()
         self.animate()
 
@@ -970,6 +972,16 @@ class PrimaryFlightDisplay:
         canvas.create_oval(x-10, y-10, x+4, y+4, outline="#00ccff", width=2, tags=tags)
         canvas.create_line(x+2, y+2, x+12, y+12, fill="#00ccff", width=3, tags=tags)
 
+    def draw_profile_trigger(self, canvas: tk.Canvas, x: float, y: float, tags: str) -> None:
+        r = 20.0
+        # Halo
+        canvas.create_oval(x-r-2, y-r-2, x+r+2, y+r+2, fill="black", outline="white", width=1, tags=tags)
+        # Icon (Vertical Profile)
+        color = "magenta" if self.show_profile else "#555"
+        canvas.create_line(x-10, y+8, x+10, y+8, fill=color, width=2, tags=tags)
+        canvas.create_line([x-10, y+8, x-5, y-2, x+5, y-6, x+10, y-10], fill=color, width=2, tags=tags)
+        canvas.create_text(x, y+2, text="PROF", fill="white", font=("Monaco", 7, "bold"), tags=tags)
+
     def on_map_click(self, event: tk.Event) -> None:
         # Check if clicked search button
         w, h = self.map_widget.width, self.map_widget.height
@@ -977,7 +989,12 @@ class PrimaryFlightDisplay:
             self.page = 8
             self.switch_page_view()
             return
-            
+
+        # Check if clicked profile button (above search)
+        if w-70 <= event.x <= w-20 and h-120 <= event.y <= h-70:
+            self.show_profile = not self.show_profile
+            return
+
         # Shift-Click to add waypoint
         try:
             state = int(event.state)
@@ -1082,6 +1099,10 @@ class PrimaryFlightDisplay:
             self.draw_zoom_scale(self.map_widget.canvas, 20, h - 150, tags="overlay_info")
             self.draw_loc_button(self.map_widget.canvas, 45, h - 45, tags="loc_btn")
             self.draw_search_trigger(self.map_widget.canvas, w - 45, h - 45, tags="search_btn")
+            self.draw_profile_trigger(self.map_widget.canvas, w - 45, h - 95, tags="profile_btn")
+            
+            if self.show_profile:
+                self.draw_vertical_profile(w, h)
             
             if not self.auto_center:
                 self.draw_map_target(self.map_widget.canvas, w/2, h/2, tags="overlay_info")
@@ -1094,6 +1115,95 @@ class PrimaryFlightDisplay:
 
         else:
             self.canvas.create_text(w/2, h/2, text="tkintermapview missing", fill="red")
+
+    def draw_vertical_profile(self, w: float, h: float) -> None:
+        canvas = self.map_widget.canvas
+        # Profile box at the bottom
+        px, py, pw, ph = 20, h - 350, w - 40, 150
+        tags = "overlay_info"
+        
+        # Background with glass effect
+        canvas.create_rectangle(px, py, px+pw, py+ph, fill="#050505", outline="#444", width=1, tags=tags, stipple="gray25")
+        canvas.create_text(px + 10, py + 10, anchor="nw", text="INSTRUMENT APPROACH - VERTICAL PROFILE", fill="magenta", font=("Monaco", 10, "bold"), tags=tags)
+        
+        if self.dest_lat is None or self.dest_lon is None:
+            canvas.create_text(px + pw/2, py + ph/2, text="NO DESTINATION SET - VERTICAL DATA UNAVAILABLE", fill="#555", font=("Monaco", 10), tags=tags)
+            return
+
+        # Math for profile
+        d_lat = self.dest_lat - self.lat
+        d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
+        dist_nm = (math.sqrt(d_lat**2 + d_lon**2) * 60.0) # approx NM
+        
+        # Scale: show up to 12NM or 1.2x current distance
+        max_d = max(12.0, dist_nm * 1.2)
+        # Scale: show up to 4000FT or 1.2x current altitude
+        curr_alt_ft = self.alt * 3.28084
+        max_alt = max(4000.0, curr_alt_ft * 1.2)
+        
+        def to_canvas(d, a):
+            # d is NM to dest, a is altitude in FT MSL
+            # Destination is on the RIGHT (x = px + pw)
+            # Far away is on the LEFT (x = px)
+            cx = px + pw - (d / max_d) * pw
+            # Bottom is 20px above py + ph
+            cy = py + ph - 30 - (a / max_alt) * (ph - 50)
+            return cx, cy
+
+        # Draw Grid & Scale
+        for d in range(0, int(max_d) + 1, 2):
+            gx, gy = to_canvas(d, 0)
+            canvas.create_line(gx, py + 30, gx, py + ph - 25, fill="#222", tags=tags)
+            canvas.create_text(gx, py + ph - 15, text=f"{d}NM", fill="#666", font=("Monaco", 8), tags=tags)
+            
+        for a in range(0, int(max_alt) + 1, 1000):
+            gx, gy = to_canvas(0, a)
+            canvas.create_line(px + 10, gy, px + pw - 10, gy, fill="#222", tags=tags)
+            canvas.create_text(px + pw - 5, gy, anchor="e", text=f"{a}FT", fill="#666", font=("Monaco", 8), tags=tags)
+
+        # Draw 3-Degree Glideslope
+        gs_pts = []
+        for d in [0, max_d]:
+            gs_alt = d * 318.0 # 3deg slope
+            gs_pts.extend(to_canvas(d, gs_alt))
+        canvas.create_line(gs_pts, fill="#555", dash=(4,4), tags=tags)
+        canvas.create_text(to_canvas(max_d, max_d*318.0)[0], to_canvas(max_d, max_d*318.0)[1]-10, text="3.0\u00b0 GS", fill="#555", font=("Monaco", 8), tags=tags)
+        
+        # Draw Runway Depiction
+        rx, ry = to_canvas(0, 0)
+        canvas.create_rectangle(rx - 30, ry, rx + 10, ry + 8, fill="#333", outline="white", width=1, tags=tags)
+        canvas.create_text(rx - 10, ry + 18, text="DEST RWY", fill="white", font=("Monaco", 8, "bold"), tags=tags)
+        
+        # Draw Planned Path (connecting waypoints)
+        prev_pt = to_canvas(dist_nm, curr_alt_ft)
+        for wp in self.waypoints:
+            w_lat, w_lon = wp['lat'], wp['lon']
+            wd_lat = self.dest_lat - w_lat
+            wd_lon = (self.dest_lon - w_lon) * math.cos(math.radians(w_lat))
+            w_dist = math.sqrt(wd_lat**2 + wd_lon**2) * 60.0
+            # Assume waypoints are at some "step" altitude or just linear
+            # For now, let's assume they are on the GS for visualization if they are closer
+            w_alt = w_dist * 318.0
+            w_pt = to_canvas(w_dist, w_alt)
+            canvas.create_line(prev_pt[0], prev_pt[1], w_pt[0], w_pt[1], fill="#00ff00", width=2, tags=tags)
+            canvas.create_oval(w_pt[0]-3, w_pt[1]-3, w_pt[0]+3, w_pt[1]+3, fill="#00ff00", tags=tags)
+            canvas.create_text(w_pt[0], w_pt[1]-12, text=wp['name'], fill="#00ff00", font=("Monaco", 7), tags=tags)
+            prev_pt = w_pt
+        
+        # Final leg to runway
+        canvas.create_line(prev_pt[0], prev_pt[1], rx, ry, fill="#00ff00", width=2, tags=tags)
+
+        # Draw Aircraft Georeferenced Position
+        curr_x, curr_y = to_canvas(dist_nm, curr_alt_ft)
+        # Small airplane symbol (triangle)
+        canvas.create_polygon([curr_x, curr_y-6, curr_x-8, curr_y+4, curr_x+8, curr_y+4], fill="#00aaff", outline="white", width=1, tags=tags)
+        canvas.create_text(curr_x, curr_y - 18, text=f"YOU: {int(curr_alt_ft)}FT", fill="#00aaff", font=("Monaco", 9, "bold"), tags=tags)
+        
+        # Glidepath deviation indicator
+        gs_target = dist_nm * 318.0
+        dev = curr_alt_ft - gs_target
+        dev_col = "#00ff00" if abs(dev) < 100 else ("yellow" if abs(dev) < 300 else "red")
+        self.draw_text_with_halo(canvas, px + pw - 10, py + 10, f"G/P DEV: {dev:+.0f} FT", dev_col, ("Monaco", 9, "bold"), "ne", tags)
 
     def draw_3d_nav_symbol(self, canvas: tk.Canvas, x: float, y: float, hdg: float, size: float = 20.0, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
         if tags is None: tags = ""
@@ -1511,10 +1621,36 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(w/2, 40, text="ADVANCED DETECTION & LOOP", fill="#ff00ff", font=("Monaco", 20, "bold"))
         user = self.full_data.get('user_entity_detection', {})
         self.canvas.create_text(50, 100, anchor="nw", text=f"USER ENTITY COUNT: {user.get('count', 0)}", fill="cyan", font=("Monaco", 12, "bold"))
+        
+        detected = user.get('detected', [])
+        dy = 130.0
+        if not detected:
+            self.canvas.create_text(70, dy, anchor="nw", text="NO ENTITIES DETECTED", fill="gray", font=("Monaco", 10, "italic"))
+            dy += 20
+        else:
+            for i, (bpm, conf) in enumerate(detected):
+                color = "white" if i > 0 else "#00ff00"
+                prefix = f"ENT {i+1}: " if i > 0 else "PRIMARY: "
+                self.canvas.create_text(70, dy, anchor="nw", text=f"{prefix}{bpm:5.1f} BPM (CONF: {conf*100:3.0f}%)", fill=color, font=("Monaco", 10, "bold" if i==0 else "normal"))
+                dy += 20
+                
+                # Heart icon for primary
+                if i == 0:
+                    # Pulsing logic based on time and BPM
+                    pulse = 1.0 + 0.2 * math.sin(time.time() * (bpm / 60.0) * 2 * math.pi)
+                    hx, hy = 320, dy - 10
+                    # Simple heart shape
+                    self.canvas.create_oval(hx-5*pulse, hy-5*pulse, hx+5*pulse, hy+5*pulse, fill="red", outline="")
+                    self.canvas.create_oval(hx+0*pulse, hy-5*pulse, hx+10*pulse, hy+5*pulse, fill="red", outline="")
+                    self.canvas.create_polygon([hx-5*pulse, hy+2*pulse, hx+10*pulse, hy+2*pulse, hx+2.5*pulse, hy+12*pulse], fill="red", outline="")
+
         mood = user.get('inferred_mood', {})
-        my = 140.0
+        my = dy + 10
+        self.canvas.create_text(50, my, anchor="nw", text="INFERRED MOOD:", fill="cyan", font=("Monaco", 12, "bold"))
+        my += 30
         for m, val in mood.items():
             self.canvas.create_text(70, my, anchor="nw", text=f"{m:18}: {float(val)*100:5.1f}%", fill="yellow", font=("Monaco", 9)); my += 20
+        
         loop = self.full_data.get('loop_consistency', {})
         self.canvas.create_text(450, 100, anchor="nw", text=f"LOOP AVG: {loop.get('avg_ms',0):.2f}ms\nSTUTTERS: {loop.get('stutters',0)}", fill="white", font=("Monaco", 10))
         

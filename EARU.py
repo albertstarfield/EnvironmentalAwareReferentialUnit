@@ -5840,7 +5840,15 @@ if HAS_QUART:
             def to_c(k): return k - 273.15
             
             # Barometer Trend (Davis codes: 0=steady, 20=rising, -20=falling)
-            tendency = wea.get('pressure_tendency_hpa', 0.0) # pyrefly: ignore
+            wea_dict = wea if isinstance(wea, dict) else {}
+            raw_tendency = wea_dict.get('pressure_tendency_hpa', 0.0)
+            try:
+                if isinstance(raw_tendency, (float, int, str)):
+                    tendency = float(raw_tendency)
+                else:
+                    tendency = 0.0
+            except (ValueError, TypeError):
+                tendency = 0.0
             bt_code = 0
             if tendency > 0.5: bt_code = 20
             elif tendency < -0.5: bt_code = -20

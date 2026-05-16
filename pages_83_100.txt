@@ -1,0 +1,1311 @@
+Approach Charts
+Airport Diagrams
+
+In the planview, when the procedure minima is not authorized, there will be an amber annunciator "NA" (Not Authorized) in the
+minimums section and the procedure reference bar. On the Profile View, an amber annunciation is displayed near the missed approach point
+stating "Minimums N/A".
+
+Departure Procedures
+
+Tap to View
+
+Arrival Procedures
+
+Current
+Selection
+
+Approach Charts
+Legend
+
+Caution
+Annunciation(s)
+Glossary
+Abbreviations &
+Acronyms
+References
+
+Approach - RNAV - LNAV/VNAV - Not Authorized
+
+Appendix
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+75
+
+Departure Procedures
+
+Airport Diagrams
+
+Approach Charts
+
+LOCALIZER BACKCOURSE / DME ARC
+When used in conjunction with the VOR system, Distance Measuring Equipment (DME) makes it possible for pilots to determine an accurate
+geographic position of the aircraft, including the bearing and distance TO and FROM the station. When flying a DME arc with wind, it is important to
+keep a continuous mental picture of the aircraft's position relative to the facility. High airspeeds require more pilot attention because of the higher
+rate of deviation and correction. Maintaining the arc is simplified by keeping slightly inside the curve, thus, the arc is turning toward the aircraft and
+interception may be accomplished by holding a straight course.
+A Lead Radial is the radial at which the turn from the arc to the inbound course is initiated. When intercepting a radial from a DME arc, the lead
+varies with arc radius and groundspeed.
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+Glossary
+
+Legend
+
+Approach Charts
+
+Arrival Procedures
+
+9
+10
+
+30
+
+11
+
+29
+28
+27
+
+26
+
+12
+
+25
+
+13
+
+24
+
+14
+
+23
+
+22
+15
+
+Abbreviations &
+Acronyms
+
+21
+20
+
+16
+
+References
+
+17
+
+19
+
+18
+
+Appendix
+
+Garmin Pilot iOS - SmartCharts - Approach - Planview - Localizer Back Course & DME Arc - Overview
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+76
+
+Approach Charts
+Aircraft Category.
+
+11
+
+Georeferenced aircraft.
+
+21
+
+Inbound Course (degrees).
+
+2
+
+Minimum Descent Altitude (MSL').
+
+12
+
+NAVAID Name and Arc Distance (nautical
+miles).
+
+22
+
+Intermediate Fix.
+
+3
+
+Height Above Touchdown (ft).
+
+13
+
+Minimum Altitude (MSL') for Arc.
+
+23
+
+Final Approach Fix.
+
+4
+
+Missed Approach has Holding Pattern.
+
+14
+
+Lead Radial from VORTAC (TOP).
+
+24
+
+Minimum Descent Altitude (MSL').
+
+5
+
+Minimum Flight Visibility (statute miles).
+
+15
+
+Minimum Altitude (MSL').
+
+25
+
+Missed Approach Point.
+
+6
+
+Missed Approach Holding Pattern.
+
+16
+
+Minimum Safe Altitude (3,100' MSL) for area
+and heading (240°-040°).
+
+26
+
+Airport Depiction.
+
+7
+
+Radial From VORTAC (TOP).
+
+17
+
+Minimum Safe Altitude (MSA) depiction.
+
+27
+
+Missed Approach Track.
+
+8
+
+Initial Approach Fix.
+
+18
+
+Back Course depiction.
+
+28
+
+Secondary NAVAID.
+
+9
+
+Airport Elevation (MSL').
+
+19
+
+Initial Approach Fix.
+
+29
+
+Primary NAVAID ID, Frequency, and Name.
+
+10
+
+Distance (nautical miles) From NAVAID.
+
+20
+
+Leg Distance (nautical miles).
+
+30
+
+Localizer ID, Frequency, and Morse Code ID.
+
+Airport Diagrams
+
+1
+
+Departure Procedures
+Arrival Procedures
+Approach Charts
+
+Profile View
+NOTE: Profile View georeferenced aircraft is depicted via GPS, not barometric altitude, even when Garmin Pilot is connected
+to the avionics via Connext. This depiction is for reference only and should not be used for navigation purposes.
+
+Legend
+
+The Profile View is drawn to scale, with a few exceptions. With certain features, such as course reversals, the Profile View shows a small, grey area
+on the far left or right, which is not to scale and will not depict the georeferenced aircraft, instead,
+will be displayed indicating the direction
+of flight with a white arrow, next to an encircled aircraft.
+
+Glossary
+Abbreviations &
+Acronyms
+
+Aircraft is Located
+in 'Not to Scale'
+Portion of Chart
+
+References
+Appendix
+
+Area Not to
+Scale
+
+Garmin Pilot iOS - SmartCharts - KLWC - Approach - ILS - Profile View - Landscape Orientation - Not to Scale Aircraft Location
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+77
+
+The to scale depiction can also allow pilots to visualize the descent profile, allowing for increased situational awareness, e.g, when landing at KTEB
+on the ILS Z or LOC Z RWY 06, the pilot will miss the mandatory altitude at DANDY if they intercept the glideslope too early.
+
+Approach Charts
+
+Arrival Procedures
+
+Departure Procedures
+
+Airport Diagrams
+
+Approach Charts
+
+Occasionally, the entire Profile View may not fit on the screen. In that case, scroll left or right by swiping on the Profile View.
+
+References
+
+Abbreviations &
+Acronyms
+
+Glossary
+
+Legend
+
+Garmin Pilot iOS - SmartCharts - KTEB - Approach - ILS Z or LOC Z - RWY06 - Profile View - Landscape Orientation
+
+Scroll LeftRight to View
+
+Appendix
+
+Obstacles
+
+Garmin Pilot iOS - SmartCharts - KSPG - Approach - RNAV - RWY07 - Profile View - Landscape Orientation
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+78
+
+Approach Charts
+Airport Diagrams
+
+Terrain and Obstacles are shown on the Profile View based on a decreasing swath width as you approach the runway. Due to this swath width,
+some procedures may have Obstacles or Terrain shown in the path, this is expected and designed for increased situational awareness.
+
+Departure Procedures
+Arrival Procedures
+Approach Charts
+
+Terrain &
+Obstacle
+
+Garmin Pilot iOS - SmartCharts - KBFI - Approach - ILS or LOC - RWY14R - Profile View - Landscape Orientation
+Legend
+
+In some regions, the Profile View depicts Segment MSA altitudes as a shaded area over the top of terrain and obstacles.
+
+Glossary
+Abbreviations &
+Acronyms
+References
+
+MSA
+
+Appendix
+
+Garmin Pilot iOS - SmartCharts - MYNN - Approach - VOR Y - RWY10 - Profile View - Landscape Orientation
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+79
+
+When a Decision Altitude (DA) is changed via Minima Adjustments, the distance between the DA and runway will change according to the
+glideslope. This distance is calculated dynamically by SmartCharts and will be depicted on the Profile View.
+The Final Approach Fix is identified on SmartCharts in the Profile View as such,
+with the 'f' next to the applicable fix name. This
+differs from other charting providers' depictions (e.g. FAA uses a lightning bolt arrow).
+When the glideslope crossing altitude and glideslope intercept altitude are the same, the altitude will only be shown once on the Profile View as
+the glideslope intercept altitude (the crossing altitude will be omitted).
+When a circling approach is selected, the Profile View will depict a distance between the missed approach point (MAP) and the airport. This
+distance is calculated from the MAP to the airport reference point (ARP), which may or may not, be located near the end of the landing runway.
+For procedures containing fly visual segments, the distance scale segment is greyed out as an indication that no obstacles or terrain is shown on
+the fly visual segment and the leg distance is removed. The bottom distance scale, distance to airport, or distance to threshold, is removed.
+
+Glossary
+
+Legend
+
+Approach Charts
+
+Arrival Procedures
+
+Departure Procedures
+
+Airport Diagrams
+
+Approach Charts
+
+Appendix
+
+References
+
+Abbreviations &
+Acronyms
+
+Garmin Pilot iOS - SmartCharts - TIST - Approach - VOR-A - Profile View - Landscape Orientation
+
+Distance Scale
+Removed
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+80
+
+Approach Charts
+Airport Diagrams
+Departure Procedures
+Arrival Procedures
+
+Circling NA
+Area
+
+Approach Charts
+Legend
+Glossary
+Abbreviations &
+Acronyms
+
+Visual
+Segment
+Distance Scale
+Removed
+
+Garmin Pilot iOS - SmartCharts - TIST Approach - VOR-A - Visual Segment - Circling Not Authorized
+
+References
+Appendix
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+81
+
+Appendix
+
+References
+
+Abbreviations &
+Acronyms
+Glossary
+
+Legend
+
+Approach Charts
+
+Arrival Procedures
+
+Departure Procedures
+
+Airport Diagrams
+
+Approach Charts
+
+Blank Page
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+82
+
+Legend
+
+U.S. TERMINAL PROCEDURES SYMBOLS & LEGEND
+
+Approach Lighting Systems
+ALSF-2
+
+ALSF-1
+
+MALS SSALS
+
+MALSF SSALF
+
+MALSR
+
+SALS
+
+SALSF
+
+SSALR
+
+ODALS
+
+Departure Procedures
+
+Symbols shown are for the Terminal Procedures Publication (TPP), which includes Standard Terminal Arrival (Arrival Procedures) Charts,
+Departure Procedures (DPs), Instrument Approach Procedures (IAP), and Airport Diagrams.
+
+Airport Diagrams
+
+LEGEND
+
+Arrival Procedures
+Approach Charts
+Legend
+Glossary
+Abbreviations &
+Acronyms
+
+Approach Lighting Systems
+
+References
+Appendix
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+83
+
+Legend
+
+Civil Airport
+
+Intermediate Fix
+
+Fly-Over Intersection w/Airspeed Restriction
+
+Airport Closed
+
+Initial Approach Fix & Intermediate
+Approach Fix
+
+Fly-Over Intersection w/Airspeed & Altitude
+Restriction
+
+Generic Airport
+
+Missed Approach Point
+
+Fly-Over Intersection w/Altitude Restriction
+
+Heliport
+
+Decision Altitude (Day/Night)
+
+Fly-By DME Compulsory Reporting Point
+
+Joint Use Airport
+
+Precision Approach Path Indicator - PAPI
+(Day/Night)
+
+Fly-By DME Non-compulsory Reporting
+Point
+
+Military Airport
+
+Radar Altimeter (Day/Night)
+
+Fly-By DME Non-compulsory w/Airspeed
+Restriction
+
+Change Over Point (Day/Night)
+
+Visual Approach Slope Indicator - VASI
+(Day/Night)
+
+Fly-By DME Non-compulsory w/Airspeed &
+Altitude Restriction
+
+Hold Procedure
+
+Fly-By Intersection Compulsory Reporting
+Point
+
+Fly-By DME Non-compulsory w/Altitude
+Restriction
+
+Hold is Not Part of Procedure
+
+Fly-By Intersection Non-compulsory
+Reporting Point
+
+Fly-Over DME Compulsory Reporting Point
+
+Missed Approach Hold
+
+Fly-By Intersection w/Airspeed Restriction
+
+Fly-Over DME Non-compulsory Reporting
+Point
+
+Final Approach Fix
+
+Fly-By Intersection w/Airspeed & Altitude
+Restriction
+
+Fly-Over DME Non-compulsory w/Airspeed
+Restriction
+
+Initial Approach Fix
+
+Fly-By Intersection w/Altitude Restriction
+
+Fly-Over DME Non-compulsory w/Airspeed
+& Altitude Restriction
+
+Initial Approach Fix & Final
+Approach Fix
+
+Fly-Over Intersection Compulsory Reporting
+Point
+
+Fly-Over DME Non-compulsory w/Altitude
+Restriction
+
+Initial Approach Fix & Missed
+Approach Point
+
+Fly-Over Intersection Non-compulsory
+Reporting Point
+
+NAVAID
+
+Charting Symbols
+
+Appendix
+
+References
+
+Abbreviations &
+Acronyms
+
+Glossary
+
+Legend
+
+Approach Charts
+
+Arrival Procedures
+
+Departure Procedures
+
+Airport Diagrams
+
+Charting Symbols
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+84
+
+Legend
+
+Fly-By Marker Non-compulsory
+Reporting Point
+
+Fly-By NDB/DME Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-Over TACAN Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Fly-By Non-Directional Beacon
+(NDB) Compulsory Reporting
+Point
+
+Fly-By NDB/DME Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-Over TACAN Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-By NDB Non-compulsory
+Reporting Point
+
+Fly-Over NDB/DME Compulsory Reporting
+Point
+
+Fly-Over TACAN Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-Over NDB/DME Non-compulsory
+Reporting Point
+
+Fly-By VOR Compulsory Reporting Point
+
+Fly-Over NDB/DME Non-compulsory
+Reporting Point w/Airspeed Restriction
+
+Fly-By VOR Non-compulsory Reporting
+Point
+
+Fly-Over NDB Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-By VOR Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Fly-Over NDB Compulsory
+Reporting Point
+
+Fly-Over NDB Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-By VOR Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-Over NDB Non-compulsory
+Reporting Point
+
+Fly-By TACAN Compulsory Reporting Point
+
+Fly-By VOR Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-By TACAN Non-compulsory Reporting
+Point
+
+Fly-Over VOR Compulsory Reporting Point
+
+Fly-By TACAN Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Fly-Over VOR Non-compulsory Reporting
+Point
+
+Fly-By TACAN Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-Over VOR Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Fly-By NDB/DME Compulsory
+Reporting Point
+
+Fly-By TACAN Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-Over VOR Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-By NDB/DME Noncompulsory Reporting Point
+
+Fly-Over TACAN Compulsory Reporting
+Point
+
+Fly-Over VOR Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-By NDB Non-compulsory
+Reporting Point w/Airspeed
+Restriction
+Fly-By NDB Non-compulsory
+Reporting Point w/Airspeed &
+Altitude Restriction
+Fly-By NDB Non-compulsory
+Reporting Point w/Altitude
+Restriction
+
+Legend
+Glossary
+Abbreviations &
+Acronyms
+
+Fly-Over NDB Non-compulsory
+Reporting Point w/Airspeed
+Restriction
+Fly-Over NDB Non-compulsory
+Reporting Point w/Airspeed &
+Altitude Restriction
+Fly-Over NDB Non-compulsory
+Reporting Point w/Altitude
+Restriction
+
+Approach Charts
+
+Fly-Over TACAN Non-compulsory Reporting
+Point
+
+Arrival Procedures
+
+Fly-By NDB/DME Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Departure Procedures
+
+Fly-By Locator Outer Marker
+(LOM) Non-compulsory
+Reporting Point
+
+Airport Diagrams
+
+Charting Symbols
+
+References
+
+Charting Symbols
+
+Appendix
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+85
+
+Charting Symbols
+Fly-By VOR/DME Compulsory
+Reporting Point
+
+Fly-By VORTAC Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Fly-By RNAV Non-compulsory
+Reporting Point w/Altitude Restriction
+
+Fly-By VOR/DME Non-compulsory
+Reporting Point
+
+Fly-By VORTAC Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-Over RNAV Compulsory Reporting
+Point
+
+Fly-By VORTAC Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-Over RNAV Non-compulsory
+Reporting Point
+
+Fly-Over VORTAC Compulsory Reporting
+Point
+
+Fly-Over RNAV Non-compulsory
+Reporting Point w/Airspeed Restriction
+
+Fly-Over VORTAC Non-compulsory Reporting
+Point
+
+Fly-Over RNAV Non-compulsory
+Reporting Point w/Airspeed & Altitude
+Restriction
+
+Fly-Over VOR/DME Compulsory
+Reporting Point
+
+Fly-Over VORTAC Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Fly-Over RNAV Non-compulsory
+Reporting Point w/Altitude Restriction
+
+Fly-Over VOR/DME Non-compulsory
+Reporting Point
+
+Fly-Over VORTAC Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Fly-Over Runway
+
+Fly-Over VORTAC Non-compulsory Reporting
+Point w/Altitude Restriction
+
+Fly-By Runway
+
+Fly-By RNAV Compulsory Reporting Point
+
+Airport Beacon (Day/Night)
+
+Fly-By RNAV Non-compulsory Reporting
+Point
+
+Windsock
+
+Fly-By VORTAC Compulsory
+Reporting Point
+
+Fly-By RNAV Non-compulsory Reporting
+Point w/Airspeed Restriction
+
+Non-Precision Approach Final Approach
+Fix
+
+Fly-By VORTAC Non-compulsory
+Reporting Point
+
+Fly-By RNAV Non-compulsory Reporting
+Point w/Airspeed & Altitude Restriction
+
+Visual Descent Point
+
+Fly-By VOR/DME Non-compulsory
+Reporting Point w/Airspeed
+Restriction
+Fly-By VOR/DME Non-compulsory
+Reporting Point w/Airspeed &
+Altitude Restriction
+Fly-By VOR/DME Non-compulsory
+Reporting Point w/Altitude
+Restriction
+
+Fly-Over VOR/DME Non-compulsory
+Reporting Point w/Airspeed
+Restriction
+Fly-Over VOR/DME Non-compulsory
+Reporting Point w/Airspeed &
+Altitude Restriction
+Fly-Over VOR/DME Non-compulsory
+Reporting Point w/Altitude
+Restriction
+
+Charting Symbols
+
+Appendix
+
+References
+
+Abbreviations &
+Acronyms
+
+Glossary
+
+Legend
+
+Approach Charts
+
+Arrival Procedures
+
+Departure Procedures
+
+Airport Diagrams
+
+Legend
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+86
+
+Legend
+
+Procedure Track
+
+Minimum Altitude
+Feeder Route
+
+Airport Diagrams
+
+ALTITUDES
+Mandatory Altitude
+
+ROUTES
+
+Mandatory Block
+Altitude
+Recommended
+Altitude
+
+Maximum Altitude
+
+Mandatory
+Airspeed
+
+Heading Legs
+
+Maximum
+Airspeed
+
+Minimum
+Airspeed
+
+Departure Procedures
+
+INDICATED AIRSPEED
+
+Missed Approach
+
+Recommended
+Airspeed
+
+Arrival Procedures
+
+Procedure Turn
+Minimum Route Altitude
+Distance
+Glidepath - GNSS to DA - Profile View
+
+HOLDING PATTERNS
+
+Approach Charts
+
+Conventional Glideslope to DA - Profile View
+
+Vertical Navigation to MDA - Profile View
+
+Legend
+
+Hold-in-lieu
+
+Vertical Guidance to MDA - Profile View
+
+Visual Descent Angle to MDA - Profile View
+
+Missed Approach Holding Pattern
+
+Glossary
+
+ILS - Vectors - Planview
+
+Radial Line and Value
+Abbreviations &
+Acronyms
+
+VOR/VORTAC ID & Lead Radial
+
+Primary NAVAID
+
+Secondary NAVAID
+
+TACAN or DME NAVAID
+
+Grass/Turf Runway
+
+Runway ID
+
+EMAS Hot Spot Displaced Threshold
+
+References
+
+Arrival Holding Pattern
+
+Waterway
+Appendix
+
+Gravel Runway
+SmartCharts - Planview Symbols - Legend - Instrument Approach Procedures
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+87
+
+Airport Diagrams
+
+Legend
+
+Departure Procedures
+
+Dirt/Unpaved Runway
+
+Paved Runway - Day Mode
+
+Legend
+
+Approach Charts
+
+Arrival Procedures
+
+Paved Runway - Night Mode
+
+Terminal Arrival Area - TAA
+
+Minimum Safe Altitude - MSA - Runway ID
+
+Glossary
+
+MISCELLANEOUS
+International Boundary (Day)
+
+Abbreviations &
+Acronyms
+
+International Boundary (Night)
+
+OBSTACLES
+Highest Obstacle Doubtful Spot
+Obstacle
+Accuracy Elevation
+
+References
+
+SPECIAL USE AIRSPACE
+
+Minimum Safe Altitude - MSA - Airport ID
+
+Restricted Airspace
+
+Prohibited Airspace
+
+Appendix
+
+SmartCharts - Profile View Symbols - Legend - Instrument Approach Procedures Cont'd
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+88
+
+Legend
+
+Airport Diagrams
+
+Departure Procedures
+
+Arrival Procedures
+
+Approach Charts
+
+Glossary
+
+Abbreviations &
+Acronyms
+
+References
+
+Appendix
+
+89
+
+Introduction to SmartCharts
+
+190-03148-00 Rev. B
+
+Legend
+
+Blank Page
+
+Approach Charts
+
+Arrival Procedures
+
+Departure Procedures
+
+Airport Diagrams
+
+Glossary
+
+GLOSSARY
+NOTE: This glossary provides definitions commonly used in the aviation industry, along with some unique to Garmin publications.
+While many items were included, not all the terms of basic aeronautical nomenclature are listed.
+
+A
+
+14 CFR. See Title 14 of the Code of Federal Regulations.
+100-hour inspection. An inspection identical in scope to an annual inspection. Conducted every 100 hours of flight on aircraft of under
+12,500 pounds that are used to carry passengers for hire.
+Absolute accuracy. The ability to determine present position in space independently, and is most often used by pilots.
+Absolute altitude. The actual distance between an aircraft and the terrain over which it is flying.
+Absolute pressure. Pressure measured from the reference of zero pressure, or a vacuum.
+A.C. Alternating current.
+
+Abbreviations &
+Acronyms
+
+Glossary
+
+Legend
+
+Acceleration. Force involved in overcoming inertia, and which may be defined as a change in velocity per unit of time.
+Acceleration error. A magnetic compass error apparent when the aircraft accelerates while flying on an easterly or westerly heading,
+causing the compass card to rotate toward North.
+Accelerate-go distance. The distance required to accelerate to V1 with all engines at takeoff power, experience an engine failure at V1,
+and continue the takeoff on the remaining engine(s). The runway required includes the distance required to climb to 35 feet by which time V2
+speed must be attained.
+Accelerate-stop distance. The distance required to accelerate to V1 with all engines at takeoff power, experience an engine failure at V1,
+and abort the takeoff and bring the airplane to a stop using braking action only (use of thrust reversing is not considered).
+Accelerometer. A part of an inertial navigation system (INS) that accurately measures the force of acceleration in one direction.
+
+References
+
+ADC. See air data computer.
+ADF. See automatic direction finder.
+
+Appendix
+
+ADI. See attitude director indicator.
+Adiabatic cooling. A process of cooling the air through expansion. For example, as air moves up slope it expands with the reduction of
+atmospheric pressure and cools as it expands.
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+90
+
+Glossary
+
+Adjustable stabilizer. A stabilizer that can be adjusted in flight to trim the airplane, thereby allowing the airplane to fly hands-off at any
+given airspeed.
+
+Arrival Procedures
+
+ADM. See aeronautical decision-making.
+
+Departure Procedures
+
+Adjustable-pitch propeller. A propeller with blades whose pitch can be adjusted on the ground with the engine not running, but which
+cannot be adjusted in flight. Also referred to as a ground adjustable propeller. Sometimes also used to refer to constant-speed propellers that
+are adjustable in flight.
+
+Airport Diagrams
+
+Adiabatic heating. A process of heating dry air through compression. For example, as air moves down a slope it is compressed, which
+results in an increase in temperature.
+
+ADS-B. See automatic dependent surveillance-broadcast.
+Advection fog. Fog resulting from the movement of warm, humid air over a cold surface.
+
+Approach Charts
+
+Adverse yaw. A condition of flight in which the nose of an airplane tends to yaw toward the outside of the turn. This is caused by the higher
+induced drag on the outside wing, which is also producing more lift. Induced drag is a by-product of the lift associated with the outside wing.
+Aerodynamics. The science of the action of air on an object, and with the motion of air on other gases. Aerodynamics deals with the
+production of lift by the aircraft, the relative wind, and the atmosphere.
+
+Glossary
+
+Aeronautical decision-making (ADM). A systematic approach to the mental process used by pilots to consistently determine the best
+course of action in response to a given set of circumstances.
+
+Legend
+
+Aeronautical chart. A map used in air navigation containing all or part of the following: topographic features, hazards and obstructions,
+navigation aids, navigation routes, designated airspace, and airports.
+
+Agonic line. An irregular imaginary line across the surface of the Earth along which the magnetic and geographic poles are in alignment,
+and along which there is no magnetic variation.
+Abbreviations &
+Acronyms
+
+Ailerons. Primary flight control surfaces mounted on the trailing edge of an airplane wing, near the tip. Ailerons control roll about the
+longitudinal axis.
+Aircraft. A device that is used, or intended to be used, for flight.
+
+References
+
+Aircraft altitude. The actual height above sea level at which the aircraft is flying.
+Aircraft approach category. A performance grouping of aircraft based on a speed of 1.3 times the stall speed in the landing configuration
+at maximum gross landing weight.
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+91
+
+Appendix
+
+Air data computer (ADC). An aircraft computer that receives and processes pitot pressure, static pressure, and temperature to calculate
+very precise altitude, indicated airspeed, true airspeed, and air temperature.
+
+Legend
+
+Approach Charts
+
+Arrival Procedures
+
+Departure Procedures
+
+Airport Diagrams
+
+Glossary
+
+Airfoil. Any surface, such as a wing, propeller, rudder, or even a trim tab, which provides aerodynamic force when it interacts with a moving
+stream of air.
+Air mass. An extensive body of air having fairly uniform properties of temperature and moisture.
+AIRMET. In-flight weather advisory issued as an amendment to the area forecast, concerning weather phenomena of operational interest to
+all aircraft and that is potentially hazardous to aircraft with limited capability due to lack of equipment, instrumentation, or pilot qualifications.
+Airplane. An engine-driven, fixed-wing aircraft heavier than air that is supported in flight by the dynamic reaction of air against its wings.
+Airplane Flight Manual (AFM). A document developed by the airplane manufacturer and approved by the Federal Aviation Administration
+(FAA). It is specific to a particular make and model airplane by serial number and it contains operating procedures and limitations.
+Airplane Owner/Information Manual. A document developed by the airplane manufacturer containing general information about the
+make and model of an airplane. The airplane owner’s manual is not FAA approved and is not specific to a particular serial numbered airplane.
+This manual is not kept current, and therefore cannot be substituted for the AFM/POH.
+Airport diagram. The section of an instrument approach procedure chart that shows a detailed diagram of the airport. This diagram
+includes surface features and airport configuration information.
+Airport/Facility Directory (A/FD). See Chart Supplement U.S.
+
+References
+
+Abbreviations &
+Acronyms
+
+Glossary
+
+Airport surface detection equipment (ASDE). Radar equipment specifically designed to detect all principal features and traffic on the
+surface of an airport, presenting the entire image on the control tower console; used to augment visual observation by tower personnel of
+aircraft and/or vehicular movements on runways and taxiways.
+Airport surveillance radar (ASR). Approach control radar used to detect and display an aircraft’s position in the terminal area.
+Airport surveillance radar approach. An instrument approach in which ATC issues instructions for pilot compliance based on aircraft
+position in relation to the final approach course and the distance from the end of the runway as displayed on the controller’s radar scope.
+Air route surveillance radar (ARSR). Air route traffic control center (ARTCC) radar used primarily to detect and display an aircraft’s
+position while en route between terminal areas.
+Air route traffic control center (ARTCC). Provides ATC service to aircraft operating on IFR flight plans within controlled airspace and
+principally during the en route phase of flight.
+
+Appendix
+
+Airspeed. Rate of the aircraft’s progress through the air.
+Airspeed indicator. A differential pressure gauge that measures the dynamic pressure of the air through which the aircraft is flying.
+Displays the craft’s airspeed, typically in knots, to the pilot.
+
+190-03148-00 Rev. B
+
+Introduction to SmartCharts
+
+92
+
+
