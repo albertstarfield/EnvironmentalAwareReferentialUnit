@@ -101,6 +101,80 @@ package body Earu.State_Store is
          State.ALS := ALS;
       end Update_Misc;
 
+      procedure Update_Loop_Consistency (Duration_Ms : Real) is
+         Target_Ms : constant Real := 10.0;
+         N : Natural range 0 .. WINDOW_SIZE;
+         Sum_Val : Real := 0.0;
+         Under_Target : Natural range 0 .. WINDOW_SIZE := 0;
+         Sorted_Times : Loop_Times_Array := (others => 0.0);
+         Temp : Real;
+         Min_Idx : Positive range 1 .. WINDOW_SIZE;
+      begin
+         Loop_Times (Write_Idx) := Duration_Ms;
+         Write_Idx := (if Write_Idx = WINDOW_SIZE then 1 else Write_Idx + 1);
+         if Total_Recorded < WINDOW_SIZE then
+            Total_Recorded := Total_Recorded + 1;
+         end if;
+         
+         if Duration_Ms > Target_Ms * 2.0 then
+            Stutters_Count := Stutters_Count + 1;
+         end if;
+         
+         N := Total_Recorded;
+         if N > 0 then
+            for I in 1 .. N loop
+               Sorted_Times (I) := Loop_Times (I);
+            end loop;
+            
+            for I in 1 .. N - 1 loop
+               Min_Idx := I;
+               for J in I + 1 .. N loop
+                  if Sorted_Times (J) < Sorted_Times (Min_Idx) then
+                     Min_Idx := J;
+                  end if;
+               end loop;
+               if Min_Idx /= I then
+                  Temp := Sorted_Times (I);
+                  Sorted_Times (I) := Sorted_Times (Min_Idx);
+                  Sorted_Times (Min_Idx) := Temp;
+               end if;
+            end loop;
+            
+            for I in 1 .. N loop
+               Sum_Val := Sum_Val + Sorted_Times (I);
+               if Sorted_Times (I) <= Target_Ms then
+                  Under_Target := Under_Target + 1;
+               end if;
+            end loop;
+            
+            State.Loop_Consistency.Avg_Ms := Sum_Val / Real (N);
+            State.Loop_Consistency.Pct_90_Ms := (Real (Under_Target) / Real (N)) * 100.0;
+            
+            declare
+               Low_1_Count : constant Natural := (if N * 1 / 100 < 1 then 1 else N * 1 / 100);
+               Low_1_Sum   : Real := 0.0;
+            begin
+               for I in N - Low_1_Count + 1 .. N loop
+                  Low_1_Sum := Low_1_Sum + Sorted_Times (I);
+               end loop;
+               State.Loop_Consistency.Low_1_Ms := Low_1_Sum / Real (Low_1_Count);
+            end;
+            
+            declare
+               Low_01_Count : constant Natural := (if N * 1 / 1000 < 1 then 1 else N * 1 / 1000);
+               Low_01_Sum   : Real := 0.0;
+            begin
+               for I in N - Low_01_Count + 1 .. N loop
+                  Low_01_Sum := Low_01_Sum + Sorted_Times (I);
+               end loop;
+               State.Loop_Consistency.Low_01_Ms := Low_01_Sum / Real (Low_01_Count);
+            end;
+            
+            State.Loop_Consistency.Stutters := Stutters_Count;
+            State.Loop_Consistency.Stutter_Warning := Stutters_Count > 0;
+         end if;
+      end Update_Loop_Consistency;
+
       function Get_Full_State return Earu_State is
       begin
          return State;
@@ -119,6 +193,10 @@ package body Earu.State_Store is
          State.SMC.Will_Bat_Survive := False;
          State.SMC.Must_Hibernate := False;
          State.System.PMSet_Info := (others => ' ');
+         Loop_Times := (others => 0.0);
+         Write_Idx := 1;
+         Total_Recorded := 0;
+         Stutters_Count := 0;
       end Initialize_State;
 
    end State_Buffer;

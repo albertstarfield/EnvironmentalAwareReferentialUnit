@@ -10,6 +10,7 @@ with Ada.Exceptions;
 with Ada.Calendar;
 with Ada.Calendar.Formatting;
 with Ada.Numerics.Generic_Elementary_Functions;
+with Ada.Real_Time;
 
 procedure Earu_Daemon is
    use Earu.Types;
@@ -259,10 +260,15 @@ procedure Earu_Daemon is
 
    task Telemetry_Task;
    task body Telemetry_Task is
+      use Ada.Real_Time;
+      Start_Time, End_Time : Ada.Real_Time.Time;
+      Elapsed : Ada.Real_Time.Time_Span;
+      Duration_Ms : Real;
    begin
       delay 5.0;
       loop
          begin
+            Start_Time := Ada.Real_Time.Clock;
             declare
                State : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
                Now_T : constant Ada.Calendar.Time := Ada.Calendar.Clock;
@@ -279,6 +285,10 @@ procedure Earu_Daemon is
                end if;
                Earu.IO.Write_EARU_Data (State, "/Volumes/EARU_dataIO/EARU_data.dat", Weather_SHM);
             end;
+            End_Time := Ada.Real_Time.Clock;
+            Elapsed := End_Time - Start_Time;
+            Duration_Ms := Real (Ada.Real_Time.To_Duration (Elapsed) * 1000.0);
+            Earu.State_Store.State_Buffer.Update_Loop_Consistency (Duration_Ms);
          exception
             when E : others =>
                Ada.Text_IO.Put_Line ("[!] Telemetry_Task error: " & Ada.Exceptions.Exception_Information (E));

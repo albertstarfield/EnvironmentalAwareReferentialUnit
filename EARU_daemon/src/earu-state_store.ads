@@ -6,6 +6,9 @@ package Earu.State_Store is
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
 
+   WINDOW_SIZE : constant := 1000;
+   type Loop_Times_Array is array (1 .. WINDOW_SIZE) of Real;
+
    protected State_Buffer is
       procedure Initialize_State;
       procedure Update_Sensors (Accel, Gyro : Vector3; Q : Quaternion);
@@ -21,9 +24,15 @@ package Earu.State_Store is
       procedure Update_Vibration (V : Vibration_State_Type; Mag : Real);
       procedure Add_Event (E : Event_Type);
       procedure Update_Misc (Lid_Angle, Lid_Speed : Real; ALS : ALS_Type);
+      procedure Update_Loop_Consistency (Duration_Ms : Real);
       function Get_Full_State return Earu_State;
    private
-      State : Earu_State;
+      State          : Earu_State;
+      Loop_Times     : Loop_Times_Array := (others => 0.0);
+      Write_Idx      : Positive range 1 .. WINDOW_SIZE := 1;
+      Total_Recorded : Natural range 0 .. WINDOW_SIZE := 0;
+      Stutters_Count : Integer := 0;
    end State_Buffer;
 
 end Earu.State_Store;
+
