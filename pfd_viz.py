@@ -13,6 +13,7 @@ from collections import deque
 import datetime
 import numpy as np
 import shutil
+import base64
 from typing import Optional, Any, Union, Literal
 
 # --- Self-Bootstrapping Block ---
@@ -717,64 +718,102 @@ class PrimaryFlightDisplay:
         try:
             if os.path.exists(self.data_path):
                 with open(self.data_path, 'r') as f:
-                    line = f.readline()
+                    lines = f.readlines()
+                    if not lines: return
+                    
+                    data = None
+                    primary_error = None
+                    
+                    # Try first line (Primary JSON)
+                    line = lines[0].strip()
                     if line:
+                        # Clean up any residual recovery info if it somehow ended up on the same line
                         if "[RECOVERY" in line: line = line.split("[RECOVERY")[0]
-                        data = json.loads(line)
-                        self.full_data = data
-                        orient = data.get('orientation', {})
-                        self.raw_pitch = float(orient.get('pitch', 0.0))
-                        self.raw_roll = float(orient.get('roll', 0.0))
-                        self.targets['pitch'] = self.raw_pitch * self.pitch_sign
-                        self.targets['roll'] = self.raw_roll * self.roll_sign
-                        
-                        loc = data.get('location', {})
-                        self.targets['alt'] = float(loc.get('alt', 0.0))
-                        self.targets['speed'] = float(loc.get('v_mag', 0.0) * 1.94384)
-                        self.targets['heading'] = float(loc.get('heading', 0.0))
-                        self.targets['lat'] = float(loc.get('lat', 0.0))
-                        self.targets['lon'] = float(loc.get('lon', 0.0))
-                        self.alt_rate = float(loc.get('alt_rate', 0.0) * 196.85)
-                        self.mach = float(loc.get('mach', 0.0))
-                        
-                        # Corrected values from EARU
-                        self.targets['cf_velocity'] = float(loc.get('CorrectionFactor_Reckoning_Velocity', 1.0))
-                        self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
-                        self.targets['cf_altitude'] = float(loc.get('CorrectionFactor_Reckoning_Altitude', 0.0))
-                        self.targets['cf_vertical_rate'] = float(loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0))
-                        
-                        sys_d = data.get('system', {})
-                        self.cpu = float(sys_d.get('cpu_usage', 0.0))
-                        self.batt = int(sys_d.get('battery_percent', 0))
-                        self.charging = bool(sys_d.get('battery_charging', False))
-                        self.hid_idle = float(sys_d.get('nonHumanInputHIDIdle', 0.0))
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError as e:
+                            primary_error = e
 
-                        self.battery_bank_wh = float(sys_d.get('BatteryEnergyBankWh', 0.0))
-                        self.battery_health = float(sys_d.get('BatteryHealthPct', 100.0))
-                        self.battery_full_wh = float(sys_d.get('BatteryFullChargeCapacityWh', 0.0))
-                        self.battery_design_wh = float(sys_d.get('BatteryDesignCapacityWh', 0.0))
+                    # If primary failed or is missing, try recovery block (Second line)
+                    if data is None and len(lines) > 1:
+                        rec_line = lines[1].strip()
+                        if rec_line.startswith("[RECOVERY_V1:"):
+                            try:
+                                # Format: [RECOVERY_V1:base64_data:hash]
+                                parts = rec_line[13:-1].split(":")
+                                if len(parts) >= 2:
+                                    b64_data = parts[0]
+                                    json_str = base64.b64decode(b64_data).decode()
+                                    data = json.loads(json_str)
+                                    # Optional: print(f"[{datetime.datetime.now()}] DATA RECOVERY: Restored data from recovery block.")
+                            except Exception as e:
+                                print(f"[{datetime.datetime.now()}] RECOVERY ERROR: Failed to restore from recovery block: {e}")
 
-                        smc = data.get('smc', {})
-                        self.power_rate = float(smc.get('PowerRateUsage', 0.0))
-                        self.day_usage_wh = float(smc.get('DayPowerUsage_Wh', 0.0))
-                        self.month_usage_wh = float(smc.get('AccumulativePowerUsageThisMonth_Wh', 0.0))
-                        self.meter_usage_wh = float(smc.get('AccumulativePowerUsageMeter_Wh', 0.0))
-                        self.est_today_wh = float(smc.get('EstimatedTodayPowerUsage_Wh', 0.0))
-                        self.survive_today = str(smc.get('WillBatterySurviveOneDay', "Yes"))
-                        self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
-                        self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
-                        self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
+                    if data is None:
+                        if primary_error:
+                            print(f"[{datetime.datetime.now()}] DATA ERROR: Failed to parse primary JSON from {self.data_path}")
+                            print(f"  Error: {primary_error}")
+                            print(f"  Line: {lines[0].strip()[:200]}...") # Truncate for log safety
+                        return
 
-                        self.simulated = False
+                    self.full_data = data
+                    orient = data.get('orientation', {})
+                    self.raw_pitch = float(orient.get('pitch', 0.0))
+                    self.raw_roll = float(orient.get('roll', 0.0))
+                    self.targets['pitch'] = self.raw_pitch * self.pitch_sign
+                    self.targets['roll'] = self.raw_roll * self.roll_sign
+                    
+                    loc = data.get('location', {})
+                    self.targets['alt'] = float(loc.get('alt', 0.0))
+                    self.targets['speed'] = float(loc.get('v_mag', 0.0) * 1.94384)
+                    self.targets['heading'] = float(loc.get('heading', 0.0))
+                    self.targets['lat'] = float(loc.get('lat', 0.0))
+                    self.targets['lon'] = float(loc.get('lon', 0.0))
+                    self.targets['alt_rate'] = float(loc.get('alt_rate', 0.0) * 196.85)
+                    self.targets['mach'] = float(loc.get('mach', 0.0))
+                    
+                    # Corrected values from EARU
+                    self.targets['cf_velocity'] = float(loc.get('CorrectionFactor_Reckoning_Velocity', 1.0))
+                    self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
+                    self.targets['cf_altitude'] = float(loc.get('CorrectionFactor_Reckoning_Altitude', 0.0))
+                    self.targets['cf_vertical_rate'] = float(loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0))
+                    
+                    sys_d = data.get('system', {})
+                    self.cpu = float(sys_d.get('cpu_usage', 0.0))
+                    self.batt = int(sys_d.get('battery_percent', 0))
+                    self.charging = bool(sys_d.get('battery_charging', False))
+                    self.hid_idle = float(sys_d.get('nonHumanInputHIDIdle', 0.0))
+
+                    self.battery_bank_wh = float(sys_d.get('BatteryEnergyBankWh', 0.0))
+                    self.battery_health = float(sys_d.get('BatteryHealthPct', 100.0))
+                    self.battery_full_wh = float(sys_d.get('BatteryFullChargeCapacityWh', 0.0))
+                    self.battery_design_wh = float(sys_d.get('BatteryDesignCapacityWh', 0.0))
+
+                    smc = data.get('smc', {})
+                    self.power_rate = float(smc.get('PowerRateUsage', 0.0))
+                    self.day_usage_wh = float(smc.get('DayPowerUsage_Wh', 0.0))
+                    self.month_usage_wh = float(smc.get('AccumulativePowerUsageThisMonth_Wh', 0.0))
+                    self.meter_usage_wh = float(smc.get('AccumulativePowerUsageMeter_Wh', 0.0))
+                    self.est_today_wh = float(smc.get('EstimatedTodayPowerUsage_Wh', 0.0))
+                    self.survive_today = str(smc.get('WillBatterySurviveOneDay', "Yes"))
+                    self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
+                    self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
+                    self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
+
+                    self.simulated = False
 
                 if os.path.exists(self.weather_history_path):
                     with open(self.weather_history_path, 'r') as f:
                         try:
-                            w_data = json.load(f)
-                            if 'ecosystem_weather' not in self.full_data:
-                                self.full_data['ecosystem_weather'] = {}
-                            self.full_data['ecosystem_weather']['3rdparty_meteo'] = w_data.get('meteo', {})
-                        except Exception: pass
+                            content = f.read()
+                            if content:
+                                w_data = json.loads(content)
+                                if 'ecosystem_weather' not in self.full_data:
+                                    self.full_data['ecosystem_weather'] = {}
+                                self.full_data['ecosystem_weather']['3rdparty_meteo'] = w_data.get('meteo', {})
+                        except Exception as e:
+                            print(f"[{datetime.datetime.now()}] WEATHER DATA ERROR: Failed to parse JSON from {self.weather_history_path}")
+                            print(f"  Error: {e}")
             else:
                 self.simulated = True
                 t = time.time()
@@ -782,7 +821,9 @@ class PrimaryFlightDisplay:
                 self.targets['heading'], self.targets['alt'] = (t*5)%360, 1000 + 100*math.sin(t*0.1)
                 self.targets['speed'], self.targets['lat'], self.targets['lon'] = 120 + 10*math.sin(t*0.2), -6.175, 106.827
                 self.cpu, self.batt, self.hid_idle = 25+5*math.sin(t), 85, (t % 60)
-        except Exception: pass
+        except Exception as e:
+            print(f"[{datetime.datetime.now()}] GENERAL UPDATE ERROR: {e}")
+
 
     def lerp_angle(self, cur: float, tgt: float, f: float) -> float:
         d = (tgt - cur + 180) % 360 - 180
@@ -868,13 +909,10 @@ class PrimaryFlightDisplay:
         self.draw_bank_scale(cx, cy)
         self.draw_status_vector(w, h)
         
-        # VSI with Correction
-        vsi_fpm = self.alt_rate * 60 # feet per minute approx
-        corr_vsi = self.alt_rate * self.cf_vertical_rate * 60
+        # VSI Display (self.alt_rate is already FPM and corrected from EARU)
+        vsi_fpm = self.alt_rate
         self.canvas.create_text(w - 130, cy - 210, text=f"VSI: {int(vsi_fpm)} FPM", fill="green", font=("Monaco", 10))
-        if abs(self.cf_vertical_rate - 1.0) > 0.01:
-            self.canvas.create_text(w - 130, cy - 195, text=f"CORR: {int(corr_vsi)}", fill="#00ccff", font=("Monaco", 8))
-
+        
         self.canvas.create_text(cx - 150, cy + 180, text=f"MACH: {self.mach:.3f}", fill="white", font=("Monaco", 10, "bold"))
 
     def draw_flight_path_vector(self, cx: float, cy: float, w: float, h: float) -> None:

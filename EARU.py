@@ -2262,6 +2262,7 @@ class LocationTracker:
         self.gas_R = 287.05  # J/kg*K
         self.gas_Cp = 1006.0  # J/kg*K
         self.gas_gamma = 1.4  # Ratio of specific heats
+        # Note: CoreLocationCLI is NOT true GPS; it relies on triangulation of WiFi and Bluetooth Soil Signals
         self.cl_path = "/opt/homebrew/bin/CoreLocationCLI"
         self.cl_available = os.path.exists(self.cl_path)
         self.smc_report_path = (
@@ -2992,11 +2993,24 @@ class LocationTracker:
                 cp_dry = 1005.0 + 0.05 * (self.ambient_temp_k - 300.0)
                 p_sat = 6.112 * math.exp(17.67 * tc / (tc + 243.5))
                 p_v = (self.humidity_pct / 100.0) * p_sat
-                p_total = self.pressure_hpa if self.pressure_hpa else 1013.25
+                
+                # Guard p_total to be at least 100 hPa and enough to keep q sane
+                p_total_raw = self.pressure_hpa if self.pressure_hpa else 1013.25
+                p_total = max(p_total_raw, 0.378 * p_v + 10.0)
+                p_total = max(p_total, 100.0) 
+                
                 q = 0.622 * p_v / (p_total - 0.378 * p_v)
+                q = max(0.0, min(q, 0.1)) # Specific humidity rarely exceeds 0.05
+                
                 self.gas_R = 287.05 * (1.0 + 0.608 * q)
                 self.gas_Cp = cp_dry * (1.0 + 0.84 * q)
-                self.gas_gamma = self.gas_Cp / (self.gas_Cp - self.gas_R)
+                
+                # Ensure gamma is physically plausible
+                denom = self.gas_Cp - self.gas_R
+                if denom > 0:
+                    self.gas_gamma = self.gas_Cp / denom
+                else:
+                    self.gas_gamma = 1.4
 
         except Exception:
             pass
@@ -3451,10 +3465,10 @@ class LocationTracker:
                 wy *= 0.1
                 wz *= 0.1
 
-            # Integrate velocity
+            # Integrate velocity (Raw Inertial)
             self.vel[0] += wx * dt
             self.vel[1] += wy * dt
-            self.vel[2] += wz * dt * self.CorrectionFactor_Reckoning_VerticalRate
+            self.vel[2] += wz * dt
 
             # 3. Dynamic Velocity Damping (Advanced ZUPT)
             # We now incorporate the VibrationDetector's motion_type for smarter damping
@@ -3498,11 +3512,11 @@ class LocationTracker:
             v_aug = self.wind_mapper.get_augmented_velocity(self.vel, va_val)
 
             # Calculate Mach number using dynamic gamma, R, and ambient temperature
-            if self.ambient_temp_k > 0:
+            # Guard against math domain error if parameters become unphysical
+            sound_product = self.gas_gamma * self.gas_R * self.ambient_temp_k
+            if self.ambient_temp_k > 0 and sound_product > 0:
                 # a = sqrt(gamma * R * T)
-                speed_of_sound = math.sqrt(
-                    self.gas_gamma * self.gas_R * self.ambient_temp_k
-                )
+                speed_of_sound = math.sqrt(sound_product)
                 self.mach = self.v_mag / speed_of_sound
             else:
                 self.mach = 0.0
@@ -3518,22 +3532,24 @@ class LocationTracker:
             dy = v_aug[1] * dt
             dz = v_aug[2] * dt
 
-            # Physical Movement Integration: Use a realistic physical knob (1.0)
-            # We apply CorrectionFactor_Reckoning_Velocity as a PID-like adjustment derived from CoreLocation anchor
+            # Physical Movement Integration: Use separate knobs for Horizontal and Vertical
+            # We apply CorrectionFactor_Reckoning gains as PID-like adjustments derived from CL/Anchor Gradient
             dyn_accel_mag = math.sqrt(wx**2 + wy**2 + wz**2)
             moving_g_normalized = dyn_accel_mag / 9.80665
+            responsiveness_boost = (1.0 + min(0.1, moving_g_normalized))
             
-            # Combined knob: physical responsiveness * CL-anchored gain
-            CorrectionFactor_Reckoning_Movement = self.CorrectionFactor_Reckoning_Velocity * (1.0 + min(0.1, moving_g_normalized))
+            # Separate Horizontal vs Vertical gain application
+            Gain_H = self.CorrectionFactor_Reckoning_Velocity * responsiveness_boost
+            Gain_V = self.CorrectionFactor_Reckoning_VerticalRate * responsiveness_boost
             
-            self.pos[0] += dx * CorrectionFactor_Reckoning_Movement
-            self.pos[1] += dy * CorrectionFactor_Reckoning_Movement
-            self.pos[2] += dz * CorrectionFactor_Reckoning_Movement
+            self.pos[0] += dx * Gain_H
+            self.pos[1] += dy * Gain_H
+            self.pos[2] += dz * Gain_V
 
             # Environmental Odometer also respects the physical scale
-            weighted_dx = dx * CorrectionFactor_Reckoning_Movement
-            weighted_dy = dy * CorrectionFactor_Reckoning_Movement
-            weighted_dz = dz * CorrectionFactor_Reckoning_Movement
+            weighted_dx = dx * Gain_H
+            weighted_dy = dy * Gain_H
+            weighted_dz = dz * Gain_V
             dist_inc = math.sqrt(weighted_dx**2 + weighted_dy**2 + weighted_dz**2)
             self.total_distance_m += dist_inc
             self.odometer_30m_history.append(
@@ -3550,7 +3566,9 @@ class LocationTracker:
             m_per_deg_lon = self.M_PER_DEG_LAT * math.cos(math.radians(self.lat))
             self.lon = np.float64(self.start_lon + (self.pos[0] / m_per_deg_lon))
             self.alt = np.float64(self.start_alt + self.pos[2] + self.CorrectionFactor_Reckoning_Altitude)
-            self.altitude_rate_per_second = self.vel[2]
+            
+            # Vertical Rate is the corrected inertial rate (for VSI display)
+            self.altitude_rate_per_second = self.vel[2] * self.CorrectionFactor_Reckoning_VerticalRate
 
             # Update Wind Map (100Hz)
             # Use SMC measured pressure vs. altitude-derived static pressure for dynamic pressure (q)
@@ -3601,6 +3619,7 @@ class LocationTracker:
             if current_user and current_user != "root" and uid != "0":
                 # Execute via launchctl asuser + osascript to proxy the user's location permissions
                 # We use the comma-separated format demonstrated by the user to prevent truncation
+                # Note: This is WiFi/Bluetooth triangulation (Soil Signals), not true GPS
                 cl_cmd = f"{self.cl_path} -f %latitude,%longitude,%altitude,%direction,%h_accuracy,%v_accuracy -once"
                 cmd = [
                     "launchctl",

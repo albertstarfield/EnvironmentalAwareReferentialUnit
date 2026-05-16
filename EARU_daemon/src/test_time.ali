@@ -1,0 +1,92 @@
+V "GNAT Lib v15"
+M P W=b
+P SS ZX
+
+RN
+RV NO_CALENDAR
+RV NO_DELAY
+RV NO_FIXED_POINT
+RV NO_IO
+RV NO_LOCAL_ALLOCATORS
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DYNAMIC_SIZED_OBJECTS
+
+U test_time%b		test_time.adb		82ffc9c1 NE OO SU
+W ada%s			ada.ads			ada.ali
+W ada.calendar%s	a-calend.adb		a-calend.ali
+W ada.calendar.formatting%s  a-calfor.adb	a-calfor.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+Z interfaces%s		interfac.ads		interfac.ali
+Z system.concat_2%s	s-conca2.adb		s-conca2.ali
+Z system.img_fixed_64%s	s-imfi64.ads		s-imfi64.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+
+D ada.ads		20250419085653 76789da1 ada%s
+D a-assert.ads		20250419085653 ba465f5c ada.assertions%s
+D a-calend.ads		20250419085653 bf7f3cc9 ada.calendar%s
+D a-calfor.ads		20250419085653 0f4707d1 ada.calendar.formatting%s
+D a-catizo.ads		20250419085653 eaa56756 ada.calendar.time_zones%s
+D a-except.ads		20250419085653 e7970cd9 ada.exceptions%s
+D a-ioexce.ads		20250419085653 40018c65 ada.io_exceptions%s
+D a-numeri.ads		20250419085653 84bea7a3 ada.numerics%s
+D a-nubinu.ads		20250419085653 93f1f3d1 ada.numerics.big_numbers%s
+D a-nbnbig.ads		20250419085653 31ff4aa1 ada.numerics.big_numbers.big_integers_ghost%s
+D a-stream.ads		20250419085653 17477cbd ada.streams%s
+D a-string.ads		20250419085653 90ac6797 ada.strings%s
+D a-sttebu.ads		20250419085653 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20250419085653 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20250419085653 fbca0ad5 ada.tags%s
+D a-textio.ads		20250419085653 34ef47de ada.text_io%s
+D a-unccon.ads		20250419085653 0e9b276f ada.unchecked_conversion%s
+D interfac.ads		20250419085653 9111f9c1 interfaces%s
+D i-cstrea.ads		20250419085653 ffd01b9d interfaces.c_streams%s
+D system.ads		20250419085653 70765b54 system%s
+D s-arit64.ads		20250419085653 e45973b2 system.arith_64%s
+D s-assert.ads		20250419085653 9c4520c7 system.assertions%s
+D s-conca2.ads		20250419085653 b5fb73f7 system.concat_2%s
+D s-crtl.ads		20250419085653 beb39b9e system.crtl%s
+D s-exctab.ads		20250419085653 91bef6ef system.exception_table%s
+D s-ficobl.ads		20250419085653 dc5161d4 system.file_control_block%s
+D s-imagef.ads		20250419085653 2a557a85 system.image_f%s
+D s-imfi64.ads		20250419085653 c2808cae system.img_fixed_64%s
+D s-parame.ads		20250419085653 3597fc11 system.parameters%s
+D s-putima.ads		20250419085653 17291fe4 system.put_images%s
+D s-secsta.ads		20250419085653 578279f5 system.secondary_stack%s
+D s-soflin.ads		20250419085653 5d88fdea system.soft_links%s
+D s-stache.ads		20250419085653 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20250419085653 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250419085653 ccded4e8 system.storage_elements%s
+D s-traent.ads		20250419085653 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250419085653 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20250419085653 d9032363 system.wch_con%s
+D test_time.adb		20260516153637 0628b507 test_time%b
+G a e
+G c Z b b [test_time standard 5 11 none]
+X 1 ada.ads
+18K9*Ada 22e8 39|1r6 2r6 3r6 6r13 7r21 7r42 8r21 8r42 11r4 11r36 12r4
+X 3 a-calend.ads
+36K13*Calendar 440e17 39|2w10 3r10 6r17 7r25 7r46 8r25 8r46 11r40
+42I9*Time<226I9> 39|6r26 7r34 8r34
+56V13*Clock{42I9} 39|8s55
+112V14*"-"{duration} 39|9s37
+226I9 Time_Rep<long_long_integer>
+X 4 a-calfor.ads
+24K22*Formatting 223e28 39|3w19 7r55 11r49
+121V13*Time_Of{3|42I9} 39|7s66
+176V13*Image{string} 39|11s60
+X 16 a-textio.ads
+58K13*Text_IO 785e16 39|1w10 11r8 12r8
+565U14*Put_Line 39|11s16 12s16
+X 18 interfac.ads
+68I9*Integer_64<long_long_integer>
+X 21 s-arit64.ads
+59I12*Int64{18|68I9}
+108V13*Multiply_With_Ovflo_Check64{59I12} 112i<c,__gnat_mulv64>22
+X 39 test_time.adb
+5U11*Test_Time 5b11 13l5 13t14
+7i4 Epoch{3|42I9} 9r39
+8i4 Now{3|42I9} 9r33 11r67
+9o4 Diff{duration} 12r58
+

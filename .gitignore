@@ -26,3 +26,5 @@ EARU_app
 EARU_core.mm
 com.earu.service.plist
 .meteo_cache.sqlite-journal
+agenticInst.txt
+PRD.md

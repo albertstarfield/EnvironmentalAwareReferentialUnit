@@ -1,0 +1,1000 @@
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+[92m[ok] EARU WifiLogger API starting on port 3270[0m
+[2026-05-16 13:30:18 +0700] [41102] [INFO] Running on http://0.0.0.0:3270 (CTRL + C to quit)
+[32m[*] mode: LOW POWER (30Hz background)[0m
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+STRICT CHECK FAILED (pyrefly):
+ERROR Object of class `NoneType` has no attribute `get`
+Object of class `float` has no attribute `get`
+Object of class `list` has no attribute `get`
+Object of class `str` has no attribute `get` [missing-attribute]
+    --> EARU.py:5843:28
+     |
+5843 |             raw_tendency = wea.get('pressure_tendency_hpa', 0.0)
+     |                            ^^^^^^^
+     |
+ INFO 1 error (27 suppressed)
+
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+STRICT CHECK FAILED (pyrefly):
+ERROR Object of class `NoneType` has no attribute `get`
+Object of class `float` has no attribute `get`
+Object of class `list` has no attribute `get`
+Object of class `str` has no attribute `get` [missing-attribute]
+    --> EARU.py:5843:28
+     |
+5843 |             raw_tendency = wea.get('pressure_tendency_hpa', 0.0)
+     |                            ^^^^^^^
+     |
+ INFO 1 error (27 suppressed)
+
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+STRICT CHECK FAILED (pyrefly):
+ERROR Object of class `NoneType` has no attribute `get`
+Object of class `float` has no attribute `get`
+Object of class `list` has no attribute `get`
+Object of class `str` has no attribute `get` [missing-attribute]
+    --> EARU.py:5843:28
+     |
+5843 |             raw_tendency = wea.get('pressure_tendency_hpa', 0.0)
+     |                            ^^^^^^^
+     |
+ INFO 1 error (27 suppressed)
+
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[33m[*] Removing stale mount point: /Volumes/EARU_dataIO[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+STRICT CHECK FAILED (pyrefly):
+ERROR Object of class `NoneType` has no attribute `get`
+Object of class `float` has no attribute `get`
+Object of class `list` has no attribute `get`
+Object of class `str` has no attribute `get` [missing-attribute]
+    --> EARU.py:5843:28
+     |
+5843 |             raw_tendency = wea.get('pressure_tendency_hpa', 0.0)
+     |                            ^^^^^^^
+     |
+ INFO 1 error (27 suppressed)
+
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+STRICT CHECK FAILED (pyrefly):
+ERROR Object of class `NoneType` has no attribute `get`
+Object of class `float` has no attribute `get`
+Object of class `list` has no attribute `get`
+Object of class `str` has no attribute `get` [missing-attribute]
+    --> EARU.py:5843:28
+     |
+5843 |             raw_tendency = wea.get('pressure_tendency_hpa', 0.0)
+     |                            ^^^^^^^
+     |
+ INFO 1 error (27 suppressed)
+
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+STRICT CHECK FAILED (pyrefly):
+ERROR Argument `bool | dict[str, dict[str, bool | float] | float | int | Unknown] | dict[str, dict[str, tuple[float | Unknown, str, str, float] | tuple[float, float, str, float]] | list[Unknown] | Unknown] | dict[str, float] | dict[Unknown, Unknown] | float | float64 | int | list[float] | list[int] | list[Unknown] | ndarray[tuple[Any, ...], dtype[float64]] | str | Unknown | None` is not assignable to parameter `x` with type `Buffer | SupportsFloat | SupportsIndex | str` in function `float.__new__` [bad-argument-type]
+    --> EARU.py:5846:34
+     |
+5846 |                 tendency = float(raw_tendency)
+     |                                  ^^^^^^^^^^^^
+     |
+  Protocol `Buffer` requires attribute `__buffer__`
+ INFO 1 error (27 suppressed)
+
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+STRICT CHECK FAILED (pyrefly):
+ERROR Argument `bool | dict[str, dict[str, bool | float] | float | int | Unknown] | dict[str, dict[str, tuple[float | Unknown, str, str, float] | tuple[float, float, str, float]] | list[Unknown] | Unknown] | dict[str, float] | dict[Unknown, Unknown] | float | float64 | int | list[float] | list[int] | list[Unknown] | ndarray[tuple[Any, ...], dtype[float64]] | str | Unknown | None` is not assignable to parameter `x` with type `Buffer | SupportsFloat | SupportsIndex | str` in function `float.__new__` [bad-argument-type]
+    --> EARU.py:5846:34
+     |
+5846 |                 tendency = float(raw_tendency)
+     |                                  ^^^^^^^^^^^^
+     |
+  Protocol `Buffer` requires attribute `__buffer__`
+ INFO 1 error (27 suppressed)
+
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+[92m[ok] EARU WifiLogger API starting on port 3270[0m
+[2026-05-16 13:32:30 +0700] [43652] [INFO] Running on http://0.0.0.0:3270 (CTRL + C to quit)
+[33m[*] stopping existing instance (pid 41102)...[0m
+[32m[*] mode: LOW POWER (30Hz background)[0m
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+[92m[ok] EARU WifiLogger API starting on port 3270[0m
+[33m[*] stopping existing instance (pid 43652)...[0m
+[2026-05-16 13:32:41 +0700] [43862] [INFO] Running on http://0.0.0.0:3270 (CTRL + C to quit)
+[32m[*] mode: LOW POWER (30Hz background)[0m
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[36m[*] Synchronizing EARU dependencies in venv...[0m
+Requirement already satisfied: numpy in ./.venv/lib/python3.13/site-packages (2.4.4)
+Requirement already satisfied: psutil in ./.venv/lib/python3.13/site-packages (7.2.2)
+Requirement already satisfied: requests in ./.venv/lib/python3.13/site-packages (2.33.1)
+Requirement already satisfied: openmeteo-requests in ./.venv/lib/python3.13/site-packages (1.7.5)
+Requirement already satisfied: pandas in ./.venv/lib/python3.13/site-packages (3.0.2)
+Requirement already satisfied: requests-cache in ./.venv/lib/python3.13/site-packages (1.3.1)
+Requirement already satisfied: retry-requests in ./.venv/lib/python3.13/site-packages (2.0.0)
+Requirement already satisfied: quart in ./.venv/lib/python3.13/site-packages (0.20.0)
+Requirement already satisfied: hypercorn in ./.venv/lib/python3.13/site-packages (0.18.0)
+Requirement already satisfied: numba in ./.venv/lib/python3.13/site-packages (0.65.1)
+Requirement already satisfied: torch in ./.venv/lib/python3.13/site-packages (2.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./.venv/lib/python3.13/site-packages (from requests) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in ./.venv/lib/python3.13/site-packages (from requests) (3.13)
+Requirement already satisfied: urllib3<3,>=1.26 in ./.venv/lib/python3.13/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./.venv/lib/python3.13/site-packages (from requests) (2026.4.22)
+Requirement already satisfied: niquests>=3.15.2 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (3.18.7)
+Requirement already satisfied: openmeteo-sdk>=1.22.0 in ./.venv/lib/python3.13/site-packages (from openmeteo-requests) (1.26.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.venv/lib/python3.13/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: attrs>=21.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: cattrs>=22.2 in ./.venv/lib/python3.13/site-packages (from requests-cache) (26.1.0)
+Requirement already satisfied: platformdirs>=2.5 in ./.venv/lib/python3.13/site-packages (from requests-cache) (4.9.6)
+Requirement already satisfied: url-normalize>=2.0 in ./.venv/lib/python3.13/site-packages (from requests-cache) (3.0.0)
+Requirement already satisfied: aiofiles in ./.venv/lib/python3.13/site-packages (from quart) (25.1.0)
+Requirement already satisfied: blinker>=1.6 in ./.venv/lib/python3.13/site-packages (from quart) (1.9.0)
+Requirement already satisfied: click>=8.0 in ./.venv/lib/python3.13/site-packages (from quart) (8.3.3)
+Requirement already satisfied: flask>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.3)
+Requirement already satisfied: itsdangerous in ./.venv/lib/python3.13/site-packages (from quart) (2.2.0)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.6)
+Requirement already satisfied: markupsafe in ./.venv/lib/python3.13/site-packages (from quart) (3.0.3)
+Requirement already satisfied: werkzeug>=3.0 in ./.venv/lib/python3.13/site-packages (from quart) (3.1.8)
+Requirement already satisfied: h11 in ./.venv/lib/python3.13/site-packages (from hypercorn) (0.16.0)
+Requirement already satisfied: h2>=4.3.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (4.3.0)
+Requirement already satisfied: priority in ./.venv/lib/python3.13/site-packages (from hypercorn) (2.0.0)
+Requirement already satisfied: wsproto>=0.14.0 in ./.venv/lib/python3.13/site-packages (from hypercorn) (1.3.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in ./.venv/lib/python3.13/site-packages (from numba) (0.47.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.13/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in ./.venv/lib/python3.13/site-packages (from torch) (4.15.0)
+Requirement already satisfied: setuptools<82 in ./.venv/lib/python3.13/site-packages (from torch) (81.0.0)
+Requirement already satisfied: sympy>=1.13.3 in ./.venv/lib/python3.13/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.13/site-packages (from torch) (3.6.1)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.13/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: hyperframe<7,>=6.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (6.1.0)
+Requirement already satisfied: hpack<5,>=4.1 in ./.venv/lib/python3.13/site-packages (from h2>=4.3.0->hypercorn) (4.1.0)
+Requirement already satisfied: urllib3-future<3,>=2.13.903 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.19.913)
+Requirement already satisfied: wassima<3,>=1.0.1 in ./.venv/lib/python3.13/site-packages (from niquests>=3.15.2->openmeteo-requests) (2.0.6)
+Requirement already satisfied: jh2<6.0.0,>=5.0.3 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (5.0.11)
+Requirement already satisfied: qh3<2.0.0,>=1.5.4 in ./.venv/lib/python3.13/site-packages (from urllib3-future<3,>=2.13.903->niquests>=3.15.2->openmeteo-requests) (1.8.1)
+Requirement already satisfied: flatbuffers==25.9.23 in ./.venv/lib/python3.13/site-packages (from openmeteo-sdk>=1.22.0->openmeteo-requests) (25.9.23)
+Requirement already satisfied: six>=1.5 in ./.venv/lib/python3.13/site-packages (from python-dateutil>=2.8.2->pandas) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.13/site-packages (from sympy>=1.13.3->torch) (1.3.0)
+
+[notice] A new release of pip is available: 25.1.1 -> 26.1.1
+[notice] To update, run: /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python3 -m pip install --upgrade pip
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[33m[*] Removing stale mount point: /Volumes/EARU_dataIO[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5
+Finished APFS operation on disk4
+Started APFS operation on disk5
+Preparing to add APFS Volume to APFS Container disk5
+Creating APFS Volume
+Created new APFS Volume disk5s1
+Mounting APFS Volume
+Setting volume permissions
+Disk from APFS operation: disk5s1
+Finished APFS operation on disk5
+[92m[ok] RAM disk mounted at /Volumes/EARU_dataIO[0m
+[92m[ok] EARU_data.dat restored from save_state.[0m
+[92m[ok] EARU WifiLogger API starting on port 3270[0m
+[2026-05-16 15:05:03 +0700] [38515] [INFO] Running on http://0.0.0.0:3270 (CTRL + C to quit)
+[33m[*] stopping existing instance (pid 43862)...[0m
+[32m[*] mode: LOW POWER (30Hz background)[0m
+[33m[*] Cleaning up existing EARU_dataIO mounts...[0m
+[36m[*] Initializing 64MB RAM disk (EARU_dataIO)...[0m
+Started APFS operation on disk4
+Creating a new empty APFS Container
+Unmounting Volumes
+Switching disk4 to APFS
+Creating APFS Container
+Created new APFS Container disk5
+Disk from APFS operation: disk5

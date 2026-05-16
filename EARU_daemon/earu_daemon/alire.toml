@@ -1,0 +1,11 @@
+name = "earu_daemon"
+description = "EARU Daemon in SPARK"
+version = "0.1.0-dev"
+
+authors = ["Albert Starfield"]
+maintainers = ["Albert Starfield <albertstarfield2001@gmail.com>"]
+licenses = "MIT"
+website = ""
+tags = []
+
+executables = ["earu_daemon"]
