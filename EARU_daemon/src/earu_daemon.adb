@@ -55,7 +55,7 @@ procedure Earu_Daemon is
    Stats_SHM   : Stats_SHM_Ptr := null;
    ML_Results  : ML_SHM_Ptr := null;
    Lid_Data    : access Interfaces.IEEE_Float_32 := null;
-   ALS_Data    : access Interfaces.IEEE_Float_32 := null;
+   ALS_Data    : ALS_SHM_Record_Ptr := null;
 
    task Sensors_Task;
    task body Sensors_Task is
@@ -141,8 +141,14 @@ procedure Earu_Daemon is
                Lid : Real := (if Lid_Data /= null then Real(Lid_Data.all) else 0.0);
                ALS : ALS_Type;
             begin
-               ALS.Lux_Factor := (if ALS_Data /= null then Real'Max (0.0, Real'Min (1.0, Real (ALS_Data.all))) else 0.0);
-               ALS.Spectral := (others => 0);
+               ALS.Lux_Factor := (if ALS_Data /= null then Real'Max (0.0, Real'Min (1.0, Real (ALS_Data.Lux_Factor))) else 0.0);
+               if ALS_Data /= null then
+                  for I in 1 .. 4 loop
+                     ALS.Spectral(I) := Integer (ALS_Data.Spectral(I));
+                  end loop;
+               else
+                  ALS.Spectral := (others => 0);
+               end if;
                Earu.State_Store.State_Buffer.Update_Misc (Lid, 0.0, ALS);
             end;
          end if;

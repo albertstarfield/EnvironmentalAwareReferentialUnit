@@ -50,6 +50,13 @@ package Earu.Shm is
 
    type Unsigned_32_Array_4 is array (1 .. 4) of Interfaces.Unsigned_32;
 
+   type ALS_SHM_Record is record
+      Spectral   : Unsigned_32_Array_4;
+      Padding    : Interfaces.Unsigned_32;
+      Lux_Factor : Interfaces.IEEE_Float_32;
+   end record with Convention => C;
+   type ALS_SHM_Record_Ptr is access all ALS_SHM_Record;
+
    -- Enhanced Stats SHM for full sidecar parity
    type Stats_SHM is record
       Header          : SHM_Header;
@@ -264,6 +271,6 @@ package Earu.Shm is
    function Open_Weather_SHM (Name : String) return Weather_SHM_Ptr;
    function Open_ML_SHM (Name : String) return ML_SHM_Ptr;
    function Open_Lid_SHM (Name : String) return access Interfaces.IEEE_Float_32;
-   function Open_ALS_SHM (Name : String) return access Interfaces.IEEE_Float_32;
+   function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
 
 end Earu.Shm;
