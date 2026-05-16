@@ -230,7 +230,6 @@ package body Earu.Math is
          -- UTF-8 for ● (U+25CF)
          Ev.Sym := (others => ' '); 
          Ev.Sym (1 .. 3) := (Character'Val (16#E2#), Character'Val (16#97#), Character'Val (16#8F#));
-         Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 9) := "vibration";
       else
          Ev.Sev := (others => ' '); Ev.Sev (1 .. 9) := "MICRO_VIB";
          -- UTF-8 for .
@@ -239,5 +238,146 @@ package body Earu.Math is
       end if;
       return Ev;
    end Classify_Event;
+
+   procedure Dead_Reckon_Update (
+      Loc            : in out Location_Type;
+      Accel          : in     Vector3;
+      Q              : in     Quaternion;
+      Gyro_Mag       : in     Real;
+      Motion_Type    : in     String;
+      DT             : in     Real;
+      Ambient_Temp_K : in     Real;
+      Gas_R          : in     Real;
+      Gas_Gamma      : in     Real
+   ) is
+      G_Const : constant Real := 9.80665;
+      W : Vector3;
+      A_Dyn_Mag : Real;
+      Is_Moving_Type : Boolean;
+      Raw_Mag : Real;
+      Damping : Real;
+      FS : constant Real := (if DT > 0.0 then 1.0 / DT else 800.0);
+      
+      -- Heading calculation
+      Sin_Y, Cos_Y, Yaw_D : Real;
+      
+      -- Position integration
+      Dx, Dy, Dz : Real;
+      Responsiveness : Real;
+      Gain_H, Gain_V : Real;
+      Dist_Inc : Real;
+      M_Per_Deg_Lat : constant Real := 111132.954;
+      M_Per_Deg_Lon : Real;
+      
+      -- Speed of sound & Mach
+      Sound_Product : Real;
+      Speed_Of_Sound : Real;
+   begin
+      -- 1. Rotate and subtract gravity
+      W := Rotate_And_Subtract_Gravity (Q, Accel, Loc.Calibrated_G);
+      
+      -- Convert g to m/s^2
+      W.X := W.X * G_Const;
+      W.Y := W.Y * G_Const;
+      W.Z := W.Z * G_Const;
+      
+      A_Dyn_Mag := Sqrt (W.X*W.X + W.Y*W.Y + W.Z*W.Z);
+      
+      -- 2. Jitter Filter (Dampen acceleration input by 90% during violent jitter)
+      if Gyro_Mag > 15.0 or A_Dyn_Mag > 5.0 then
+         W.X := W.X * 0.1;
+         W.Y := W.Y * 0.1;
+         W.Z := W.Z * 0.1;
+      end if;
+      
+      -- 3. Integrate velocity
+      Loc.Vel.X := Loc.Vel.X + W.X * DT;
+      Loc.Vel.Y := Loc.Vel.Y + W.Y * DT;
+      Loc.Vel.Z := Loc.Vel.Z + W.Z * DT;
+      
+      -- 4. Dynamic Velocity Damping (Advanced ZUPT)
+      Is_Moving_Type := not (Motion_Type (1 .. 10) = "Stationary" or else Motion_Type (1 .. 17) = "Stowed / Passive ");
+      
+      if Gyro_Mag < 0.8 then
+         Raw_Mag := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
+         if Abs (Raw_Mag - Loc.Calibrated_G) < 0.05 and not Is_Moving_Type then
+            -- Stationary: 50% loss per second -> Damping = 0.5 ** (1/fs)
+            Damping := Exp (Log (0.5) / FS);
+         else
+            -- Moving: 0.5% loss per second -> Damping = 0.995 ** (1/fs)
+            Damping := Exp (Log (0.995) / FS);
+         end if;
+      else
+         -- Jitter: 10% loss per second -> Damping = 0.9 ** (1/fs)
+         Damping := Exp (Log (0.9) / FS);
+      end if;
+      
+      Loc.Vel.X := Loc.Vel.X * Damping;
+      Loc.Vel.Y := Loc.Vel.Y * Damping;
+      Loc.Vel.Z := Loc.Vel.Z * Damping;
+      
+      Loc.V_Mag := Sqrt (Loc.Vel.X*Loc.Vel.X + Loc.Vel.Y*Loc.Vel.Y + Loc.Vel.Z*Loc.Vel.Z);
+      
+      -- 5. Heading Calculation (Yaw)
+      Sin_Y := 2.0 * (Q.W * Q.Z + Q.X * Q.Y);
+      Cos_Y := 1.0 - 2.0 * (Q.Y * Q.Y + Q.Z * Q.Z);
+      Yaw_D := Arctan (Sin_Y, Cos_Y) * (180.0 / PI);
+      
+      declare
+         Val : Real := Yaw_D + Loc.Corr_Heading;
+      begin
+         while Val < 0.0 loop Val := Val + 360.0; end loop;
+         while Val >= 360.0 loop Val := Val - 360.0; end loop;
+         Loc.Heading := Val;
+      end;
+      
+      -- 6. Integrate position using separate knobs
+      Responsiveness := 1.0 + Real'Min (0.1, Loc.V_Mag / G_Const);
+      Gain_H := Loc.Corr_Velocity * Responsiveness;
+      Gain_V := Loc.Corr_VRate * Responsiveness;
+      
+      Dx := Loc.Vel.X * DT;
+      Dy := Loc.Vel.Y * DT;
+      Dz := Loc.Vel.Z * DT;
+      
+      Loc.Pos.X := Loc.Pos.X + Dx * Gain_H;
+      Loc.Pos.Y := Loc.Pos.Y + Dy * Gain_H;
+      Loc.Pos.Z := Loc.Pos.Z + Dz * Gain_V;
+      
+      -- Odometer update
+      Dist_Inc := Sqrt ((Dx * Gain_H)**2 + (Dy * Gain_H)**2 + (Dz * Gain_V)**2);
+      Loc.Total_Dist := Loc.Total_Dist + Dist_Inc;
+      
+      -- 7. Update lat/lon/alt
+      if Loc.Lat /= 0.0 and Loc.Lon /= 0.0 then
+         Loc.Lat := Loc.Lat + (Loc.Pos.Y / M_Per_Deg_Lat);
+         M_Per_Deg_Lon := M_Per_Deg_Lat * Cos (Loc.Lat * (PI / 180.0));
+         if Abs (M_Per_Deg_Lon) > 0.001 then
+            Loc.Lon := Loc.Lon + (Loc.Pos.X / M_Per_Deg_Lon);
+         end if;
+      end if;
+      Loc.Alt := Loc.Alt + Loc.Pos.Z + Loc.Corr_Alt;
+      Loc.Alt_Rate := Loc.Vel.Z * Loc.Corr_VRate;
+      
+      -- 8. Mach calculation
+      Sound_Product := Gas_Gamma * Gas_R * Ambient_Temp_K;
+      if Ambient_Temp_K > 0.0 and Sound_Product > 0.0 then
+         Speed_Of_Sound := Sqrt (Sound_Product);
+         Loc.Mach := Loc.V_Mag / Speed_Of_Sound;
+      else
+         Loc.Mach := 0.0;
+      end if;
+      
+      -- Calculate pressure from Alt
+      declare
+         Base : constant Real := 1.0 - 0.0000225577 * Loc.Alt;
+      begin
+         if Base > 0.0 then
+            Loc.Pressure_HPa := 1013.25 * (Base**5.25588);
+         else
+            Loc.Pressure_HPa := 0.0;
+         end if;
+      end;
+   end Dead_Reckon_Update;
 
 end Earu.Math;

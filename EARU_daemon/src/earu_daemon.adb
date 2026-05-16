@@ -95,6 +95,25 @@ procedure Earu_Daemon is
                         Last_T := Real(E_A.Timestamp);
                         Earu.Math.Mahony_Update (Local_Q, Local_Gyro, Local_Accel, DT, 1.0, 0.05, Err_Int);
                         
+                        declare
+                           Full_State : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+                           Loc : Location_Type := Full_State.Location;
+                           Gyro_Mag : constant Real := Sqrt (Local_Gyro.X**2 + Local_Gyro.Y**2 + Local_Gyro.Z**2);
+                        begin
+                           Earu.Math.Dead_Reckon_Update (
+                              Loc            => Loc,
+                              Accel          => Local_Accel,
+                              Q              => Local_Q,
+                              Gyro_Mag       => Gyro_Mag,
+                              Motion_Type    => Full_State.Seismic_Activity.Motion_Type,
+                              DT             => DT,
+                              Ambient_Temp_K => Full_State.SMC.Ambient_Temp_K,
+                              Gas_R          => Full_State.SMC.Gas_Constants.R,
+                              Gas_Gamma      => Full_State.SMC.Gas_Constants.Gamma
+                           );
+                           Earu.State_Store.State_Buffer.Update_Location (Loc);
+                        end;
+
                         Earu.Math.Update_Vibration_State (Vib, Sqrt(Local_Accel.X**2 + Local_Accel.Y**2 + Local_Accel.Z**2), 800.0, Triggered, Ratio);
                         if Triggered then
                            declare

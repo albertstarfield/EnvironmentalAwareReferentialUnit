@@ -71,6 +71,8 @@ package Earu.Types is
       Corr_Heading  : aliased Real := 0.0;
       Corr_Velocity : aliased Real := 0.0;
       Corr_VRate    : aliased Real := 1.0;
+
+      Vel           : aliased Vector3 := (others => <>);
    end record;
 
    type Weather_Type is record

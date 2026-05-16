@@ -291,6 +291,54 @@ def stats_worker():
             print(f"[!] Stats error: {e}")
             time.sleep(1)
 
+import threading
+
+class LocationState:
+    def __init__(self):
+        self.lat = -6.2
+        self.lon = 106.8
+        self.alt = 0.0
+        self.pressure_hpa = 1013.25
+        self.cl_running = False
+
+global_location = LocationState()
+
+def check_core_location_bg():
+    global_location.cl_running = True
+    try:
+        user_res = subprocess.run(["stat", "-f%Su", "/dev/console"], capture_output=True, text=True)
+        current_user = user_res.stdout.strip() if user_res.returncode == 0 else "root"
+        uid_res = subprocess.run(["id", "-u", current_user], capture_output=True, text=True)
+        uid = uid_res.stdout.strip() if uid_res.returncode == 0 else "0"
+        
+        cl_path = "/opt/homebrew/bin/CoreLocationCLI"
+        if os.path.exists(cl_path):
+            if current_user and current_user != "root" and uid != "0":
+                cl_cmd = f"{cl_path} -f %latitude,%longitude,%altitude,%direction,%h_accuracy,%v_accuracy -once"
+                cmd = ["launchctl", "asuser", uid, "osascript", "-e", f'do shell script "{cl_cmd}"']
+            else:
+                cmd = [cl_path, "-f", "%latitude,%longitude,%altitude,%direction,%h_accuracy,%v_accuracy", "-once"]
+                
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
+                if res.returncode == 0:
+                    parts = res.stdout.strip().split(",")
+                    if len(parts) >= 6:
+                        new_lat = float(parts[0])
+                        new_lon = float(parts[1])
+                        new_alt = float(parts[2])
+                        if not (abs(new_lat) < 0.00001 and abs(new_lon) < 0.00001):
+                            global_location.lat = new_lat
+                            global_location.lon = new_lon
+                            global_location.alt = new_alt
+                            global_location.pressure_hpa = 1013.25 * math.pow(1.0 - 0.0000225577 * new_alt, 5.25588)
+            except Exception as e:
+                print(f"[!] CoreLocationCLI execution error: {e}")
+    except Exception as e:
+        print(f"[!] check_core_location_bg error: {e}")
+    finally:
+        global_location.cl_running = False
+
 def weather_worker():
     print("[*] Weather worker started.")
     shm = None
@@ -298,8 +346,14 @@ def weather_worker():
     except: shm = shared_memory.SharedMemory(name=WEATHER_SHM_NAME, create=True, size=273408)
     
     update_count = 0
+    last_cl_check = 0.0
     while True:
         try:
+            now = time.time()
+            if now - last_cl_check >= 15.0 and not global_location.cl_running:
+                last_cl_check = now
+                threading.Thread(target=check_core_location_bg, daemon=True).start()
+
             # Replicating the exact structured weather payload to ensure 100% telemetry parity
             # Let's populate grid wind maps and stats exactly matching expectation
             grid_7x7_10m = []
@@ -354,7 +408,7 @@ def weather_worker():
             }
 
             header = struct.pack("<I192sI", update_count, b'\0'*192, 0)
-            basic = struct.pack("<3fId4f", 30.81 + 273.15, 96.9248, 1013.25, 0, time.time(), -6.2, 106.8, 0.0, 1013.25)
+            basic = struct.pack("<3fId4f", 30.81 + 273.15, 96.9248, 1013.25, 0, time.time(), global_location.lat, global_location.lon, global_location.alt, global_location.pressure_hpa)
             
             grid_data = bytearray()
             for r_idx in range(7):

@@ -58,4 +58,16 @@ package Earu.Math is
       NSrc : Integer
    ) return Event_Type;
 
+   procedure Dead_Reckon_Update (
+      Loc            : in out Location_Type;
+      Accel          : in     Vector3;
+      Q              : in     Quaternion;
+      Gyro_Mag       : in     Real;
+      Motion_Type    : in     String;
+      DT             : in     Real;
+      Ambient_Temp_K : in     Real;
+      Gas_R          : in     Real;
+      Gas_Gamma      : in     Real
+   ) with Pre => (DT > 0.0 and DT < 1.0);
+
 end Earu.Math;

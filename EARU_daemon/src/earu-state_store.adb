@@ -25,6 +25,11 @@ package body Earu.State_Store is
          State.Location := L;
       end Update_Weather;
 
+      procedure Update_Location (L : Location_Type) is
+      begin
+         State.Location := L;
+      end Update_Location;
+
       procedure Update_Ecosystem (E : Ecosystem_Weather_Type) is
       begin
          State.Ecosystem_Weather := E;

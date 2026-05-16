@@ -10,6 +10,7 @@ package Earu.State_Store is
       procedure Initialize_State;
       procedure Update_Sensors (Accel, Gyro : Vector3; Q : Quaternion);
       procedure Update_Weather (W : Weather_Type; L : Location_Type);
+      procedure Update_Location (L : Location_Type);
       procedure Update_Ecosystem (E : Ecosystem_Weather_Type);
       procedure Update_System (S : System_Stats_Type; E : Electron_Travel_Type);
       procedure Update_SMC (SMC : SMC_Type);
