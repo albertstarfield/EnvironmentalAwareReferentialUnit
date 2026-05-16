@@ -55,12 +55,15 @@ package Earu.Types is
       Lat           : aliased Real := 0.0;
       Lon           : aliased Real := 0.0;
       Alt           : aliased Real := 0.0;
+      Start_Lat     : aliased Real := 0.0;
+      Start_Lon     : aliased Real := 0.0;
+      Start_Alt     : aliased Real := 0.0;
       Alt_Rate      : aliased Real := 0.0;
       Mach          : aliased Real := 0.0;
       Heading       : aliased Real := 0.0;
       Compass_Dir   : aliased String (1 .. 2) := (others => ' ');
       Pressure_HPa  : aliased Real := 1013.25;
-      Calibrated_G  : aliased Real := 9.80665;
+      Calibrated_G  : aliased Real := 1.0;
       Pos           : aliased Vector3 := (others => <>);
       Total_Dist    : aliased Real := 0.0;
       Odometer_30m  : aliased Real := 0.0;

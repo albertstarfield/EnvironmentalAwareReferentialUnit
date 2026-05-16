@@ -22,7 +22,7 @@ package body Earu.Shm is
    package Stats_Conv is new System.Address_To_Access_Conversions (Stats_SHM);
    
    package Lid_Data_Conv is new System.Address_To_Access_Conversions (Interfaces.IEEE_Float_32);
-   package ALS_Data_Conv is new System.Address_To_Access_Conversions (Interfaces.Unsigned_32);
+   package ALS_Data_Conv is new System.Address_To_Access_Conversions (Interfaces.IEEE_Float_32);
 
    function Map_Generic (Name : String; Size : size_t) return System.Address is
       C_Name : chars_ptr := New_String (Name);
@@ -77,11 +77,11 @@ package body Earu.Shm is
       return Lid_Data_Conv.To_Pointer (Addr + Storage_Offset (8));
    end Open_Lid_SHM;
 
-   function Open_ALS_SHM (Name : String) return access Interfaces.Unsigned_32 is
+   function Open_ALS_SHM (Name : String) return access Interfaces.IEEE_Float_32 is
       Addr : System.Address := Map_Generic (Name, 130);
    begin
       if Addr = System.Null_Address then return null; end if;
-      return ALS_Data_Conv.To_Pointer (Addr + Storage_Offset (8));
+      return ALS_Data_Conv.To_Pointer (Addr + Storage_Offset (48));
    end Open_ALS_SHM;
 
 end Earu.Shm;

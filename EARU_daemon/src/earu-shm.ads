@@ -264,6 +264,6 @@ package Earu.Shm is
    function Open_Weather_SHM (Name : String) return Weather_SHM_Ptr;
    function Open_ML_SHM (Name : String) return ML_SHM_Ptr;
    function Open_Lid_SHM (Name : String) return access Interfaces.IEEE_Float_32;
-   function Open_ALS_SHM (Name : String) return access Interfaces.Unsigned_32;
+   function Open_ALS_SHM (Name : String) return access Interfaces.IEEE_Float_32;
 
 end Earu.Shm;

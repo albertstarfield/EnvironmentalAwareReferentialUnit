@@ -349,14 +349,14 @@ package body Earu.Math is
       Loc.Total_Dist := Loc.Total_Dist + Dist_Inc;
       
       -- 7. Update lat/lon/alt
-      if Loc.Lat /= 0.0 and Loc.Lon /= 0.0 then
-         Loc.Lat := Loc.Lat + (Loc.Pos.Y / M_Per_Deg_Lat);
+      if Loc.Start_Lat /= 0.0 and Loc.Start_Lon /= 0.0 then
+         Loc.Lat := Loc.Start_Lat + (Loc.Pos.Y / M_Per_Deg_Lat);
          M_Per_Deg_Lon := M_Per_Deg_Lat * Cos (Loc.Lat * (PI / 180.0));
          if Abs (M_Per_Deg_Lon) > 0.001 then
-            Loc.Lon := Loc.Lon + (Loc.Pos.X / M_Per_Deg_Lon);
+            Loc.Lon := Loc.Start_Lon + (Loc.Pos.X / M_Per_Deg_Lon);
          end if;
       end if;
-      Loc.Alt := Loc.Alt + Loc.Pos.Z + Loc.Corr_Alt;
+      Loc.Alt := Loc.Start_Alt + Loc.Pos.Z + Loc.Corr_Alt;
       Loc.Alt_Rate := Loc.Vel.Z * Loc.Corr_VRate;
       
       -- 8. Mach calculation

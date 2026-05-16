@@ -55,7 +55,7 @@ procedure Earu_Daemon is
    Stats_SHM   : Stats_SHM_Ptr := null;
    ML_Results  : ML_SHM_Ptr := null;
    Lid_Data    : access Interfaces.IEEE_Float_32 := null;
-   ALS_Data    : access Interfaces.Unsigned_32 := null;
+   ALS_Data    : access Interfaces.IEEE_Float_32 := null;
 
    task Sensors_Task;
    task body Sensors_Task is
@@ -141,7 +141,7 @@ procedure Earu_Daemon is
                Lid : Real := (if Lid_Data /= null then Real(Lid_Data.all) else 0.0);
                ALS : ALS_Type;
             begin
-               ALS.Lux_Factor := (if ALS_Data /= null then Real(ALS_Data.all) else 0.0);
+               ALS.Lux_Factor := (if ALS_Data /= null then Real'Max (0.0, Real'Min (1.0, Real (ALS_Data.all))) else 0.0);
                ALS.Spectral := (others => 0);
                Earu.State_Store.State_Buffer.Update_Misc (Lid, 0.0, ALS);
             end;
@@ -170,10 +170,14 @@ procedure Earu_Daemon is
                 W.Pressure_MSL := Real (Weather_SHM.Pressure_MSL);
                 W.Weather_Code := Integer (Weather_SHM.Weather_Code);
                 W.Fetch_Time := Real (Weather_SHM.Fetch_Time);
+                L.Start_Lat := Real (Weather_SHM.Lat);
+                L.Start_Lon := Real (Weather_SHM.Lon);
+                L.Start_Alt := Real (Weather_SHM.Alt);
                 L.Lat := Real (Weather_SHM.Lat);
                 L.Lon := Real (Weather_SHM.Lon);
                 L.Alt := Real (Weather_SHM.Alt);
                 L.Pressure_HPa := Real (Weather_SHM.Pressure_HPa);
+                L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
                 Earu.Math.Update_Weather_Thermodynamics (Eco, SMC, L, W, Real (Stats_SHM.SMC_Ambient_K));
                 Earu.State_Store.State_Buffer.Update_Weather (W, L);
                 Earu.State_Store.State_Buffer.Update_Ecosystem (Eco);
@@ -187,7 +191,6 @@ procedure Earu_Daemon is
             declare
                Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
                S    : System_Stats_Type := Full.System;
-               L    : Location_Type := Full.Location;
                SMC  : SMC_Type := Full.SMC;
             begin
                S.CPU_Usage := Real (Stats_SHM.CPU_Usage);
@@ -203,7 +206,6 @@ procedure Earu_Daemon is
                S.PMSet_Info := Stats_SHM.PMSET_Info;
                S.Uptime_System := Real (Stats_SHM.Uptime_System);
                S.Uptime_Earu := Real (Stats_SHM.Uptime_Earu);
-               L.V_Mag := Real (Stats_SHM.V_Mag);
                SMC.Ambient_Temp_K := Real (Stats_SHM.SMC_Ambient_K);
                SMC.Humidity_Pct := Real (Stats_SHM.SMC_Humidity);
                SMC.TaLP_K := Real (Stats_SHM.TaLP_K);
@@ -219,7 +221,6 @@ procedure Earu_Daemon is
                SMC.Thrust_N := Real (Stats_SHM.SMC_Thrust_N);
                SMC.Massflow_Kg_S := Real (Stats_SHM.SMC_Massflow);
                Earu.State_Store.State_Buffer.Update_System (S, (T_CPU_ns => Long_Long_Integer (Stats_SHM.T_CPU_ns), T_RTC_ns => Long_Long_Integer (Stats_SHM.T_RTC_ns), T_GPU_ns => Long_Long_Integer (Stats_SHM.T_GPU_ns), T_ANE_ns => Long_Long_Integer (Stats_SHM.T_ANE_ns), T_DAT_ns => Long_Long_Integer (Stats_SHM.T_DAT_ns), T_SPU_ns => Long_Long_Integer (Stats_SHM.T_SPU_ns), SPU_Lat_ms => Real (Stats_SHM.SPU_Lat_ms), GPU_Lat_ms => Real (Stats_SHM.GPU_Lat_ms), ANE_Lat_ms => Real (Stats_SHM.ANE_Lat_ms), RTC_Jitter_ms => Real (Stats_SHM.RTC_Jitter_ms), Interference => Stats_SHM.Header.Padding /= 0, TS_ISO => Stats_SHM.TS_ISO));
-               Earu.State_Store.State_Buffer.Update_Weather (Full.Weather, L);
                Earu.State_Store.State_Buffer.Update_SMC (SMC);
                Earu.State_Store.State_Buffer.Update_Damage (Real (Stats_SHM.Fatigue_Cum), Real (Stats_SHM.Seu_Risk), Full.Seismic_Activity.Peak_G);
                Last_S := Stats_SHM.Header.Update_Count;
