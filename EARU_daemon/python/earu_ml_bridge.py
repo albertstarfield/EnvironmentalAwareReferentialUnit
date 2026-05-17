@@ -146,6 +146,18 @@ def stats_worker():
     start_time = time.time()
     update_count = 0
     
+    # Real-time Lid & ALS Variables
+    shm_lid = None
+    shm_als = None
+    last_lid_count = 0
+    last_als_count = 0
+    last_lid_angle = None
+    last_lid_t = time.time()
+    lid_angle = 0.0
+    lid_speed = 0.0
+    lux_factor = 0.0
+    spectral = [0, 0, 0, 0]
+    
     # Load persistent power metrics
     power_json_path = "/usr/local/EnvironmentalAwareReferentialUnit/save_state/power_metrics.json"
     day_power_usage_wh = 0.0
@@ -192,6 +204,45 @@ def stats_worker():
             
             v_mag = math.sqrt(np.sum(vel**2))
             global_location.v_mag = v_mag
+            # Read Lid Sensor
+            if not shm_lid:
+                try: shm_lid = shared_memory.SharedMemory(name="vib_detect_shm_lid")
+                except: pass
+            if shm_lid:
+                try:
+                    cnt, = struct.unpack_from('<I', shm_lid.buf, 0)
+                    if cnt != last_lid_count:
+                        new_lid_angle, = struct.unpack_from('<f', shm_lid.buf, 8)
+                        lid_angle = new_lid_angle
+                        now = time.time()
+                        if last_lid_angle is not None:
+                            dt_lid = now - last_lid_t
+                            if dt_lid > 0:
+                                raw_speed = abs(lid_angle - last_lid_angle) / dt_lid
+                                lid_speed = lid_speed * 0.7 + raw_speed * 0.3
+                        last_lid_angle = lid_angle
+                        last_lid_t = now
+                        last_lid_count = cnt
+                    else:
+                        lid_speed *= 0.95
+                except Exception as e:
+                    pass
+
+            # Read ALS Sensor
+            if not shm_als:
+                try: shm_als = shared_memory.SharedMemory(name="vib_detect_shm_als")
+                except: pass
+            if shm_als:
+                try:
+                    cnt, = struct.unpack_from('<I', shm_als.buf, 0)
+                    if cnt != last_als_count:
+                        new_lux, = struct.unpack_from('<f', shm_als.buf, 8 + 40)
+                        lux_factor = max(0.0, min(1.0, new_lux))
+                        spectral = [struct.unpack_from('<I', shm_als.buf, 8 + o)[0] for o in [20, 24, 28, 32]]
+                        last_als_count = cnt
+                except Exception as e:
+                    pass
+
             cpu = psutil.cpu_percent()
             mem = psutil.virtual_memory().percent
             batt = psutil.sensors_battery()
@@ -278,7 +329,8 @@ def stats_worker():
             uptime_sys = time.time() - psutil.boot_time()
             uptime_earu = time.time() - start_time
             sys_det = struct.pack("<Q2f", int(hid_idle_ns), float(uptime_sys), float(uptime_earu))
-            lid_als = struct.pack("<3f4I", 0.0, 0.0, 0.0, 0, 0, 0, 0)
+            lid_als = struct.pack("<3f4I", float(lid_angle), float(lid_speed), float(lux_factor),
+                                  int(spectral[0]), int(spectral[1]), int(spectral[2]), int(spectral[3]))
             addl = struct.pack("<12fi6f",
                 0.0, 0.0, temps.get("TaLW", 293.0), temps.get("TaLT", 293.0),
                 temps.get("TaLP", 293.0), temps.get("TaRF", 293.0),
@@ -329,8 +381,7 @@ def check_core_location_bg():
                 try:
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
                     with open("CoreLocationCLI.log", "a") as log_f:
-                        log_f.write(f"--- {time.strftime('%Y-%m-%dT%H:%M:%S')} (Attempt {attempt+1}) ---
-")
+                        log_f.write(f"--- {time.strftime('%Y-%m-%dT%H:%M:%S')} (Attempt {attempt+1}) ---\n")
                         log_f.write(f"Cmd: {cmd}\n")
                         log_f.write(f"Exit Code: {res.returncode}\n")
                         if res.stdout: log_f.write(f"Stdout: {res.stdout.strip()}\n")
