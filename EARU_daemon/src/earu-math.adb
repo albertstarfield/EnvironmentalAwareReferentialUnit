@@ -478,6 +478,39 @@ package body Earu.Math is
             Loc.Pressure_HPa := 0.0;
          end if;
       end;
+
+      -- 9. Transportation Category Classification
+      declare
+         Transport : String (1 .. 32) := (others => ' ');
+         Is_Rocket : Boolean := False;
+         Is_Flight : Boolean := False;
+         Is_Auto   : Boolean := False;
+         Is_Walk   : Boolean := False;
+      begin
+         if Motion_Type'Length >= 22 then
+            Is_Rocket := Motion_Type (Motion_Type'First .. Motion_Type'First + 21) = "Rocket / High-G Flight";
+            Is_Auto   := Motion_Type (Motion_Type'First .. Motion_Type'First + 21) = "Automotive / Transport";
+         end if;
+         if Motion_Type'Length >= 17 then
+            Is_Walk   := Motion_Type (Motion_Type'First .. Motion_Type'First + 16) = "Carried (Walking)";
+         end if;
+         if Motion_Type'Length >= 16 then
+            Is_Flight := Motion_Type (Motion_Type'First .. Motion_Type'First + 15) = "Turbulent Flight";
+         end if;
+
+         if Loc.V_Mag >= 250.0 or else Is_Rocket then
+            Transport (1 .. 18) := "Rocket/Spaceflight";
+         elsif Loc.V_Mag >= 30.0 or else Is_Flight then
+            Transport (1 .. 17) := "High-Speed/Flight";
+         elsif Loc.V_Mag >= 2.0 or else Is_Auto then
+            Transport (1 .. 20) := "Automotive/Transport";
+         elsif Loc.V_Mag >= 0.2 or else Is_Walk then
+            Transport (1 .. 18) := "Pedestrian/Walking";
+         else
+            Transport (1 .. 10) := "Stationary";
+         end if;
+         Loc.Transportation_Category := Transport;
+      end;
    end Dead_Reckon_Update;
 
    procedure Process_GPS_Update (

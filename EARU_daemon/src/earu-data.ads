@@ -31,6 +31,7 @@ package Earu.Data is
       Dew_Point_K      : Real := 273.15;
       Dew_Point_Spread : Real := 0.0;
       Weather_Inop     : Boolean := False;
+      Transportation_Category : String (1 .. 32) := (others => ' ');
    end record;
 
    type Damage_Fatigue_Data is record

@@ -782,7 +782,31 @@ def mock_sensor_worker():
             print(f"[!] Mock Sensor error: {e}")
             time.sleep(1)
 
+def request_wireless_permissions():
+    print("[*] Requesting WiFi and Bluetooth scanning permissions via osascript...")
+    try:
+        # Prompt user for WiFi and Bluetooth scan permission
+        prompt_script = (
+            'display dialog "EARU Telemetry Service requires permission to perform WiFi and Bluetooth scans '
+            'for location-based environmental calibration and velocity drift correction. Allow scanning?" '
+            'buttons {"Deny", "Allow"} default button "Allow" with title "EARU Telemetry Service"'
+        )
+        # Execute osascript dialog to request location permission
+        prompt_res = subprocess.run(["osascript", "-e", prompt_script], capture_output=True, text=True)
+        if "Allow" in prompt_res.stdout:
+            print("[+] User allowed scanning. Performing initial WiFi & Bluetooth queries...")
+            # Query WiFi Scan silently via private command line tool (airport) to trigger system prompt
+            subprocess.run(["osascript", "-e", 'do shell script "/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport -s"'], capture_output=True)
+            # Query Bluetooth System Profiler query silently to trigger system prompt
+            subprocess.run(["osascript", "-e", 'do shell script "system_profiler SPBluetoothDataType"'], capture_output=True)
+            print("[+] Initial WiFi/Bluetooth scans triggered.")
+        else:
+            print("[-] User denied scanning permission.")
+    except Exception as e:
+        print(f"[!] Wireless scanning permission setup failed: {e}")
+
 def main():
+    request_wireless_permissions()
     print("[*] Starting EARU Production Bridge...")
     for name in [STATS_SHM_NAME, WEATHER_SHM_NAME, ML_SHM_NAME, "vib_detect_shm", "vib_detect_shm_gyro", "vib_detect_shm_lid", "vib_detect_shm_als"]:
         try:
