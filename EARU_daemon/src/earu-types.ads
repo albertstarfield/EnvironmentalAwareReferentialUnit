@@ -28,6 +28,7 @@ package Earu.Types is
       Pct_90_Ms       : aliased Real := 0.0;
       Stutters        : aliased Integer := 0;
       Stutter_Warning : aliased Boolean := False;
+      Wcef_Latency    : aliased Real := 0.0;
    end record;
 
    type Stat_Bucket is record

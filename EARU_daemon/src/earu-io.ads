@@ -10,4 +10,7 @@ package Earu.IO is
       Weather : Earu.Shm.Weather_SHM_Ptr
    );
 
+   function Read_Sensor_Real (Filename : String) return Earu.Types.Real;
+   function Read_Sensor_Integer (Filename : String) return Integer;
+
 end Earu.IO;

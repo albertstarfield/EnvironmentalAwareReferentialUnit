@@ -67,9 +67,9 @@ echo "[*] Launching EARU Daemon directly from project root..."
 cd "$PROJECT_ROOT" || { echo "[!] Failed to enter project root"; exit 1; }
 
 if [ -f "./EARU_daemon/bin/earu_daemon" ]; then
-    ./EARU_daemon/bin/earu_daemon
+    nice -n -20 ./EARU_daemon/bin/earu_daemon
 else
     echo "[!] Compiled binary not found at ./EARU_daemon/bin/earu_daemon. Attempting fallback..."
     cd "$DAEMON_DIR" || exit 1
-    run_as_user alr --non-interactive run earu_daemon
+    nice -n -20 run_as_user alr --non-interactive run earu_daemon
 fi

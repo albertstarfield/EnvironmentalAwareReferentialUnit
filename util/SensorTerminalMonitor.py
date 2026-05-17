@@ -340,6 +340,7 @@ class PrimaryFlightDisplay:
         self.hid_idle: float = 0.0
         self.transportation_category: str = "stationary"
         self.fan_rpms: list[float] = []
+        self.turbo: int = 0
         self.airflow_inlet_c: float = 20.0
         self.airflow_outlet_c: float = 20.0
         self.airflow_offset: int = 0
@@ -987,6 +988,7 @@ class PrimaryFlightDisplay:
                     self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
                     self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
                     self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
+                    self.turbo = int(float(smc.get('turbo', 0)))
                     self.fan_rpms = [
                         float(smc.get('PropellerEngine1Tach', 0.0)),
                         float(smc.get('PropellerEngine2Tach', 0.0))
@@ -1030,6 +1032,7 @@ class PrimaryFlightDisplay:
                 self.targets['vel_y'] = 10.0 * math.sin(t * 0.2)
                 self.targets['vel_z'] = 0.5 * math.sin(t * 0.1)
                 self.cpu, self.batt, self.hid_idle = 25+5*math.sin(t), 85, (t % 60)
+                self.turbo = 0
         except Exception as e:
             print(f"[{datetime.datetime.now()}] GENERAL UPDATE ERROR: {e}")
 
@@ -1805,6 +1808,10 @@ class PrimaryFlightDisplay:
             
             # Digital telemetry
             self.canvas.create_text(cx, cy + 45, text=f"FAN {idx} / F{idx}Ac\n{int(rpm)} RPM", fill="white", font=("Monaco", 9, "bold"), justify="center", anchor="n")
+
+        # Check if TURBO mode is on and any Fan Propeller RPM goes beyond 10000rpm
+        if getattr(self, 'turbo', 0) == 1 and any(sf(rpm_val) > 10000.0 for rpm_val in fans):
+            self.canvas.create_text(x_env + 120, cy + 85, text="Turbo mode Enabled! Consumer fan bearing goes BRRRRRRR", fill="red", font=("Monaco", 10, "bold"), anchor="n")
 
         # --- Laptop Body & Airflow Illustration ---
         # Centered horizontally at x = 240, vertically at y = 550

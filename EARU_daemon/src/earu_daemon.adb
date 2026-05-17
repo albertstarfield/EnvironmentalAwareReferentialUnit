@@ -137,9 +137,18 @@ procedure Earu_Daemon is
                               elsif W_Code = 6 then
                                  Loc.Transportation_Category := (others => ' ');
                                  Loc.Transportation_Category (1 .. 27) := "sea_voyage_general_maritime";
-                              elsif W_Code = 7 then
-                                 Loc.Transportation_Category := (others => ' ');
-                                 Loc.Transportation_Category (1 .. 30) := "significant_location_detection";
+                               elsif W_Code = 7 then
+                                  Loc.Transportation_Category := (others => ' ');
+                                  Loc.Transportation_Category (1 .. 30) := "significant_location_detection";
+                               elsif W_Code = 8 then
+                                  Loc.Transportation_Category := (others => ' ');
+                                  Loc.Transportation_Category (1 .. 19) := "UnknownMoving_10kph";
+                               elsif W_Code = 9 then
+                                  Loc.Transportation_Category := (others => ' ');
+                                  Loc.Transportation_Category (1 .. 19) := "UnknownMoving_20kph";
+                               elsif W_Code = 10 then
+                                  Loc.Transportation_Category := (others => ' ');
+                                  Loc.Transportation_Category (1 .. 22) := "UnknownMoving_100knots";
                               end if;
                            end;
 
@@ -277,19 +286,96 @@ procedure Earu_Daemon is
                S.PMSet_Info := Stats_SHM.PMSET_Info;
                S.Uptime_System := Real (Stats_SHM.Uptime_System);
                S.Uptime_Earu := Real (Stats_SHM.Uptime_Earu);
-               SMC.Ambient_Temp_K := Real (Stats_SHM.SMC_Ambient_K);
-               SMC.Humidity_Pct := Real (Stats_SHM.SMC_Humidity);
-               SMC.TaLP_K := Real (Stats_SHM.TaLP_K);
-               SMC.TaRF_K := Real (Stats_SHM.TaRF_K);
-               SMC.Fan_RPMs := (Real (Stats_SHM.SMC_Fan1_RPM), Real (Stats_SHM.SMC_Fan2_RPM));
-               SMC.Temps := (PSTR => Real (Stats_SHM.SMC_PSTR), TCMz => Real (Stats_SHM.SMC_TCMz), TaLP => Real (Stats_SHM.SMC_TaLP), TaLT => Real (Stats_SHM.SMC_TaLT), TaLW => Real (Stats_SHM.SMC_TaLW), TaRF => Real (Stats_SHM.SMC_TaRF), TaRT => Real (Stats_SHM.SMC_TaRT), TaRW => Real (Stats_SHM.SMC_TaRW), Tg0X => Real (Stats_SHM.SMC_Tg0X), Ts0P => Real (Stats_SHM.SMC_Ts0P), Ts1P => Real (Stats_SHM.SMC_Ts1P));
-               SMC.Power := Real (Stats_SHM.Power_W);
-                SMC.Power_Rate_Usage := Real (Stats_SHM.Power_W);
+               
+               declare
+                  D_TCMz : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TCMz.dat");
+                  D_Tg0X : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Tg0X.dat");
+                  D_TaLP : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaLP.dat");
+                  D_TaLT : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaLT.dat");
+                  D_TaLW : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaLW.dat");
+                  D_TaRF : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRF.dat");
+                  D_TaRT : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRT.dat");
+                  D_TaRW : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRW.dat");
+                  
+                  function Get_Ts0P return Real is
+                     V : Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts0P.dat");
+                  begin
+                     if V = 0.0 then
+                        V := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts0p.dat");
+                     end if;
+                     return V;
+                  end Get_Ts0P;
+                  
+                  function Get_Ts1P return Real is
+                     V : Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts1P.dat");
+                  begin
+                     if V = 0.0 then
+                        V := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts1p.dat");
+                     end if;
+                     return V;
+                  end Get_Ts1P;
+
+                  D_Ts0P : constant Real := Get_Ts0P;
+                  D_Ts1P : constant Real := Get_Ts1P;
+                  D_PSTR : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_PSTR.dat");
+                  D_Fan0 : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F0Ac.dat");
+                  D_Fan1 : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F1Ac.dat");
+                  D_Turbo : constant Integer := Earu.IO.Read_Sensor_Integer ("sensor_TURBO_MODE.dat");
+               begin
+                  if D_Ts1P /= 0.0 then
+                     SMC.Ambient_Temp_K := D_Ts1P + 273.15;
+                  else
+                     SMC.Ambient_Temp_K := Real (Stats_SHM.SMC_Ambient_K);
+                  end if;
+                  
+                  SMC.Humidity_Pct := Real (Stats_SHM.SMC_Humidity);
+                  
+                  if D_TaLP /= 0.0 then
+                     SMC.TaLP_K := D_TaLP + 273.15;
+                  else
+                     SMC.TaLP_K := Real (Stats_SHM.TaLP_K);
+                  end if;
+                  
+                  if D_TaRF /= 0.0 then
+                     SMC.TaRF_K := D_TaRF + 273.15;
+                  else
+                     SMC.TaRF_K := Real (Stats_SHM.TaRF_K);
+                  end if;
+                  
+                  if D_Fan0 /= 0.0 or D_Fan1 /= 0.0 then
+                     SMC.Fan_RPMs := (D_Fan0, D_Fan1);
+                  else
+                     SMC.Fan_RPMs := (Real (Stats_SHM.SMC_Fan1_RPM), Real (Stats_SHM.SMC_Fan2_RPM));
+                  end if;
+                  
+                  if D_TCMz /= 0.0 then SMC.Temps.TCMz := D_TCMz; else SMC.Temps.TCMz := Real (Stats_SHM.SMC_TCMz); end if;
+                  if D_Tg0X /= 0.0 then SMC.Temps.Tg0X := D_Tg0X; else SMC.Temps.Tg0X := Real (Stats_SHM.SMC_Tg0X); end if;
+                  if D_TaLP /= 0.0 then SMC.Temps.TaLP := D_TaLP; else SMC.Temps.TaLP := Real (Stats_SHM.SMC_TaLP); end if;
+                  if D_TaLT /= 0.0 then SMC.Temps.TaLT := D_TaLT; else SMC.Temps.TaLT := Real (Stats_SHM.SMC_TaLT); end if;
+                  if D_TaLW /= 0.0 then SMC.Temps.TaLW := D_TaLW; else SMC.Temps.TaLW := Real (Stats_SHM.SMC_TaLW); end if;
+                  if D_TaRF /= 0.0 then SMC.Temps.TaRF := D_TaRF; else SMC.Temps.TaRF := Real (Stats_SHM.SMC_TaRF); end if;
+                  if D_TaRT /= 0.0 then SMC.Temps.TaRT := D_TaRT; else SMC.Temps.TaRT := Real (Stats_SHM.SMC_TaRT); end if;
+                  if D_TaRW /= 0.0 then SMC.Temps.TaRW := D_TaRW; else SMC.Temps.TaRW := Real (Stats_SHM.SMC_TaRW); end if;
+                  if D_Ts0P /= 0.0 then SMC.Temps.Ts0P := D_Ts0P; else SMC.Temps.Ts0P := Real (Stats_SHM.SMC_Ts0P); end if;
+                  if D_Ts1P /= 0.0 then SMC.Temps.Ts1P := D_Ts1P; else SMC.Temps.Ts1P := Real (Stats_SHM.SMC_Ts1P); end if;
+                  
+                  if D_PSTR /= 0.0 then
+                     SMC.Temps.PSTR := D_PSTR;
+                     SMC.Power := D_PSTR;
+                     SMC.Power_Rate_Usage := D_PSTR;
+                  else
+                     SMC.Temps.PSTR := Real (Stats_SHM.SMC_PSTR);
+                     SMC.Power := Real (Stats_SHM.Power_W);
+                     SMC.Power_Rate_Usage := Real (Stats_SHM.Power_W);
+                  end if;
+                  
+                  SMC.Turbo := D_Turbo;
+               end;
+               
                SMC.Day_Power_Usage_Wh := Real (Stats_SHM.Day_Power_Wh);
                SMC.Est_Today_Power_Wh := Real (Stats_SHM.Est_Today_Wh);
                SMC.Accum_Power_Month_Wh := Real (Stats_SHM.Month_Power_Wh);
                SMC.Accum_Power_Meter_Wh := Real (Stats_SHM.Meter_Power_Wh);
-               SMC.Turbo := Integer (Stats_SHM.SMC_Turbo);
                SMC.Thrust_N := Real (Stats_SHM.SMC_Thrust_N);
                SMC.Massflow_Kg_S := Real (Stats_SHM.SMC_Massflow);
                

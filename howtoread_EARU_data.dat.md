@@ -123,6 +123,7 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `low_1_ms` | ms | 1st percentile execution time. |
 | `stutters` | Count | Number of times the loop exceeded the 10ms (100Hz) target. |
 | `stutter_warning`| Bool | True if stutters were detected in the last window. |
+| `wcef_latency` | ps | Worst-Case Execution Frame (WCEF) latency, representing the maximum loop duration inside the sliding window in picosecond units. |
 
 ### 10. `smc` (System Management Controller)
 | Variable | Unit | Description |

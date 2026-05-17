@@ -368,7 +368,8 @@ package body Earu.IO is
       Append_Pair (P_Aug_Payload, "low_1_ms", F(State.Loop_Consistency.Low_1_Ms));
       Append_Pair (P_Aug_Payload, "pct_90_ms", F(State.Loop_Consistency.Pct_90_Ms));
       Append_Pair (P_Aug_Payload, "stutter_warning", B(State.Loop_Consistency.Stutter_Warning));
-      Append_Pair (P_Aug_Payload, "stutters", Ada.Strings.Fixed.Trim(Integer'Image(State.Loop_Consistency.Stutters), Ada.Strings.Left), False);
+      Append_Pair (P_Aug_Payload, "stutters", Ada.Strings.Fixed.Trim(Integer'Image(State.Loop_Consistency.Stutters), Ada.Strings.Left));
+      Append_Pair (P_Aug_Payload, "wcef_latency", F(State.Loop_Consistency.Wcef_Latency), False);
       Append (P_Aug_Payload, "}, ");
       
       Append (P_Aug_Payload, """seismic_activity"": {");
@@ -591,7 +592,8 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "low_1_ms", F(State.Loop_Consistency.Low_1_Ms));
       Append_Pair (JSON_Line, "pct_90_ms", F(State.Loop_Consistency.Pct_90_Ms));
       Append_Pair (JSON_Line, "stutter_warning", B(State.Loop_Consistency.Stutter_Warning));
-      Append_Pair (JSON_Line, "stutters", Ada.Strings.Fixed.Trim(Integer'Image(State.Loop_Consistency.Stutters), Ada.Strings.Left), False);
+      Append_Pair (JSON_Line, "stutters", Ada.Strings.Fixed.Trim(Integer'Image(State.Loop_Consistency.Stutters), Ada.Strings.Left));
+      Append_Pair (JSON_Line, "wcef_latency", F(State.Loop_Consistency.Wcef_Latency), False);
       Append (JSON_Line, "}, ");
       
       Append (JSON_Line, """orientation"": {");
@@ -740,4 +742,140 @@ package body Earu.IO is
          Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
       end;
    end Write_EARU_Data;
+
+   Cache_TCMz : Real := 75.0;
+   Cache_Tg0X : Real := 60.0;
+   Cache_TaLP : Real := 50.0;
+   Cache_TaRF : Real := 50.0;
+   Cache_TaLT : Real := 40.0;
+   Cache_TaLW : Real := 40.0;
+   Cache_TaRT : Real := 40.0;
+   Cache_TaRW : Real := 40.0;
+   Cache_Ts0P : Real := 50.0;
+   Cache_Ts1P : Real := 35.0;
+   Cache_PSTR : Real := 15.0;
+   Cache_F0   : Real := 2000.0;
+   Cache_F1   : Real := 2000.0;
+   Cache_Turbo : Integer := 0;
+
+   function Read_Sensor_Real (Filename : String) return Earu.Types.Real is
+      use Ada.Text_IO;
+      File : File_Type;
+      Val  : Real := 0.0;
+   begin
+      begin
+         Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/EARU_dataIO/" & Filename);
+      exception
+         when Name_Error | Use_Error =>
+            begin
+               Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/" & Filename);
+            exception
+               when others =>
+                  null;
+            end;
+      end;
+      
+      if Is_Open (File) then
+         begin
+            Real_IO.Get (File, Val);
+         exception
+            when others =>
+               Val := 0.0;
+         end;
+         Close (File);
+      end if;
+      
+      if Val /= 0.0 then
+         if Filename = "sensor_temp_TCMz.dat" then Cache_TCMz := Val;
+         elsif Filename = "sensor_temp_Tg0X.dat" then Cache_Tg0X := Val;
+         elsif Filename = "sensor_temp_TaLP.dat" then Cache_TaLP := Val;
+         elsif Filename = "sensor_temp_TaRF.dat" then Cache_TaRF := Val;
+         elsif Filename = "sensor_temp_TaLT.dat" then Cache_TaLT := Val;
+         elsif Filename = "sensor_temp_TaLW.dat" then Cache_TaLW := Val;
+         elsif Filename = "sensor_temp_TaRT.dat" then Cache_TaRT := Val;
+         elsif Filename = "sensor_temp_TaRW.dat" then Cache_TaRW := Val;
+         elsif Filename = "sensor_temp_Ts0P.dat" or Filename = "sensor_temp_Ts0p.dat" then Cache_Ts0P := Val;
+         elsif Filename = "sensor_temp_Ts1P.dat" or Filename = "sensor_temp_Ts1p.dat" then Cache_Ts1P := Val;
+         elsif Filename = "sensor_temp_PSTR.dat" then Cache_PSTR := Val;
+         elsif Filename = "sensor_fan_F0Ac.dat" then Cache_F0 := Val;
+         elsif Filename = "sensor_fan_F1Ac.dat" then Cache_F1 := Val;
+         end if;
+         return Val;
+      else
+         if Filename = "sensor_temp_TCMz.dat" then return Cache_TCMz;
+         elsif Filename = "sensor_temp_Tg0X.dat" then return Cache_Tg0X;
+         elsif Filename = "sensor_temp_TaLP.dat" then return Cache_TaLP;
+         elsif Filename = "sensor_temp_TaRF.dat" then return Cache_TaRF;
+         elsif Filename = "sensor_temp_TaLT.dat" then return Cache_TaLT;
+         elsif Filename = "sensor_temp_TaLW.dat" then return Cache_TaLW;
+         elsif Filename = "sensor_temp_TaRT.dat" then return Cache_TaRT;
+         elsif Filename = "sensor_temp_TaRW.dat" then return Cache_TaRW;
+         elsif Filename = "sensor_temp_Ts0P.dat" or Filename = "sensor_temp_Ts0p.dat" then return Cache_Ts0P;
+         elsif Filename = "sensor_temp_Ts1P.dat" or Filename = "sensor_temp_Ts1p.dat" then return Cache_Ts1P;
+         elsif Filename = "sensor_temp_PSTR.dat" then return Cache_PSTR;
+         elsif Filename = "sensor_fan_F0Ac.dat" then return Cache_F0;
+         elsif Filename = "sensor_fan_F1Ac.dat" then return Cache_F1;
+         else return 0.0;
+         end if;
+      end if;
+   exception
+      when others =>
+         if Is_Open (File) then
+            Close (File);
+         end if;
+         if Filename = "sensor_temp_TCMz.dat" then return Cache_TCMz;
+         elsif Filename = "sensor_temp_Tg0X.dat" then return Cache_Tg0X;
+         elsif Filename = "sensor_temp_TaLP.dat" then return Cache_TaLP;
+         elsif Filename = "sensor_temp_TaRF.dat" then return Cache_TaRF;
+         elsif Filename = "sensor_temp_TaLT.dat" then return Cache_TaLT;
+         elsif Filename = "sensor_temp_TaLW.dat" then return Cache_TaLW;
+         elsif Filename = "sensor_temp_TaRT.dat" then return Cache_TaRT;
+         elsif Filename = "sensor_temp_TaRW.dat" then return Cache_TaRW;
+         elsif Filename = "sensor_temp_Ts0P.dat" or Filename = "sensor_temp_Ts0p.dat" then return Cache_Ts0P;
+         elsif Filename = "sensor_temp_Ts1P.dat" or Filename = "sensor_temp_Ts1p.dat" then return Cache_Ts1P;
+         elsif Filename = "sensor_temp_PSTR.dat" then return Cache_PSTR;
+         elsif Filename = "sensor_fan_F0Ac.dat" then return Cache_F0;
+         elsif Filename = "sensor_fan_F1Ac.dat" then return Cache_F1;
+         else return 0.0;
+         end if;
+   end Read_Sensor_Real;
+
+   function Read_Sensor_Integer (Filename : String) return Integer is
+      use Ada.Text_IO;
+      File : File_Type;
+      Val  : Integer := 0;
+      package Int_IO is new Ada.Text_IO.Integer_IO (Integer);
+   begin
+      begin
+         Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/EARU_dataIO/" & Filename);
+      exception
+         when Name_Error | Use_Error =>
+            begin
+               Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/" & Filename);
+            exception
+               when others =>
+                  null;
+            end;
+      end;
+      
+      if Is_Open (File) then
+         begin
+            Int_IO.Get (File, Val);
+         exception
+            when others =>
+               Val := 0;
+         end;
+         Close (File);
+         Cache_Turbo := Val;
+      end if;
+      
+      return Cache_Turbo;
+   exception
+      when others =>
+         if Is_Open (File) then
+            Close (File);
+         end if;
+         return Cache_Turbo;
+   end Read_Sensor_Integer;
+
 end Earu.IO;

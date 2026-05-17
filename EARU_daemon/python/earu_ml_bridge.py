@@ -111,25 +111,62 @@ def get_detailed_battery():
         return design_wh, energy_wh, full_wh, health
     except: return 74.0, 50.0, 55.0, 100.0
 
+_smc_cache = {}
+SMC_PATH = os.path.join(BASE_PATH, "EARU_dataIO")
+if not os.path.exists(SMC_PATH):
+    SMC_PATH = BASE_PATH
+
 def get_smc_data():
+    global _smc_cache
     temps = {}
     keys = ["TCMz", "Tg0X", "TaLP", "TaRF", "TaLT", "TaLW", "TaRT", "TaRW", "Ts0P", "Ts1P", "PSTR"]
     for k in keys:
-        p = os.path.join(BASE_PATH, f"sensor_temp_{k}.dat")
-        try:
-            with open(p, "r") as f: temps[k] = float(f.read().strip())
-        except: temps[k] = 0.0
+        paths = [
+            os.path.join(SMC_PATH, f"sensor_temp_{k}.dat"),
+            os.path.join(SMC_PATH, f"sensor_temp_{k.replace('P', 'p')}.dat"),
+            os.path.join(SMC_PATH, f"sensor_temp_{k.lower()}.dat")
+        ]
+        val = None
+        for p in paths:
+            try:
+                with open(p, "r") as f:
+                    content = f.read().strip()
+                    if content:
+                        val = float(content)
+                        break
+            except:
+                pass
+        if val is not None:
+            temps[k] = val
+            _smc_cache[f"temp_{k}"] = val
+        else:
+            temps[k] = _smc_cache.get(f"temp_{k}", 0.0)
+
     rpms = [0.0, 0.0]
     for i in range(2):
-        p = os.path.join(BASE_PATH, f"sensor_fan_F{i}Ac.dat")
+        p = os.path.join(SMC_PATH, f"sensor_fan_F{i}Ac.dat")
+        val = None
         try:
-            with open(p, "r") as f: rpms[i] = float(f.read().strip())
-        except: pass
+            with open(p, "r") as f:
+                content = f.read().strip()
+                if content:
+                    val = float(content)
+        except:
+            pass
+        if val is not None:
+            rpms[i] = val
+            _smc_cache[f"fan_{i}"] = val
+        else:
+            rpms[i] = _smc_cache.get(f"fan_{i}", 0.0)
+
     turbo = 0
     try:
-        with open(os.path.join(BASE_PATH, "sensor_TURBO_MODE.dat"), "r") as f:
-            turbo = int(f.read().strip())
-    except: pass
+        with open(os.path.join(SMC_PATH, "sensor_TURBO_MODE.dat"), "r") as f:
+            content = f.read().strip()
+            if content:
+                turbo = int(float(content))
+    except:
+        pass
     return temps, rpms, turbo
 
 def get_pmset_info():
@@ -893,6 +930,18 @@ def weather_worker():
                                             json.dump(sig_data, sf, indent=4)
                                 except Exception as e:
                                     print(f"[!] Error saving significant location: {e}")
+
+            # If no other category is locked in, classify dynamic speed thresholds
+            if weather_code == 0:
+                v_mag_val = getattr(global_location, 'v_mag', 0.0)
+                speed_kph = v_mag_val * 3.6
+                speed_kts = v_mag_val * 1.94384
+                if speed_kts >= 100.0:
+                    weather_code = 10
+                elif speed_kph >= 20.0:
+                    weather_code = 9
+                elif speed_kph >= 10.0:
+                    weather_code = 8
 
             header = struct.pack("<I192sI", update_count, b'\0'*192, 0)
             basic = struct.pack("<3fId4f", 30.81 + 273.15, 96.9248, 1013.25, weather_code, time.time(), global_location.lat, global_location.lon, global_location.alt, global_location.pressure_hpa)

@@ -1,0 +1,66 @@
+Note: Building earu_daemon=0.1.0-dev/earu_daemon.gpr...
+Compile
+   [Ada]          earu_daemon.adb
+   [Ada]          print_offsets.adb
+   [C]            bridge_mock.c
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+print_offsets.adb:3:06: warning: unit "Interfaces" is not referenced [-gnatwu]
+print_offsets.adb:6:04: warning: variable "S" is read but never assigned [-gnatwv]
+print_offsets.adb:7:04: warning: variable "W" is read but never assigned [-gnatwv]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+   [Ada]          earu-shm.adb
+earu-shm.adb:29:07: warning: "FD" is not modified, could be declared constant [-gnatwk]
+earu-shm.adb:46:07: warning: "Addr" is not modified, could be declared constant [-gnatwk]
+earu-shm.adb:53:07: warning: "Addr" is not modified, could be declared constant [-gnatwk]
+earu-shm.adb:60:07: warning: "Addr" is not modified, could be declared constant [-gnatwk]
+earu-shm.adb:67:07: warning: "Addr" is not modified, could be declared constant [-gnatwk]
+earu-shm.adb:74:07: warning: "Addr" is not modified, could be declared constant [-gnatwk]
+earu-shm.adb:81:07: warning: "Addr" is not modified, could be declared constant [-gnatwk]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+earu_daemon.adb:3:06: warning: unit "System" is not referenced [-gnatwu]
+earu_daemon.adb:20:04: warning: use clause for type "Interfaces.C.int" has no effect [-gnatwu]
+earu_daemon.adb:58:04: warning: variable "ML_Results" is assigned but never read [-gnatwm]
+earu_daemon.adb:205:16: warning: "Lid" is not modified, could be declared constant [-gnatwk]
+earu_daemon.adb:227:15: warning: variable "Last_ML" is not referenced [-gnatwu]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+   [Ada]          earu-bridge.adb
+   [Ada]          earu-io.adb
+   [Ada]          earu-math.adb
+   [Ada]          earu-state_store.adb
+   [Ada]          earu-types.ads
+earu-bridge.adb:1:06: warning: redundant with clause in body [-gnatwr]
+earu-bridge.adb:1:18: warning: "Types" is already use-visible through previous use_clause at earu-bridge.ads:1 [-gnatwr]
+earu-bridge.adb:10:07: warning: use clause for package "Math" has no effect [-gnatwu]
+earu-bridge.adb:29:07: warning: "Pressure_Stress" is not modified, could be declared constant [-gnatwk]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+earu-math.adb:170:07: warning: formal parameter "FS" is not referenced [-gnatwf]
+earu-math.adb:211:07: warning: formal parameter "Ratio" is not referenced [-gnatwf]
+earu-math.adb:351:43: warning: index for "Motion_Type" may assume lower bound of 1 [-gnatww]
+earu-math.adb:351:43: warning: suggested replacement: "Motion_Type'First" [-gnatww]
+earu-math.adb:351:48: warning: index for "Motion_Type" may assume lower bound of 1 [-gnatww]
+earu-math.adb:351:48: warning: suggested replacement: "Motion_Type'First + 9" [-gnatww]
+earu-math.adb:351:88: warning: index for "Motion_Type" may assume lower bound of 1 [-gnatww]
+earu-math.adb:351:88: warning: suggested replacement: "Motion_Type'First" [-gnatww]
+earu-math.adb:351:93: warning: index for "Motion_Type" may assume lower bound of 1 [-gnatww]
+earu-math.adb:351:93: warning: suggested replacement: "Motion_Type'First + 16" [-gnatww]
+earu-math.adb:431:10: warning: use clause for type "Interfaces.C.long" has no effect [-gnatwu]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+earu-io.adb:7:06: warning: redundant with clause in body [-gnatwr]
+earu-io.adb:8:06: warning: redundant with clause in body [-gnatwr]
+earu-io.adb:30:13: warning: "Str" is not modified, could be declared constant [-gnatwk]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+Bind
+   [gprbind]      earu_daemon.bexch
+   [gprbind]      print_offsets.bexch
+   [Ada]          print_offsets.ali
+   [Ada]          earu_daemon.ali
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+clang: warning: overriding deployment version from '16.0' to '26.0' [-Woverriding-deployment-version]
+Link
+   [archive]      libearu_daemon.a
+   [index]        libearu_daemon.a
+   [link]         earu_daemon.adb
+   [link]         print_offsets.adb
+Success: Build finished successfully in 4.42 seconds.

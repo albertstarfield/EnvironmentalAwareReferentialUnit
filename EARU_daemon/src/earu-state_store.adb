@@ -177,6 +177,7 @@ package body Earu.State_Store is
             
             State.Loop_Consistency.Stutters := Stutters_Count;
             State.Loop_Consistency.Stutter_Warning := Stutters_Count > 0;
+            State.Loop_Consistency.Wcef_Latency := Sorted_Times (N) * 1_000_000_000.0;
          end if;
       end Update_Loop_Consistency;
 

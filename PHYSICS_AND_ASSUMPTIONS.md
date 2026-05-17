@@ -229,6 +229,15 @@ $$\text{Interference} = \begin{cases}
     $$\text{State.Electron\_Travel.Interference} = (\text{Stats\_SHM.Header.Padding} \neq 0)$$
     When active, interference inflicts a **1.2x stress multiplier penalty** on logic board solder joint microcrack fatigue increments!
 
+### 7.4 Loop Consistency & Worst-Case Execution Frame (WCEF) Latency
+
+To guarantee real-time scheduler reliability under highest CPU priority nice bounds, the system continuously tracks its loop execution times over a sliding window ($W_{size} = 1000$ iterations). The daemon evaluates:
+*   **Average Loop Latency ($T_{avg}$):** The mean duration per loop execution cycle.
+*   **Worst-Case Execution Frame (WCEF) Latency ($T_{wcef}$):** The maximum loop duration observed within the sliding window, serialized in high-resolution picosecond ($1\text{ ms} = 10^9\text{ ps}$) units to prevent precision loss:
+    $$T_{wcef} = \max(T_{loop}) \cdot 10^9 \quad (\text{ps})$$
+
+This WCEF latency is exported natively to `EARU_data.dat` as the `"wcef_latency"` key under the `"loop_consistency"` dictionary, allowing downstream cockpit HUD monitors to display live real-time scheduling constraints.
+
 ---
 
 ## 8. Data Integrity Parity & RECOVERY_V1 Architecture
@@ -457,6 +466,9 @@ These variables are evaluated against seven fine-grained transportation scenario
 | **5** | `sea_voyage_maritime_nautics` | $\ge 4$ | Sparse | $\Delta Alt = [50\text{–}100\text{m}]$ over sea level ($Alt_{terrain} \le 0$) | $1\text{–}90 \text{ kts}$ for 5 min |
 | **6** | `sea_voyage_general_maritime` | $\le 1$ | Intermittent | $\Delta Alt = [50\text{–}100\text{m}]$ over sea level ($Alt_{terrain} \le 0$) | $1\text{–}90 \text{ kts}$ for 5 min |
 | **7** | `significant_location_detection` | $\ge 1$ | Dense ($\ge 3$) | Dwelling inside $5\text{m}$ radius for 5 min | $\le 30 \text{ kts}$ for 5 min |
+| **8** | `UnknownMoving_10kph` | Any | Any | Any | $\ge 10 \text{ kph}$ (if unclassified) |
+| **9** | `UnknownMoving_20kph` | Any | Any | Any | $\ge 20 \text{ kph}$ (if unclassified) |
+| **10** | `UnknownMoving_100knots` | Any | Any | Any | $\ge 100 \text{ knots}$ (if unclassified) |
 
 ---
 
@@ -482,7 +494,7 @@ $$d_{geodetic}(\text{New\_Anchor}, \, \text{Existing\_Anchor}) > 10.0 \text{ met
 #### 11.7.3 Shared Memory Transmission & Ada Intercepts
 
 To avoid breaking representation clauses, structural paddings, or binary serialization lengths in the Unix shared memory segments:
-1.  The Python sidecar calculates the active scenario code ($1 \dots 7$) and packages it as an unsigned 32-bit integer inside the standard `Weather_Code` field of `Weather_SHM`.
+1.  The Python sidecar calculates the active scenario code ($1 \dots 10$) and packages it as an unsigned 32-bit integer inside the standard `Weather_Code` field of `Weather_SHM`.
 2.  The Ada/SPARK telemetry daemon intercepts this field upon update, matches the scenario value, and immediately overrides the default calculated `Location.Transportation_Category` string with the correct underscore-separated codename:
     ```ada
     if Weather_SHM.Weather_Code = 1 then
@@ -490,6 +502,12 @@ To avoid breaking representation clauses, structural paddings, or binary seriali
     elsif Weather_SHM.Weather_Code = 2 then
         Loc.Transportation_Category := Pad_String ("flight_general_aviation_voyage");
     -- ...
+    elsif Weather_SHM.Weather_Code = 8 then
+        Loc.Transportation_Category := Pad_String ("UnknownMoving_10kph");
+    elsif Weather_SHM.Weather_Code = 9 then
+        Loc.Transportation_Category := Pad_String ("UnknownMoving_20kph");
+    elsif Weather_SHM.Weather_Code = 10 then
+        Loc.Transportation_Category := Pad_String ("UnknownMoving_100knots");
     end if;
     ```
 
