@@ -70,4 +70,12 @@ package Earu.Math is
       Gas_Gamma      : in     Real
    ) with Pre => (DT > 0.0 and DT < 1.0);
 
+   procedure Process_GPS_Update (
+      Loc     : in out Location_Type;
+      New_Lat : in     Real;
+      New_Lon : in     Real;
+      New_Alt : in     Real;
+      Now_T   : in     Real
+   );
+
 end Earu.Math;

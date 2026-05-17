@@ -3,4 +3,5 @@ PATH=/Users/albertstarfield/.opam/default/bin:/usr/local/MechanicalTransientBend
 
 cd /usr/local/EnvironmentalAwareReferentialUnit
 export PYTHONUNBUFFERED=1
-taskpolicy -b python3 EARU.py -lp --no-tui 2>&1 | python3 log_rotator.py
+#taskpolicy -b python3 EARU.py -lp --no-tui 2>&1 | python3 log_rotator.py
+bash runEARUDaemon.sh

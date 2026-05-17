@@ -51,6 +51,15 @@ package Earu.Types is
       Q     : aliased Quaternion := (others => <>);
    end record;
 
+   type CL_Point is record
+      T   : aliased Real := 0.0;
+      Lat : aliased Real := 0.0;
+      Lon : aliased Real := 0.0;
+      Alt : aliased Real := 0.0;
+   end record;
+
+   type CL_History_Array is array (1 .. 3) of CL_Point;
+
    type Location_Type is record
       Lat           : aliased Real := 0.0;
       Lon           : aliased Real := 0.0;
@@ -72,10 +81,12 @@ package Earu.Types is
       -- Reckoning factors
       Corr_Alt      : aliased Real := 0.0;
       Corr_Heading  : aliased Real := 0.0;
-      Corr_Velocity : aliased Real := 0.0;
+      Corr_Velocity : aliased Real := 1.0;
       Corr_VRate    : aliased Real := 1.0;
 
       Vel           : aliased Vector3 := (others => <>);
+      CL_History    : aliased CL_History_Array := (others => (others => 0.0));
+      CL_Count      : aliased Integer := 0;
    end record;
 
    type Weather_Type is record

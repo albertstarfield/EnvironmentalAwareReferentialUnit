@@ -331,22 +331,43 @@ package body Earu.Math is
          Loc.Heading := Val;
       end;
       
-      -- 6. Integrate position using separate knobs
-      Responsiveness := 1.0 + Real'Min (0.1, Loc.V_Mag / G_Const);
-      Gain_H := Loc.Corr_Velocity * Responsiveness;
-      Gain_V := Loc.Corr_VRate * Responsiveness;
-      
-      Dx := Loc.Vel.X * DT;
-      Dy := Loc.Vel.Y * DT;
-      Dz := Loc.Vel.Z * DT;
-      
-      Loc.Pos.X := Loc.Pos.X + Dx * Gain_H;
-      Loc.Pos.Y := Loc.Pos.Y + Dy * Gain_H;
-      Loc.Pos.Z := Loc.Pos.Z + Dz * Gain_V;
-      
-      -- Odometer update
-      Dist_Inc := Sqrt ((Dx * Gain_H)**2 + (Dy * Gain_H)**2 + (Dz * Gain_V)**2);
-      Loc.Total_Dist := Loc.Total_Dist + Dist_Inc;
+      -- 6. Integrate position using separate knobs with exponential scaling
+      declare
+         V_Mag_Raw : constant Real := Loc.V_Mag;
+         V_Mag_Scaled : Real := V_Mag_Raw;
+         Vel_Scaled : Vector3 := Loc.Vel;
+      begin
+         if V_Mag_Raw > 0.001 then
+            declare
+               V_Knots : constant Real := V_Mag_Raw * 1.94384;
+               V_Actual_Knots : constant Real := 7.48 * (Exp (0.6 * V_Knots) - 1.0);
+               Scale : constant Real := (V_Actual_Knots / 1.94384) / V_Mag_Raw;
+            begin
+               V_Mag_Scaled := V_Actual_Knots / 1.94384;
+               Vel_Scaled.X := Loc.Vel.X * Scale;
+               Vel_Scaled.Y := Loc.Vel.Y * Scale;
+               Vel_Scaled.Z := Loc.Vel.Z * Scale;
+            end;
+         end if;
+
+         Loc.V_Mag := V_Mag_Scaled;
+
+         Responsiveness := 1.0 + Real'Min (0.1, Loc.V_Mag / G_Const);
+         Gain_H := Loc.Corr_Velocity * Responsiveness;
+         Gain_V := Loc.Corr_VRate * Responsiveness;
+         
+         Dx := Vel_Scaled.X * DT;
+         Dy := Vel_Scaled.Y * DT;
+         Dz := Vel_Scaled.Z * DT;
+         
+         Loc.Pos.X := Loc.Pos.X + Dx * Gain_H;
+         Loc.Pos.Y := Loc.Pos.Y + Dy * Gain_H;
+         Loc.Pos.Z := Loc.Pos.Z + Dz * Gain_V;
+         
+         -- Odometer update
+         Dist_Inc := Sqrt ((Dx * Gain_H)**2 + (Dy * Gain_H)**2 + (Dz * Gain_V)**2);
+         Loc.Total_Dist := Loc.Total_Dist + Dist_Inc;
+      end;
       
       -- 7. Update lat/lon/alt
       if Loc.Start_Lat /= 0.0 and Loc.Start_Lon /= 0.0 then
@@ -379,5 +400,136 @@ package body Earu.Math is
          end if;
       end;
    end Dead_Reckon_Update;
+
+   procedure Process_GPS_Update (
+      Loc     : in out Location_Type;
+      New_Lat : in     Real;
+      New_Lon : in     Real;
+      New_Alt : in     Real;
+      Now_T   : in     Real
+   ) is
+      H_Start, H_End : CL_Point;
+      Dt_CL, CL_Dist, CL_V_Ground, CL_V_Vert, CL_V_Mag : Real;
+      Dist_Confidence, Max_Alpha, Adj_Alpha : Real;
+      Error_Ratio : Real;
+   begin
+      -- 1. Discard history older than 90s
+      declare
+         Valid_Count : Integer := 0;
+         Temp_Hist   : CL_History_Array := (others => (others => 0.0));
+      begin
+         for I in 1 .. Loc.CL_Count loop
+            if Now_T - Loc.CL_History(I).T <= 90.0 then
+               Valid_Count := Valid_Count + 1;
+               Temp_Hist(Valid_Count) := Loc.CL_History(I);
+            end if;
+         end loop;
+         Loc.CL_History := Temp_Hist;
+         Loc.CL_Count := Valid_Count;
+      end;
+
+      -- 2. Append new sample
+      if Loc.CL_Count < 3 then
+         Loc.CL_Count := Loc.CL_Count + 1;
+         Loc.CL_History(Loc.CL_Count) := (T => Now_T, Lat => New_Lat, Lon => New_Lon, Alt => New_Alt);
+      else
+         Loc.CL_History(1) := Loc.CL_History(2);
+         Loc.CL_History(2) := Loc.CL_History(3);
+         Loc.CL_History(3) := (T => Now_T, Lat => New_Lat, Lon => New_Lon, Alt => New_Alt);
+      end if;
+
+      -- 3. Calculate anchoring and calibrations
+      if Loc.CL_Count >= 2 then
+         H_Start := Loc.CL_History(1);
+         H_End := Loc.CL_History(Loc.CL_Count);
+         Dt_CL := H_End.T - H_Start.T;
+
+         if Dt_CL > 0.0 then
+            CL_Dist := Haversine (H_Start.Lat, H_Start.Lon, H_End.Lat, H_End.Lon);
+            CL_V_Ground := CL_Dist / Dt_CL;
+            CL_V_Vert := (H_End.Alt - H_Start.Alt) / Dt_CL;
+            CL_V_Mag := Sqrt (CL_V_Ground**2 + CL_V_Vert**2);
+
+            -- Distance-based confidence: scales from 0.0 at 2m to 1.0 at 20m
+            Dist_Confidence := Real'Max (0.0, Real'Min (1.0, (CL_Dist - 2.0) / 18.0));
+            Max_Alpha := (if Loc.CL_Count = 3 then 0.3 else 0.15);
+            Adj_Alpha := Max_Alpha * Dist_Confidence;
+
+            -- Velocity Gain Anchor
+            if Loc.V_Mag > 0.1 and CL_V_Mag > 0.1 and Adj_Alpha > 0.0 then
+               Error_Ratio := CL_V_Mag / Loc.V_Mag;
+
+               if Error_Ratio > 1.5 or Error_Ratio < 0.5 then
+                  Loc.Vel.X := Loc.Vel.X * Error_Ratio;
+                  Loc.Vel.Y := Loc.Vel.Y * Error_Ratio;
+                  Loc.Vel.Z := Loc.Vel.Z * Error_Ratio;
+                  Loc.V_Mag := CL_V_Mag;
+               end if;
+
+               Loc.Corr_Velocity := Loc.Corr_Velocity * (1.0 - Adj_Alpha) + (Loc.Corr_Velocity * Error_Ratio) * Adj_Alpha;
+               Loc.Corr_Velocity := Real'Max (0.5, Real'Min (2.0, Loc.Corr_Velocity));
+            end if;
+
+            -- Vertical Rate Gain Anchor
+            if Abs (Loc.Alt_Rate) > 0.05 and Abs (CL_V_Vert) > 0.05 and Adj_Alpha > 0.0 then
+               declare
+                  Error_Ratio_V : constant Real := CL_V_Vert / Loc.Alt_Rate;
+               begin
+                  Loc.Corr_VRate := Loc.Corr_VRate * (1.0 - Adj_Alpha) + (Loc.Corr_VRate * Error_Ratio_V) * Adj_Alpha;
+                  Loc.Corr_VRate := Real'Max (0.5, Real'Min (2.0, Loc.Corr_VRate));
+               end;
+            end if;
+
+            -- Altitude Offset Anchor
+            declare
+               Alt_Error : constant Real := New_Alt - Loc.Alt;
+            begin
+               Loc.Corr_Alt := Loc.Corr_Alt + Alt_Error * (Adj_Alpha * 0.5);
+            end;
+
+            -- Heading fix from CL gradient
+            if CL_Dist > 2.0 then
+               declare
+                  DLon : constant Real := (H_End.Lon - H_Start.Lon) * (PI / 180.0);
+                  Lat1_Rad : constant Real := H_Start.Lat * (PI / 180.0);
+                  Lat2_Rad : constant Real := H_End.Lat * (PI / 180.0);
+                  Y_Val : constant Real := Sin (DLon) * Cos (Lat2_Rad);
+                  X_Val : constant Real := Cos (Lat1_Rad) * Sin (Lat2_Rad) - Sin (Lat1_Rad) * Cos (Lat2_Rad) * Cos (DLon);
+                  CL_Bearing : Real := (Arctan (Y_Val, X_Val) * (180.0 / PI));
+                  Bearing_Diff : Real;
+                  Max_Nudge, Nudge_Alpha : Real;
+               begin
+                  if CL_Bearing < 0.0 then
+                     CL_Bearing := CL_Bearing + 360.0;
+                  end if;
+
+                  Bearing_Diff := CL_Bearing - Loc.Heading;
+                  if Bearing_Diff > 180.0 then
+                     Bearing_Diff := Bearing_Diff - 360.0;
+                  elsif Bearing_Diff < -180.0 then
+                     Bearing_Diff := Bearing_Diff + 360.0;
+                  end if;
+
+                  Max_Nudge := (if Loc.CL_Count = 3 then 0.2 else 0.1);
+                  Nudge_Alpha := Max_Nudge * Dist_Confidence;
+
+                  if Nudge_Alpha > 0.0 then
+                     Loc.Corr_Heading := Loc.Corr_Heading + Bearing_Diff * Nudge_Alpha;
+                     if Loc.Corr_Heading < 0.0 then
+                        Loc.Corr_Heading := Loc.Corr_Heading + 360.0;
+                     elsif Loc.Corr_Heading >= 360.0 then
+                        Loc.Corr_Heading := Loc.Corr_Heading - 360.0;
+                     end if;
+                  end if;
+               end;
+            end if;
+         end if;
+      end if;
+
+      -- 4. Update coordinates
+      Loc.Lat := New_Lat;
+      Loc.Lon := New_Lon;
+      Loc.Alt := New_Alt;
+   end Process_GPS_Update;
 
 end Earu.Math;

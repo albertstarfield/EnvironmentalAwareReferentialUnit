@@ -124,9 +124,12 @@ def get_smc_data():
 
 def get_pmset_info():
     try:
-        res = subprocess.run(["pmset", "-g"], capture_output=True, text=True, timeout=2)
-        return res.stdout[:1024]
-    except: return "pmset error"
+        res_batt = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, timeout=2)
+        res_all = subprocess.run(["pmset", "-g"], capture_output=True, text=True, timeout=2)
+        pm_out = res_batt.stdout.strip() + "\n" + res_all.stdout.strip()
+        return pm_out[:1024]
+    except:
+        return "pmset error"
 
 def stats_worker():
     print("[*] Stats worker started.")
@@ -319,21 +322,39 @@ def check_core_location_bg():
             else:
                 cmd = [cl_path, "-f", "%latitude,%longitude,%altitude,%direction,%h_accuracy,%v_accuracy", "-once"]
                 
-            try:
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
-                if res.returncode == 0:
-                    parts = res.stdout.strip().split(",")
-                    if len(parts) >= 6:
-                        new_lat = float(parts[0])
-                        new_lon = float(parts[1])
-                        new_alt = float(parts[2])
-                        if not (abs(new_lat) < 0.00001 and abs(new_lon) < 0.00001):
-                            global_location.lat = new_lat
-                            global_location.lon = new_lon
-                            global_location.alt = new_alt
-                            global_location.pressure_hpa = 1013.25 * math.pow(1.0 - 0.0000225577 * new_alt, 5.25588)
-            except Exception as e:
-                print(f"[!] CoreLocationCLI execution error: {e}")
+            # Retry loop for kCLErrorDomain error 0 / transient location service glitches
+            for attempt in range(5):
+                try:
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
+                    with open("CoreLocationCLI.log", "a") as log_f:
+                        log_f.write(f"--- {time.strftime('%Y-%m-%dT%H:%M:%S')} (Attempt {attempt+1}) ---
+")
+                        log_f.write(f"Cmd: {cmd}\n")
+                        log_f.write(f"Exit Code: {res.returncode}\n")
+                        if res.stdout: log_f.write(f"Stdout: {res.stdout.strip()}\n")
+                        if res.stderr: log_f.write(f"Stderr: {res.stderr.strip()}\n")
+                    
+                    if res.returncode == 0:
+                        parts = res.stdout.strip().split(",")
+                        if len(parts) >= 6:
+                            new_lat = float(parts[0])
+                            new_lon = float(parts[1])
+                            new_alt = float(parts[2])
+                            if not (abs(new_lat) < 0.00001 and abs(new_lon) < 0.00001):
+                                global_location.lat = new_lat
+                                global_location.lon = new_lon
+                                global_location.alt = new_alt
+                                global_location.pressure_hpa = 1013.25 * math.pow(1.0 - 0.0000225577 * new_alt, 5.25588)
+                                break
+                    elif res.stderr and "The operation couldn’t be completed" in res.stderr:
+                        time.sleep(1.0)
+                        continue
+                    else:
+                        break
+                except Exception as e:
+                    with open("CoreLocationCLI.log", "a") as log_f:
+                        log_f.write(f"Exception: {e}\n")
+                    break
     except Exception as e:
         print(f"[!] check_core_location_bg error: {e}")
     finally:

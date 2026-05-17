@@ -177,14 +177,23 @@ procedure Earu_Daemon is
                 W.Pressure_MSL := Real (Weather_SHM.Pressure_MSL);
                 W.Weather_Code := Integer (Weather_SHM.Weather_Code);
                 W.Fetch_Time := Real (Weather_SHM.Fetch_Time);
-                L.Start_Lat := Real (Weather_SHM.Lat);
-                L.Start_Lon := Real (Weather_SHM.Lon);
-                L.Start_Alt := Real (Weather_SHM.Alt);
-                L.Lat := Real (Weather_SHM.Lat);
-                L.Lon := Real (Weather_SHM.Lon);
-                L.Alt := Real (Weather_SHM.Alt);
-                L.Pressure_HPa := Real (Weather_SHM.Pressure_HPa);
-                L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
+                 if Abs (Real (Weather_SHM.Lat) - L.Start_Lat) > 1.0E-6 or
+                    Abs (Real (Weather_SHM.Lon) - L.Start_Lon) > 1.0E-6 or
+                    Abs (Real (Weather_SHM.Alt) - L.Start_Alt) > 1.0E-3
+                 then
+                    Earu.Math.Process_GPS_Update (
+                       Loc     => L,
+                       New_Lat => Real (Weather_SHM.Lat),
+                       New_Lon => Real (Weather_SHM.Lon),
+                       New_Alt => Real (Weather_SHM.Alt),
+                       Now_T   => Real (C_Time (null))
+                    );
+                    L.Start_Lat := Real (Weather_SHM.Lat);
+                    L.Start_Lon := Real (Weather_SHM.Lon);
+                    L.Start_Alt := Real (Weather_SHM.Alt);
+                    L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
+                 end if;
+                 L.Pressure_HPa := Real (Weather_SHM.Pressure_HPa);
                 Earu.Math.Update_Weather_Thermodynamics (Eco, SMC, L, W, Real (Stats_SHM.SMC_Ambient_K));
                 Earu.State_Store.State_Buffer.Update_Weather (W, L);
                 Earu.State_Store.State_Buffer.Update_Ecosystem (Eco);
@@ -203,7 +212,7 @@ procedure Earu_Daemon is
                S.CPU_Usage := Real (Stats_SHM.CPU_Usage);
                S.Mem_Usage := Real (Stats_SHM.Mem_Usage);
                S.Battery_Percent := Integer (Stats_SHM.Battery_Percent);
-               S.Battery_Charging := Stats_SHM.Battery_State /= 1;
+               S.Battery_Charging := Stats_SHM.Battery_State /= 1.0;
                S.Battery_Design_Wh := Real (Stats_SHM.Bat_Design_Wh);
                S.Battery_Energy_Wh := Real (Stats_SHM.Bat_Energy_Wh);
                S.Battery_Full_Wh := Real (Stats_SHM.Bat_Full_Wh);

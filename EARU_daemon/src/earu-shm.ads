@@ -65,7 +65,7 @@ package Earu.Shm is
       CPU_Usage       : Interfaces.IEEE_Float_32;
       Mem_Usage       : Interfaces.IEEE_Float_32;
       Battery_Percent : Interfaces.IEEE_Float_32;
-      Battery_State   : Interfaces.Unsigned_32;
+      Battery_State   : Interfaces.IEEE_Float_32;
       V_Mag           : Interfaces.IEEE_Float_32;
       
       -- Loop Consistency
