@@ -1,9 +1,9 @@
 # How to Read EARU_data.dat
 
 > [!WARNING]
-> **THIS is NOT an Accurate, it will drift eventually!. If you want an exact measurement purchase/use the actual sensors!**
+> **THIS is NOT an accurate physical device, it will drift eventually! If you want an exact measurement, purchase/use the actual external sensors!**
 
-`EARU_data.dat` is the primary real-time state storage for the **EnvironmentalAwareReferentialUnit (EARU)**. It is written asynchronously to minimize impact on the main sensor loop.
+`EARU_data.dat` is the primary real-time state storage for the **EnvironmentalAwareReferentialUnit (EARU)**. It is written asynchronously by an ordinary background daemon that tries to be minimum capable to help read the sensors cleanly.
 
 ## File Structure
 The file consists of two parts:
@@ -18,12 +18,16 @@ The file consists of two parts:
 ### 1. Root Level
 | Variable | Unit | Description |
 | :--- | :--- | :--- |
-| `time` | Seconds | Unix timestamp of the data sample. |
+| `time` | Seconds | Unix timestamp of the data sample (C system time). |
 | `lid_angle` | Degrees | The current angle of the laptop lid (0° = closed). |
-| `lid_speed` | deg/s | Angular velocity of the lid movement. |
-| `als` | Object | Dictionary containing `lux_factor` (0.0 to 1.0) and `spectral` (List of 4 integer RGB-proxy channels). |
+| `lid_speed` | deg/s | Dynamic filtered angular velocity of the lid movement. |
+| `als` | Object | Dictionary containing `lux_factor` (0.0 to 1.0) and `spectral` (List of 4 integer RGB-proxy hardware channels). |
 | `high_res_drift` | Mixed | High-resolution clock drift monitoring data. |
-| `events` | List | Recent significant environmental or system events. |
+| `events` | List | Recent significant environmental, system, or lockout events (e.g. `"ALT_INOP"`). |
+| `pedometer` | Object | Dictionary containing root steps counter: `{"steps": Integer}`. |
+| `master_warning`| Bool | Active avionics emergency warning flag (critical sensors, drift interference, or alt lockout). |
+| `master_caution`| Bool | Active caution flag (solder joint stress exceedances, high CPU/memory consumption > 90%). |
+| `alt_inop` | Bool | Active Dead Reckoning Altitude INOP lockout safety status (true during altitude lockout). |
 
 ### 2. `accel` (Accelerometer)
 | Variable | Unit | Description |
@@ -47,12 +51,13 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | Variable | Unit | Description | Possible Outputs |
 | :--- | :--- | :--- | :--- |
 | `lat`, `lon` | Degrees | Geographic coordinates (Latitude, Longitude). | -90 to 90 / -180 to 180 |
-| `alt` | Meters | Altitude above sea level. | |
+| `alt` | Meters | Altitude above sea level (GPS/topo combined or dead-reckoned). | |
 | `alt_rate` | m/s | Vertical velocity (climb/sink rate). | |
 | `pressure_hpa` | hPa | Local atmospheric pressure. | ~950 to 1050 |
 | `heading` | Degrees | Bearing relative to North. | 0 to 360 |
 | `compass_dir` | String | Cardinal direction. | "N", "NE", "E", etc. |
-| `v_mag` | m/s | Ground speed magnitude. | |
+| `v_mag` | m/s | Horizontally scaled ground speed magnitude. | |
+| `vel` | List | Individual velocity components: `[vel_x, vel_y, vel_z]` in m/s. | |
 | `mach` | Mach | Speed relative to the speed of sound. | |
 | `calibrated_g` | m/s² | The local gravity constant used for IMU calibration. | ~9.80 |
 | `pos` | Meters | Relative Cartesian position `[x, y, z]`. | |
@@ -126,14 +131,17 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `airflow_inlet_k` | Kelvin | Temperature of air entering the chassis. |
 | `airflow_outlet_k` | Kelvin | Temperature of air exiting the chassis. |
 | `fan_rpms` | List | Current rotation speed for each fan. |
-| `heatflux_j` | Joules | Estimated heat energy transfer. |
+| `heatflux_j` | Joules | Estimated convective heat transfer rate. |
 | `massflow_kg_s` | kg/s | Air mass flow rate through the cooling system. |
 | `thrust_n` | Newtons | Force exerted by the cooling fans. |
 | `humidity_pct` | % | Estimated relative humidity. |
 | `power` | Watts | Power consumption (derived from `PSTR`). |
 | `PowerRateUsage` | Watts | Duplicate of `power`. |
+| `cooling_efficiency_pct`| % | Convective thermal exhaust extraction efficiency. |
+| `work_efficiency_pct` | % | Derived computational work efficiency ($100 - \text{cooling\_efficiency\_pct}$). |
+| `thermal_inefficiency_w`| Watts | Power dissipated as heat losses in the cooling system. |
 | `DayPowerUsage_Wh` | Wh | Cumulative energy consumption for the current day. |
-| `EstimatedTodayPowerUsage_Wh` | Wh | AI-estimated total energy consumption for the end of the day. |
+| `EstimatedTodayPowerUsage_Wh` | Wh | Project total energy consumption for the end of the day. |
 | `AccumulativePowerUsageThisMonth_Wh` | Wh | Cumulative energy consumption for the current month. |
 | `AccumulativePowerUsageMeter_Wh` | Wh | Lifetime cumulative energy consumption (total meter). |
 | `WillBatterySurviveOneDay` | String | "Yes" or "No" prediction based on current bank vs projected usage. |
@@ -141,13 +149,14 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `PulsingSuggestionMaintenanceWindowWake` | Seconds | Suggested background wake interval to stretch battery life. |
 | `PulsingSuggestionMaintenanceWindowWakeLength` | Seconds | Suggested duration for each background wake. |
 
-### 11. `user_entity_detection` (BCG)
-Detects physiological signals through the chassis using the IMU.
+### 11. `user_entity_detection` (BCG Heartbeat & Mood)
+Detects physiological signals and presence through the chassis using the IMU.
 | Variable | Unit | Description | Possible Outputs |
 | :--- | :--- | :--- | :--- |
-| `detected` | BPM | List of detected heart rates in the vicinity. | |
-| `count` | Integer | Number of distinct entities detected. | |
-| `inferred_mood` | Probability | Probability map of the detected user's mood. | "Calm/Relaxed", "Excited/Joyful", "Tired/Bored", "Anxious/Frustrated" |
+| `detected` | BPM | The heartbeat rate of the primary target measured by BCG proxy. | 55.0 to 165.0 |
+| `count` | Integer | Number of other neighboring entities detected. | |
+| `inferred_mood` | Probability | Probability map of the detected primary user's mood. | "Calm/Relaxed", "Excited/Joyful", "Tired/Bored", "Anxious/Frustrated" |
+| `confidence` | 0.0-1.0 | Heartbeat estimation certainty rating. | |
 
 ---
 
@@ -176,4 +185,4 @@ Configure your Davis integration to point to `http://[YOUR_IP]:3270/wflexp.json`
 ## Technical Implementation Notes
 - **JSON Encoding:** Numpy integers and floats are converted to standard JSON types. Binary `als` data is hex-encoded.
 - **Data Integrity:** The `parity` field inside the JSON and the `RECOVERY_V1` footer allow for validation of every write operation.
-- **Sampling Rate:** Typically updated at 5Hz-10Hz depending on motion and system load. (Main sensor loop remains 100Hz).
+- **Sampling Rate:** Updated at 5Hz-10Hz depending on motion and system load. (Main physical IMU sensor loop remains 100Hz-800Hz).

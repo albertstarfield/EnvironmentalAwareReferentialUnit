@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# start.sh - Build and Run EARU Ada/SPARK Daemon
-# This script sets up paths, builds the Ada project using Alire,
+# start.sh - Build and Run EARU Daemon (Version: Amaryllis Twilight Migratory)
+# This script sets up paths, builds the project, and starts the daemon.
 # and starts the daemon natively.
 
 # --- Environment & Path Configuration ---

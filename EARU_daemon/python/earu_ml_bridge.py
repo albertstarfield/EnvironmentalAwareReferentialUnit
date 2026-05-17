@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# earu_ml_bridge.py - Cozy Telemetry and Thermodynamics Bridge
+# Version: Amaryllis Twilight Migratory
 
 import os
 import sys
