@@ -357,6 +357,7 @@ class PrimaryFlightDisplay:
         self.smooth_inefficiency: float = 0.0
         self.smooth_efficiency: float = 0.0
         self.smooth_power: float = 0.0
+        self.smooth_work_efficiency: float = 0.0
 
         self.simulated: bool = False
         self.raw_pitch: float = 0.0
@@ -765,6 +766,32 @@ class PrimaryFlightDisplay:
                         return
 
                     self.full_data = data
+                    
+                    # Smooth rates & thermodynamics (EMA filters)
+                    smc = data.get('smc', {})
+                    raw_massflow = float(smc.get('massflow_kg_s', 0.0))
+                    raw_heatflux = float(smc.get('heatflux_j', 0.0))
+                    raw_power = float(smc.get('power', 0.0))
+                    raw_inefficiency = float(smc.get('thermal_inefficiency_w', max(0.0, raw_power - raw_heatflux)))
+                    raw_efficiency = float(smc.get('cooling_efficiency_pct', (raw_heatflux / raw_power * 100.0) if raw_power > 0.0 else 0.0))
+                    raw_work_eff = float(smc.get('work_efficiency_pct', 100.0 - raw_efficiency))
+                    
+                    alpha = 0.08  # Silky-smooth coefficient
+                    if self.smooth_power == 0.0 and raw_power > 0.0:
+                        self.smooth_massflow = raw_massflow
+                        self.smooth_heatflux = raw_heatflux
+                        self.smooth_power = raw_power
+                        self.smooth_inefficiency = raw_inefficiency
+                        self.smooth_efficiency = raw_efficiency
+                        self.smooth_work_efficiency = raw_work_eff
+                    else:
+                        self.smooth_massflow = alpha * raw_massflow + (1.0 - alpha) * self.smooth_massflow
+                        self.smooth_heatflux = alpha * raw_heatflux + (1.0 - alpha) * self.smooth_heatflux
+                        self.smooth_power = alpha * raw_power + (1.0 - alpha) * self.smooth_power
+                        self.smooth_inefficiency = alpha * raw_inefficiency + (1.0 - alpha) * self.smooth_inefficiency
+                        self.smooth_efficiency = alpha * raw_efficiency + (1.0 - alpha) * self.smooth_efficiency
+                        self.smooth_work_efficiency = alpha * raw_work_eff + (1.0 - alpha) * self.smooth_work_efficiency
+
                     orient = data.get('orientation', {})
                     self.raw_pitch = float(orient.get('pitch', 0.0))
                     self.raw_roll = float(orient.get('roll', 0.0))
@@ -1738,15 +1765,75 @@ class PrimaryFlightDisplay:
                 self.canvas.create_text(lx + i*40 + 15, ly+180, text=str(val), fill="white", font=("Monaco", 7), anchor="n")
 
         smc = self.full_data.get('smc', {}); gas = smc.get('gas_constants', {})
-        self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {smc.get('massflow_kg_s',0):.4f}kg/s\nHEATFLUX: {smc.get('heatflux_j',0):.4f} J/s", fill="cyan", font=("Monaco", 10))
+        massflow = getattr(self, 'smooth_massflow', float(smc.get('massflow_kg_s', 0.0)))
+        heatflux = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
+        
+        self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {massflow:.4f}kg/s\nHEATFLUX: {heatflux:.4f} J/s", fill="cyan", font=("Monaco", 10))
         
         # Thermodynamics & Efficiency
-        p_in = float(smc.get('power', 0.0))
-        p_heat = float(smc.get('heatflux_j', 0.0))
-        p_loss = float(smc.get('thermal_inefficiency_w', max(0.0, p_in - p_heat)))
-        eff_pct = float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0))
+        p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))
+        p_heat = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
+        p_loss = getattr(self, 'smooth_inefficiency', float(smc.get('thermal_inefficiency_w', max(0.0, p_in - p_heat))))
+        eff_pct = getattr(self, 'smooth_efficiency', float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0)))
+        work_pct = getattr(self, 'smooth_work_efficiency', float(smc.get('work_efficiency_pct', 100.0 - eff_pct)))
         
-        self.canvas.create_text(450, 310, anchor="nw", text=f"THERMODYNAMICS & EFF:\nPOWER INPUT: {p_in:.2f} W\nHEAT EXHAUST: {p_heat:.2f} J/s\nTHERM LOSS:   {p_loss:.2f} W\nCOOLING EFF:  {eff_pct:.2f}%", fill="orange", font=("Monaco", 10))
+        self.canvas.create_text(450, 310, anchor="nw", text=f"THERMODYNAMICS & EFF:\nPOWER INPUT: {p_in:.2f} W\nHEAT EXHAUST: {p_heat:.2f} J/s\nTHERM LOSS:   {p_loss:.2f} W\nCOOLING EFF:  {eff_pct:.2f}%\nWORK EFF:     {work_pct:.2f}%", fill="orange", font=("Monaco", 10))
+        
+        # 1. DR Calibration & Drift Corrections
+        loc = self.full_data.get('location', {})
+        c_alt = loc.get('CorrectionFactor_Reckoning_Altitude', 1.0)
+        c_hdg = loc.get('CorrectionFactor_Reckoning_Heading', 1.0)
+        c_vel = loc.get('CorrectionFactor_Reckoning_Velocity', 1.0)
+        c_vrt = loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0)
+        cal_g = loc.get('calibrated_g', 9.80665)
+        
+        self.canvas.create_text(450, 420, anchor="nw", text=f"DR CALIBRATION:\nALT CF:  {c_alt:.4f} | HDG CF: {c_hdg:.4f}\nVEL CF:  {c_vel:.4f} | VRT CF: {c_vrt:.4f}\nCALIB G: {cal_g:.6f} m/s²", fill="#44ff44", font=("Monaco", 9))
+
+        # 2. Geometry & Position Vectors
+        pos = loc.get('pos', [0.0, 0.0, 0.0])
+        orient = self.full_data.get('orientation', {})
+        q = orient.get('q', [1.0, 0.0, 0.0, 0.0])
+        mach = loc.get('mach', 0.0)
+        odo = loc.get('odometer_30m', 0.0)
+        cardinal = loc.get('compass_dir', 'N')
+        
+        self.canvas.create_text(450, 490, anchor="nw", text=f"GEOMETRY & POSITION:\nLOCAL POS: X:{pos[0]:.2f} Y:{pos[1]:.2f} Z:{pos[2]:.2f}\nQUATERN:   W:{q[0]:.3f} X:{q[1]:.3f} Y:{q[2]:.3f} Z:{q[3]:.3f}\nMACH:      {mach:.5f} | CARDINAL: {cardinal}\nMICRO-ODO: {odo:.2f} m", fill="#a8a8ff", font=("Monaco", 9))
+
+        # 3. Structural Fatigue & Seismic Stress
+        seis = self.full_data.get('seismic_activity', {})
+        dmg = seis.get('damage_fatigue', {})
+        em_fatigue = dmg.get('electromech_fatigue_prob', 0.0)
+        sd_fatigue = dmg.get('solder_fatigue_prob', 0.0)
+        seu_mul = dmg.get('seu_risk_multiplier', 1.0)
+        alt_mul = dmg.get('alt_stress_multiplier', 1.0)
+        upset_count = dmg.get('anomaly_event_upset', 0)
+        motion = seis.get('motion_type', 'Stationary')
+        spec_bal = seis.get('spectral_balance', 0.0)
+        
+        self.canvas.create_text(450, 580, anchor="nw", text=f"STRUCTURAL FATIGUE & STRESS:\nMOTION REGIME: {motion} | SPEC BAL: {spec_bal:.4f}\nEM FATIGUE:    {em_fatigue*100:.6f}%\nSOLDER FTG:    {sd_fatigue*100:.6f}%\nSEU RISK MULT: {seu_mul:.4f}x\nALT COOL MULT: {alt_mul:.4f}x\nSEU UPSETS:    {upset_count}", fill="#ff5555", font=("Monaco", 9))
+
+        # 4. System Uptime & Capacities
+        sys_info = self.full_data.get('system', {})
+        uptime_earu = sys_info.get('uptime_earu', 0.0)
+        uptime_sys = sys_info.get('uptime_system', 0.0)
+        b_design = sys_info.get('BatteryDesignCapacityWh', 0.0)
+        b_full = sys_info.get('BatteryFullChargeCapacityWh', 0.0)
+        b_bank = sys_info.get('BatteryEnergyBankWh', 0.0)
+        hid_idle = sys_info.get('nonHumanInputHIDIdle', 0.0)
+        
+        self.canvas.create_text(50, 540, anchor="nw", text=f"SYSTEM RUNTIME & ENERGY:\nEARU RUNTIME:  {uptime_earu:.1f} s\nSYSTEM UPTIME: {uptime_sys:.1f} s ({uptime_sys/3600.0:.1f} hrs)\nDESIGN CAP:    {b_design:.2f} Wh\nFULL CAP:      {b_full:.2f} Wh | BANK: {b_bank:.2f} Wh\nHID IDLE SCAN: {hid_idle:.3f} s", fill="#ffff55", font=("Monaco", 9))
+
+        # 5. SPU Clock & Hardware Timings
+        drift = self.full_data.get('high_res_drift', {})
+        spu_lat = drift.get('spu_lat_ms', 0.0)
+        gpu_lat = drift.get('gpu_lat_ms', 0.0)
+        rtc_jit = drift.get('rtc_jitter_ms', 0.0)
+        t_cpu = drift.get('t_cpu_ns', 0)
+        t_rtc = drift.get('t_rtc_ns', 0)
+        t_spu = drift.get('t_spu_ns', 0)
+        interfere = drift.get('interference', 'No')
+        
+        self.canvas.create_text(50, 630, anchor="nw", text=f"SPU CLOCK & HARDWARE TIMINGS:\nSPU LATENCY:  {spu_lat:.3f} ms | GPU: {gpu_lat:.3f} ms\nRTC JITTER:   {rtc_jit:.6f} ms\nT_CPU NS:     {t_cpu} ns\nT_RTC NS:     {t_rtc} ns\nT_SPU NS:     {t_spu} ns\nINTERFERENCE: {interfere}", fill="#ffaa55", font=("Monaco", 9))
 
     def draw_metar_page(self, w: float, h: float) -> None:
         weather = self.full_data.get('ecosystem_weather', {})

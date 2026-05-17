@@ -369,6 +369,7 @@ package body Earu.IO is
       Append_Pair (P_Aug_Payload, "power", F(State.SMC.Power));
       Append_Pair (P_Aug_Payload, "thermal_inefficiency_w", F(Real'Max (0.0, State.SMC.Power - State.SMC.Heatflux_J)));
       Append_Pair (P_Aug_Payload, "cooling_efficiency_pct", F(if State.SMC.Power > 0.0 then Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
+      Append_Pair (P_Aug_Payload, "work_efficiency_pct", F(if State.SMC.Power > 0.0 then 100.0 - Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
       Append_Pair (P_Aug_Payload, "talp_k", F(State.SMC.TaLP_K));
       Append_Pair (P_Aug_Payload, "tarf_k", F(State.SMC.TaRF_K));
       Append (P_Aug_Payload, """temps"": {");
@@ -595,6 +596,7 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "power", F(State.SMC.Power));
       Append_Pair (JSON_Line, "thermal_inefficiency_w", F(Real'Max (0.0, State.SMC.Power - State.SMC.Heatflux_J)));
       Append_Pair (JSON_Line, "cooling_efficiency_pct", F(if State.SMC.Power > 0.0 then Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
+      Append_Pair (JSON_Line, "work_efficiency_pct", F(if State.SMC.Power > 0.0 then 100.0 - Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
       Append_Pair (JSON_Line, "talp_k", F(State.SMC.TaLP_K));
       Append_Pair (JSON_Line, "tarf_k", F(State.SMC.TaRF_K));
       Append (JSON_Line, """temps"": {");
