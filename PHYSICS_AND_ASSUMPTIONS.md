@@ -794,7 +794,7 @@ To optimize CPU utilization, maintain system responsiveness, and extend battery 
 *   **To my friend, Ol' Akhsan**, who keeps mocking me as a "Hacker." Well... let's make that wish a reality.
 *   **To my Pop**, who always pushed me, holding high expectations for me to be instantly ready and always hot-to-go within ~5 seconds (living in that true "smartphone paradigm"). Thank you for pushing my limits.
 *   **To the inventors and creators of the Ada and SPARK programming languages**—from **Jean Ichbiah** (who designed Ada under Honeywell Bull) and **Lady Ada Lovelace** (whose namesake and pioneering vision inspired it), to **Bernard Carré** (who pioneered the SPARK mathematical subset at Southampton University), and the modern engineering teams at **AdaCore** and **Capgemini Engineering**: thank you for guarding my runtime against the evils of segmentation faults and math domain errors, keeping me safe even beyond the static checks of Pyrefly.
-*   **To the Gemini Language Model**, my tireless AI coding companion, for guiding my path and helping teach me the esoteric black magic of aerospace dynamics, real-time sensor fusion, and verified systems engineering.
+*   **To the Gemini Language Model**, my tireless Language Model coding companion, for guiding my path and helping teach me the esoteric black magic of aerospace dynamics, real-time sensor fusion, and verified systems engineering.
 
 
 
