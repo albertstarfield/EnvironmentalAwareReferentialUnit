@@ -351,6 +351,13 @@ class PrimaryFlightDisplay:
         self.pulse_wake: float = 0.0
         self.pulse_length: float = 0.0
 
+        # Smoothed rates and thermodynamics (1Hz filters)
+        self.smooth_massflow: float = 0.0
+        self.smooth_heatflux: float = 0.0
+        self.smooth_inefficiency: float = 0.0
+        self.smooth_efficiency: float = 0.0
+        self.smooth_power: float = 0.0
+
         self.simulated: bool = False
         self.raw_pitch: float = 0.0
         self.raw_roll: float = 0.0
@@ -1731,7 +1738,15 @@ class PrimaryFlightDisplay:
                 self.canvas.create_text(lx + i*40 + 15, ly+180, text=str(val), fill="white", font=("Monaco", 7), anchor="n")
 
         smc = self.full_data.get('smc', {}); gas = smc.get('gas_constants', {})
-        self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {smc.get('massflow_kg_s',0):.4f}kg/s", fill="cyan", font=("Monaco", 10))
+        self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {smc.get('massflow_kg_s',0):.4f}kg/s\nHEATFLUX: {smc.get('heatflux_j',0):.4f} J/s", fill="cyan", font=("Monaco", 10))
+        
+        # Thermodynamics & Efficiency
+        p_in = float(smc.get('power', 0.0))
+        p_heat = float(smc.get('heatflux_j', 0.0))
+        p_loss = float(smc.get('thermal_inefficiency_w', max(0.0, p_in - p_heat)))
+        eff_pct = float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0))
+        
+        self.canvas.create_text(450, 310, anchor="nw", text=f"THERMODYNAMICS & EFF:\nPOWER INPUT: {p_in:.2f} W\nHEAT EXHAUST: {p_heat:.2f} J/s\nTHERM LOSS:   {p_loss:.2f} W\nCOOLING EFF:  {eff_pct:.2f}%", fill="orange", font=("Monaco", 10))
 
     def draw_metar_page(self, w: float, h: float) -> None:
         weather = self.full_data.get('ecosystem_weather', {})

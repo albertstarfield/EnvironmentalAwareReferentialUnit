@@ -131,6 +131,29 @@ def get_pmset_info():
     except:
         return "pmset error"
 
+def solve_pulsing_numerically(target_p, avg_p_active):
+    best_err = float("inf")
+    best_t, best_tau = 0.0, 0.0
+    p_sleep = 0.5  # Estimated 0.5W during deep maintenance sleep
+
+    for tau_int in range(1, 61):
+        tau = float(tau_int)
+        if target_p > p_sleep:
+            t_sol = (tau * (avg_p_active - p_sleep)) / (target_p - p_sleep)
+            t_clamped = max(300.0, min(3600.0, t_sol))
+            p_res = (avg_p_active * tau + p_sleep * (t_clamped - tau)) / t_clamped
+            err = abs(p_res - target_p)
+            if err < best_err:
+                best_err = err
+                best_t, best_tau = t_clamped, tau
+        else:
+            p_res = (avg_p_active * tau + p_sleep * (3600.0 - tau)) / 3600.0
+            err = abs(p_res - target_p)
+            if err < best_err:
+                best_err = err
+                best_t, best_tau = 3600.0, tau
+    return best_t, best_tau
+
 def stats_worker():
     print("[*] Stats worker started.")
     shm = None
@@ -178,6 +201,7 @@ def stats_worker():
         except Exception as e:
             print(f"[!] Warning: Failed to load power metrics: {e}")
             
+    power_history = []
     last_power_time = time.time()
 
     while True:
@@ -291,6 +315,39 @@ def stats_worker():
             remaining_hours = (1.0 - day_frac) * 24.0
             est_today_usage_wh = day_power_usage_wh + (pstr_val * remaining_hours)
             
+            # Append power history
+            power_history.append((now_t, pstr_val))
+            if len(power_history) > 7200:
+                power_history.pop(0)
+                
+            # Survival and Pulsing Logic
+            remaining_energy_needed = max(0.0, est_today_usage_wh - day_power_usage_wh)
+            seconds_until_midnight = ((23 - dt_now.hour) * 3600) + ((59 - dt_now.minute) * 60) + (60 - dt_now.second)
+            hours_until_midnight = seconds_until_midnight / 3600.0
+            
+            pulse_wake = 0.0
+            pulse_length = 0.0
+            
+            if energy_wh < remaining_energy_needed:
+                if hours_until_midnight > 0:
+                    target_p = energy_wh / hours_until_midnight
+                    avg_p_active = sum([p for t, p in power_history]) / len(power_history) if power_history else 10.0
+                    pulse_wake, pulse_length = solve_pulsing_numerically(target_p, avg_p_active)
+                    
+            # Real-time Heatflux Calculation (1Hz)
+            ambient_temp_k = temps.get("Ts1P", 20.0) + 273.15
+            p_pa = 101325.0
+            gas_r = 287.058
+            gas_cp = 1005.0 + 0.05 * (ambient_temp_k - 300.0)
+            density = p_pa / (gas_r * ambient_temp_k)
+            v_dot = ((rpms[0] + rpms[1]) / 6000.0) * 0.007
+            inlet_t = temps.get("TaLW", 20.0) + 273.15
+            outlet_t = temps.get("TaLT", 20.0) + 273.15
+            delta_t = outlet_t - inlet_t
+            heatflux_j = max(0.0, density * v_dot * gas_cp * delta_t)
+            
+            seu_risk = float(detector.cusum_val)
+            
             # Save power metrics periodically (every ~30 updates)
             if update_count % 30 == 0:
                 try:
@@ -332,9 +389,9 @@ def stats_worker():
             lid_als = struct.pack("<3f4I", float(lid_angle), float(lid_speed), float(lux_factor),
                                   int(spectral[0]), int(spectral[1]), int(spectral[2]), int(spectral[3]))
             addl = struct.pack("<12fi6f",
-                0.0, 0.0, temps.get("TaLW", 293.0), temps.get("TaLT", 293.0),
+                pulse_wake, pulse_length, temps.get("TaLW", 293.0), temps.get("TaLT", 293.0),
                 temps.get("TaLP", 293.0), temps.get("TaRF", 293.0),
-                1005.0, 287.0, 1.4, float(detector.cumulative_fatigue), 0.0, 0.0,
+                1005.0, 287.0, 1.4, heatflux_j, float(detector.cumulative_fatigue), seu_risk,
                 turbo, 0.0, temps.get("Ts1P", 293.0)+273.15, 50.0, rpms[0], rpms[1], 0.0)
             ts_iso = time.strftime("%Y-%m-%dT%H:%M:%S.000000").encode().ljust(32, b'\0')
             pmset_b = pmset.encode().ljust(1024, b'\0')

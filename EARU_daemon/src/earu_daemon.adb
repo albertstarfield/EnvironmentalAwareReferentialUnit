@@ -259,6 +259,30 @@ procedure Earu_Daemon is
                SMC.Turbo := Integer (Stats_SHM.SMC_Turbo);
                SMC.Thrust_N := Real (Stats_SHM.SMC_Thrust_N);
                SMC.Massflow_Kg_S := Real (Stats_SHM.SMC_Massflow);
+               
+               SMC.Pulse_Wake := Real (Stats_SHM.SMC_Pulse_Wake);
+               SMC.Pulse_Length := Real (Stats_SHM.SMC_Pulse_Len);
+               SMC.Heatflux_J := Real (Stats_SHM.Heatflux_J);
+               
+               SMC.Will_Bat_Survive := SMC.Pulse_Wake = 0.0;
+               if not SMC.Will_Bat_Survive then
+                  declare
+                     Seconds_Until_Midnight : constant Real := 86400.0 - Real (Long_Long_Integer (C_Time (null)) mod 86400);
+                     Hours_Until_Midnight   : constant Real := Seconds_Until_Midnight / 3600.0;
+                     Target_P               : Real := 10.0;
+                     Avg_P_Active           : constant Real := (if SMC.Power > 0.0 then SMC.Power else 10.0);
+                     P_Agg                  : Real;
+                  begin
+                     if Hours_Until_Midnight > 0.0 then
+                        Target_P := S.Battery_Energy_Wh / Hours_Until_Midnight;
+                     end if;
+                     P_Agg := (Avg_P_Active * 1.0 + 0.5 * 3599.0) / 3600.0;
+                     SMC.Must_Hibernate := Target_P < P_Agg;
+                  end;
+               else
+                  SMC.Must_Hibernate := False;
+               end if;
+               
                Earu.State_Store.State_Buffer.Update_System (S, (T_CPU_ns => Long_Long_Integer (Stats_SHM.T_CPU_ns), T_RTC_ns => Long_Long_Integer (Stats_SHM.T_RTC_ns), T_GPU_ns => Long_Long_Integer (Stats_SHM.T_GPU_ns), T_ANE_ns => Long_Long_Integer (Stats_SHM.T_ANE_ns), T_DAT_ns => Long_Long_Integer (Stats_SHM.T_DAT_ns), T_SPU_ns => Long_Long_Integer (Stats_SHM.T_SPU_ns), SPU_Lat_ms => Real (Stats_SHM.SPU_Lat_ms), GPU_Lat_ms => Real (Stats_SHM.GPU_Lat_ms), ANE_Lat_ms => Real (Stats_SHM.ANE_Lat_ms), RTC_Jitter_ms => Real (Stats_SHM.RTC_Jitter_ms), Interference => Stats_SHM.Header.Padding /= 0, TS_ISO => Stats_SHM.TS_ISO));
                Earu.State_Store.State_Buffer.Update_SMC (SMC);
                Earu.State_Store.State_Buffer.Update_Damage (Real (Stats_SHM.Fatigue_Cum), Real (Stats_SHM.Seu_Risk), Full.Seismic_Activity.Peak_G);
