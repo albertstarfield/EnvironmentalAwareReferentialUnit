@@ -430,6 +430,9 @@ package body Earu.IO is
             Append (P_Aug_Payload, Meteo);
          end;
       else Append (P_Aug_Payload, "{}"); end if;
+      Append (P_Aug_Payload, ", ");
+      Append_Pair (P_Aug_Payload, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
+      Append_Pair (P_Aug_Payload, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
       Append (P_Aug_Payload, "}");
 
       -- --- MAIN JSON_LINE ---
@@ -647,6 +650,9 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "Excited/Joyful", F(State.User_Entity.Mood.Excited));
       Append_Pair (JSON_Line, "Tired/Bored", F(State.User_Entity.Mood.Tired), False);
       Append (JSON_Line, "}");
+      Append (JSON_Line, ", ");
+      Append_Pair (JSON_Line, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
+      Append_Pair (JSON_Line, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
       Append (JSON_Line, "}");
       Append (JSON_Line, "}");
 

@@ -358,6 +358,15 @@ class PrimaryFlightDisplay:
         self.smooth_efficiency: float = 0.0
         self.smooth_power: float = 0.0
         self.smooth_work_efficiency: float = 0.0
+        self.last_telemetry_time: float = 0.0
+        from collections import deque
+        self.work_efficiency_history: deque[float] = deque(maxlen=3600)
+        
+        # Master Warning and Caution systems
+        self.prev_warning: bool = False
+        self.prev_caution: bool = False
+        self.warn_acknowledged: bool = False
+        self.caution_acknowledged: bool = False
 
         self.simulated: bool = False
         self.raw_pitch: float = 0.0
@@ -789,8 +798,33 @@ class PrimaryFlightDisplay:
                         self.smooth_heatflux = alpha * raw_heatflux + (1.0 - alpha) * self.smooth_heatflux
                         self.smooth_power = alpha * raw_power + (1.0 - alpha) * self.smooth_power
                         self.smooth_inefficiency = alpha * raw_inefficiency + (1.0 - alpha) * self.smooth_inefficiency
-                        self.smooth_efficiency = alpha * raw_efficiency + (1.0 - alpha) * self.smooth_efficiency
                         self.smooth_work_efficiency = alpha * raw_work_eff + (1.0 - alpha) * self.smooth_work_efficiency
+
+                    # Record history queue once per second (1Hz) based on telemetry epoch time stamp
+                    current_time = float(data.get('time', 0.0))
+                    if current_time != self.last_telemetry_time:
+                        self.last_telemetry_time = current_time
+                        self.work_efficiency_history.append(raw_work_eff)
+
+                    # Master Warning / Caution state updates
+                    raw_warning = bool(data.get('master_warning', False))
+                    raw_caution = bool(data.get('master_caution', False))
+                    
+                    if raw_warning:
+                        if not self.prev_warning:
+                            self.warn_acknowledged = False
+                            self.prev_warning = True
+                    else:
+                        self.prev_warning = False
+                        self.warn_acknowledged = False
+                        
+                    if raw_caution:
+                        if not self.prev_caution:
+                            self.caution_acknowledged = False
+                            self.prev_caution = True
+                    else:
+                        self.prev_caution = False
+                        self.caution_acknowledged = False
 
                     orient = data.get('orientation', {})
                     self.raw_pitch = float(orient.get('pitch', 0.0))
@@ -892,6 +926,69 @@ class PrimaryFlightDisplay:
         elif self.page == 7: self.draw_weather_page(w, h)
         elif self.page == 8: self.draw_search_page(w, h)
         self.draw_nav_keys()
+        self.draw_warning_caution_buttons(w, h)
+
+    def draw_warning_caution_buttons(self, w: float, h: float) -> None:
+        import time
+        # Load warning/caution states from latest loaded telemetry
+        raw_warning = False
+        raw_caution = False
+        if self.full_data:
+            raw_warning = bool(self.full_data.get('master_warning', False))
+            raw_caution = bool(self.full_data.get('master_caution', False))
+            
+        warn_ack = getattr(self, 'warn_acknowledged', False)
+        caut_ack = getattr(self, 'caution_acknowledged', False)
+        
+        # 1. Master Warning button (x: w - 240 to w - 130, y: 10 to 40)
+        wx1, wy1, wx2, wy2 = w - 240, 10, w - 130, 40
+        if raw_warning:
+            if warn_ack:
+                # Solid dimmed red if acknowledged
+                w_fill = "#7a0000"
+                w_text = "WARNING\n(ACK)"
+                w_outline = "#ff3333"
+                w_text_color = "white"
+            else:
+                # Flashing bright red/white
+                is_flash = (time.time() % 0.6 > 0.3)
+                w_fill = "#ff0000" if is_flash else "#ffffff"
+                w_text = "MASTER\nWARNING"
+                w_outline = "#ffffff"
+                w_text_color = "black" if is_flash else "red"
+        else:
+            w_fill = "#240000"
+            w_outline = "#550000"
+            w_text = "WARNING"
+            w_text_color = "#880000"
+            
+        self.canvas.create_rectangle(wx1, wy1, wx2, wy2, fill=w_fill, outline=w_outline, width=2)
+        self.canvas.create_text((wx1+wx2)/2, (wy1+wy2)/2, text=w_text, fill=w_text_color, font=("Monaco", 8, "bold"), justify="center")
+        
+        # 2. Master Caution button (x: w - 120 to w - 10, y: 10 to 40)
+        cx1, cy1, cx2, cy2 = w - 120, 10, w - 10, 40
+        if raw_caution:
+            if caut_ack:
+                # Solid dimmed amber
+                c_fill = "#7a4a00"
+                c_text = "CAUTION\n(ACK)"
+                c_outline = "#ffaa00"
+                c_text_color = "white"
+            else:
+                # Flashing amber/black
+                is_flash = (time.time() % 0.8 > 0.4)
+                c_fill = "#ff9900" if is_flash else "#331f00"
+                c_text = "MASTER\nCAUTION"
+                c_outline = "#ffaa00"
+                c_text_color = "black" if is_flash else "orange"
+        else:
+            c_fill = "#241800"
+            c_outline = "#553a00"
+            c_text = "CAUTION"
+            c_text_color = "#885f00"
+            
+        self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=c_fill, outline=c_outline, width=2)
+        self.canvas.create_text((cx1+cx2)/2, (cy1+cy2)/2, text=c_text, fill=c_text_color, font=("Monaco", 8, "bold"), justify="center")
 
     def draw_search_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="DESTINATION SEARCH & SELECTION", fill="#0077be", font=("Monaco", 20, "bold"))
@@ -905,6 +1002,16 @@ class PrimaryFlightDisplay:
             if y > h - 100: break
 
     def on_canvas_click(self, event: tk.Event) -> None:
+        w = self.canvas.winfo_width()
+        # Master Warning click acknowledgement (w-240 to w-130, y: 10 to 40)
+        if w - 240 <= event.x <= w - 130 and 10 <= event.y <= 40:
+            self.warn_acknowledged = True
+            return
+        # Master Caution click acknowledgement (w-120 to w-10, y: 10 to 40)
+        if w - 120 <= event.x <= w - 10 and 10 <= event.y <= 40:
+            self.caution_acknowledged = True
+            return
+
         if self.page == 8:
             # Check if clicked on a search result
             y = 150.0
@@ -1712,7 +1819,8 @@ class PrimaryFlightDisplay:
     def draw_advanced_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ADVANCED DETECTION & LOOP", fill="#ff00ff", font=("Monaco", 20, "bold"))
         user = self.full_data.get('user_entity_detection', {})
-        self.canvas.create_text(50, 100, anchor="nw", text=f"USER ENTITY COUNT: {user.get('count', 0)}", fill="cyan", font=("Monaco", 12, "bold"))
+        total_count = user.get('count', 0)
+        self.canvas.create_text(50, 100, anchor="nw", text=f"USER ENTITY COUNT: {total_count}", fill="cyan", font=("Monaco", 12, "bold"))
         
         detected = user.get('detected', [])
         dy = 130.0
@@ -1720,21 +1828,23 @@ class PrimaryFlightDisplay:
             self.canvas.create_text(70, dy, anchor="nw", text="NO ENTITIES DETECTED", fill="gray", font=("Monaco", 10, "italic"))
             dy += 20
         else:
-            for i, (bpm, conf) in enumerate(detected):
-                color = "white" if i > 0 else "#00ff00"
-                prefix = f"ENT {i+1}: " if i > 0 else "PRIMARY: "
-                self.canvas.create_text(70, dy, anchor="nw", text=f"{prefix}{bpm:5.1f} BPM (CONF: {conf*100:3.0f}%)", fill=color, font=("Monaco", 10, "bold" if i==0 else "normal"))
-                dy += 20
-                
-                # Heart icon for primary
-                if i == 0:
-                    # Pulsing logic based on time and BPM
-                    pulse = 1.0 + 0.2 * math.sin(time.time() * (bpm / 60.0) * 2 * math.pi)
-                    hx, hy = 320, dy - 10
-                    # Simple heart shape
-                    self.canvas.create_oval(hx-5*pulse, hy-5*pulse, hx+5*pulse, hy+5*pulse, fill="red", outline="")
-                    self.canvas.create_oval(hx+0*pulse, hy-5*pulse, hx+10*pulse, hy+5*pulse, fill="red", outline="")
-                    self.canvas.create_polygon([hx-5*pulse, hy+2*pulse, hx+10*pulse, hy+2*pulse, hx+2.5*pulse, hy+12*pulse], fill="red", outline="")
+            # Focus on exactly one primary entity heartbeat
+            bpm, conf = detected[0]
+            self.canvas.create_text(70, dy, anchor="nw", text=f"PRIMARY: {bpm:5.1f} BPM (CONF: {conf*100:3.0f}%)", fill="#00ff00", font=("Monaco", 10, "bold"))
+            
+            # Pulsing heart icon based on time and BPM for primary entity
+            pulse = 1.0 + 0.2 * math.sin(time.time() * (bpm / 60.0) * 2 * math.pi)
+            hx, hy = 320, dy + 7
+            # Simple heart shape
+            self.canvas.create_oval(hx-5*pulse, hy-5*pulse, hx+5*pulse, hy+5*pulse, fill="red", outline="")
+            self.canvas.create_oval(hx+0*pulse, hy-5*pulse, hx+10*pulse, hy+5*pulse, fill="red", outline="")
+            self.canvas.create_polygon([hx-5*pulse, hy+2*pulse, hx+10*pulse, hy+2*pulse, hx+2.5*pulse, hy+12*pulse], fill="red", outline="")
+            dy += 30
+            
+            # State the number of other detected entities
+            other_count = max(0, total_count - 1)
+            self.canvas.create_text(70, dy, anchor="nw", text=f"OTHER ENTITIES: {other_count}", fill="white", font=("Monaco", 10))
+            dy += 25
 
         mood = user.get('inferred_mood', {})
         my = dy + 10
@@ -1777,7 +1887,11 @@ class PrimaryFlightDisplay:
         eff_pct = getattr(self, 'smooth_efficiency', float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0)))
         work_pct = getattr(self, 'smooth_work_efficiency', float(smc.get('work_efficiency_pct', 100.0 - eff_pct)))
         
-        self.canvas.create_text(450, 310, anchor="nw", text=f"THERMODYNAMICS & EFF:\nPOWER INPUT: {p_in:.2f} W\nHEAT EXHAUST: {p_heat:.2f} J/s\nTHERM LOSS:   {p_loss:.2f} W\nCOOLING EFF:  {eff_pct:.2f}%\nWORK EFF:     {work_pct:.2f}%", fill="orange", font=("Monaco", 10))
+        # Calculate running average of Work Efficiency
+        history = getattr(self, 'work_efficiency_history', [])
+        avg_work_1h = sum(history) / len(history) if history else work_pct
+        
+        self.canvas.create_text(450, 310, anchor="nw", text=f"THERMODYNAMICS & EFF:\nPOWER INPUT:  {p_in:.2f} W\nHEAT EXHAUST: {p_heat:.2f} J/s\nTHERM LOSS:   {p_loss:.2f} W\nCOOLING EFF:  {eff_pct:.2f}%\nWORK EFF:     {work_pct:.2f}%\nWORK EFF 1H:  {avg_work_1h:.2f}%", fill="orange", font=("Monaco", 10))
         
         # 1. DR Calibration & Drift Corrections
         loc = self.full_data.get('location', {})

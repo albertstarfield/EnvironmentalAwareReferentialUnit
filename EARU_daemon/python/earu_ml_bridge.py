@@ -49,7 +49,9 @@ import sys
 from collections import deque
 
 # Add parent dir to path to import EARU (Root is two levels up from EARU_daemon/python/)
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+root_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+sys.path.append(root_dir)
+sys.path.append(os.path.join(root_dir, "EARU_LegacyPython"))
 try:
     from EARU import VibrationDetector
 except ImportError:
