@@ -1856,6 +1856,12 @@ class PrimaryFlightDisplay:
         loop = self.full_data.get('loop_consistency', {})
         self.canvas.create_text(450, 100, anchor="nw", text=f"LOOP AVG: {loop.get('avg_ms',0):.2f}ms\nSTUTTERS: {loop.get('stutters',0)}", fill="white", font=("Monaco", 10))
         
+        # Pedometer Steps
+        ped = self.full_data.get('pedometer', {})
+        steps = ped.get('steps', 0)
+        self.canvas.create_text(450, 150, anchor="nw", text="PEDOMETER", fill="cyan", font=("Monaco", 12, "bold"))
+        self.canvas.create_text(450, 180, anchor="nw", text=f"STEPS COMPLETED: {steps}", fill="#00ff00", font=("Monaco", 10, "bold"))
+        
         # ALS Detail
         als = self.full_data.get('als', {})
         if als:

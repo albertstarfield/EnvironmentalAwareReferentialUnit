@@ -48,7 +48,7 @@ procedure Earu_Daemon is
       pragma Unreferenced (Ret);
    begin
       Ada.Text_IO.Put_Line ("[*] Automatically invoking Python ML Bridge (Enhanced Parity)...");
-      Ret := C_System (Interfaces.C.To_C ("REAL_SENSOR=1 /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &"));
+      Ret := C_System (Interfaces.C.To_C ("REAL_SENSOR=1 /opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &"));
    end Start_ML_Bridge;
 
    Accel_SHM : IMU_SHM_Ptr := null;
@@ -100,6 +100,7 @@ procedure Earu_Daemon is
                         declare
                            Full_State : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
                            Loc : Location_Type := Full_State.Location;
+                           Ped : Pedometer_State_Type := Full_State.Pedometer;
                            Gyro_Mag : constant Real := Sqrt (Local_Gyro.X**2 + Local_Gyro.Y**2 + Local_Gyro.Z**2);
                         begin
                            Earu.Math.Dead_Reckon_Update (
@@ -113,6 +114,8 @@ procedure Earu_Daemon is
                               Gas_R          => Full_State.SMC.Gas_Constants.R,
                               Gas_Gamma      => Full_State.SMC.Gas_Constants.Gamma
                            );
+
+                           Earu.Math.Update_Pedometer (Ped, Local_Accel, Local_Q, Loc.Calibrated_G, Real(E_A.Timestamp));
 
                             -- Transition to Altitude INOP event logging
                             if Loc.Alt_Inop and not Full_State.Location.Alt_Inop then
@@ -134,6 +137,7 @@ procedure Earu_Daemon is
                                end;
                             end if;
 
+                           Earu.State_Store.State_Buffer.Update_Pedometer (Ped);
                            Earu.State_Store.State_Buffer.Update_Location (Loc);
                         end;
 

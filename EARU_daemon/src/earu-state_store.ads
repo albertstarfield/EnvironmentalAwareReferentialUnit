@@ -19,6 +19,7 @@ package Earu.State_Store is
       procedure Update_SMC (SMC : SMC_Type);
       procedure Update_Parity (Aug, Ext, Int_Hash : String);
       procedure Update_ML (User : User_Detection_Type);
+      procedure Update_Pedometer (P : Pedometer_State_Type);
       procedure Update_Damage (Cumulative, Risk, Peak : Real);
       procedure Update_Damage_Fatigue (D : Damage_Fatigue_Type);
       procedure Update_Vibration (V : Vibration_State_Type; Mag : Real);

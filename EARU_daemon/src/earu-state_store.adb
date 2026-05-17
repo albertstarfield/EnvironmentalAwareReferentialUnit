@@ -58,6 +58,11 @@ package body Earu.State_Store is
          State.User_Entity := User;
       end Update_ML;
 
+      procedure Update_Pedometer (P : Pedometer_State_Type) is
+      begin
+         State.Pedometer := P;
+      end Update_Pedometer;
+
       procedure Update_Damage (Cumulative, Risk, Peak : Real) is
       begin
          State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue := Cumulative;

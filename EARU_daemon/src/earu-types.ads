@@ -246,6 +246,18 @@ package Earu.Types is
       Detected : aliased Entity_Array := (others => (others => <>));
    end record;
 
+   type Pedometer_State_Type is record
+      Steps          : aliased Integer := 0;
+      Last_Step_Time : aliased Real := 0.0;
+      VX             : aliased Real := 0.0;
+      VY             : aliased Real := 0.0;
+      VZ             : aliased Real := 0.0;
+      V_Mag_Prev     : aliased Real := 0.0;
+      Peak_Candidate : aliased Real := 0.0;
+      Peak_Time      : aliased Real := 0.0;
+      Last_Timestamp : aliased Real := 0.0;
+   end record;
+
    type Event_Type is record
       Time : aliased Real := 0.0;
       TStr : aliased String (1 .. 12) := (others => ' ');
@@ -287,6 +299,7 @@ package Earu.Types is
       Electron_Travel     : aliased Electron_Travel_Type := (others => <>);
       ALS                 : aliased ALS_Type := (others => <>);
       User_Entity         : aliased User_Detection_Type := (others => <>);
+      Pedometer           : aliased Pedometer_State_Type := (others => <>);
       Lid_Angle           : aliased Real := 0.0;
       Lid_Speed           : aliased Real := 0.0;
       P_Augmented         : aliased String (1 .. 64) := (others => ' ');

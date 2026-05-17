@@ -54,17 +54,23 @@ sys.path.append(root_dir)
 sys.path.append(os.path.join(root_dir, "EARU_LegacyPython"))
 try:
     from EARU import VibrationDetector
-except ImportError:
-    print("[!] Warning: Could not import VibrationDetector from EARU.py. Using stub.")
+except Exception as e:
+    print(f"[!] Warning: Could not import VibrationDetector from EARU.py. Exception: {e}")
     class VibrationDetector:
         def __init__(self, fs=100):
             self.events = []
             self.cumulative_fatigue = 1e-10
+            self.cusum_val = 0.0
             self.latest_mag = 0.0
             self.rms = 0.0
             self.peak = 0.0
-        def update(self, x, y, z): 
+        def process(self, x, y, z, ts):
             self.latest_mag = math.sqrt(x**2 + y**2 + z**2)
+            self.peak = max(self.peak * 0.999, self.latest_mag)
+            self.rms = self.rms * 0.99 + self.latest_mag * 0.01
+            if self.latest_mag > 0.05:
+                self.cumulative_fatigue += 1e-8
+            self.cusum_val = self.cusum_val * 0.99 + max(0.0, self.latest_mag - 0.02) * 0.01
 
 # SHM Configuration - ALIGNED with _spu.py and earu_daemon.adb
 SHM_PREFIX = "earu_v2_"

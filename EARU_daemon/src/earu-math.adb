@@ -611,4 +611,83 @@ package body Earu.Math is
       Loc.Alt := New_Alt;
    end Process_GPS_Update;
 
+   procedure Update_Pedometer (
+      P            : in out Pedometer_State_Type;
+      Accel        : in     Vector3;
+      Q            : in     Quaternion;
+      Calibrated_G : in     Real;
+      Timestamp    : in     Real
+   ) is
+      G_Const : constant Real := 9.80665;
+      DT : Real := 0.00125; -- Default for 800Hz
+      W : Vector3;
+      
+      -- Dynamic filter parameters
+      F_HP     : constant Real := 0.5;
+      RC_HP    : constant Real := 1.0 / (2.0 * PI * F_HP);
+      HP_Alpha : Real;
+      
+      F_LP     : constant Real := 3.0;
+      RC_LP    : constant Real := 1.0 / (2.0 * PI * F_LP);
+      LP_Alpha : Real;
+      
+      V_Mag        : Real;
+      V_Mag_Smooth : Real;
+      
+      Threshold : constant Real := 0.02;
+      Min_Step_Interval : constant Real := 0.35;
+   begin
+      -- 0. Calculate precise DT
+      if P.Last_Timestamp > 0.0 then
+         DT := Timestamp - P.Last_Timestamp;
+         if DT <= 0.0 or DT > 0.1 then
+            DT := 0.00125;
+         end if;
+      end if;
+      P.Last_Timestamp := Timestamp;
+      
+      -- 1. Rotate and subtract gravity to isolate dynamic acceleration (in g)
+      W := Rotate_And_Subtract_Gravity (Q, Accel, Calibrated_G);
+      
+      -- Convert g to m/s^2 for integration
+      W.X := W.X * G_Const;
+      W.Y := W.Y * G_Const;
+      W.Z := W.Z * G_Const;
+      
+      -- 2. Calculate dynamic alpha filters
+      HP_Alpha := RC_HP / (RC_HP + DT);
+      LP_Alpha := DT / (RC_LP + DT);
+      
+      -- Integrate acceleration to get high-pass filtered velocity
+      P.VX := HP_Alpha * (P.VX + W.X * DT);
+      P.VY := HP_Alpha * (P.VY + W.Y * DT);
+      P.VZ := HP_Alpha * (P.VZ + W.Z * DT);
+      
+      -- 3. Calculate Velocity Magnitude
+      V_Mag := Sqrt (P.VX*P.VX + P.VY*P.VY + P.VZ*P.VZ);
+      
+      -- 4. Low-pass filter (3Hz) to smooth velocity magnitude
+      V_Mag_Smooth := LP_Alpha * V_Mag + (1.0 - LP_Alpha) * P.V_Mag_Prev;
+      P.V_Mag_Prev := V_Mag_Smooth;
+      
+      -- 5. Online stream-based peak detection
+      -- Check if we are above the walking velocity magnitude threshold
+      if V_Mag_Smooth > Threshold then
+         -- Track the maximum peak candidate and its timestamp in the current excursion
+         if V_Mag_Smooth > P.Peak_Candidate then
+            P.Peak_Candidate := V_Mag_Smooth;
+            P.Peak_Time := Timestamp;
+         end if;
+      else
+         -- Signal dropped below threshold, check if we captured a valid step peak
+         if P.Peak_Candidate > Threshold then
+            if P.Last_Step_Time = 0.0 or else (P.Peak_Time - P.Last_Step_Time >= Min_Step_Interval) then
+               P.Steps := P.Steps + 1;
+               P.Last_Step_Time := P.Peak_Time;
+            end if;
+         end if;
+         P.Peak_Candidate := 0.0;
+      end if;
+   end Update_Pedometer;
+
 end Earu.Math;

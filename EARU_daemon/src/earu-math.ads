@@ -78,4 +78,12 @@ package Earu.Math is
       Now_T   : in     Real
    );
 
+   procedure Update_Pedometer (
+      P            : in out Pedometer_State_Type;
+      Accel        : in     Vector3;
+      Q            : in     Quaternion;
+      Calibrated_G : in     Real;
+      Timestamp    : in     Real
+   );
+
 end Earu.Math;

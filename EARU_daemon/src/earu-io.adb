@@ -420,6 +420,10 @@ package body Earu.IO is
       Append (P_Aug_Payload, "}");
       Append (P_Aug_Payload, "}, ");
       
+      Append (P_Aug_Payload, """pedometer"": {");
+      Append_Pair (P_Aug_Payload, "steps", Ada.Strings.Fixed.Trim(Integer'Image(State.Pedometer.Steps), Ada.Strings.Left), False);
+      Append (P_Aug_Payload, "}, ");
+      
       Append (P_Aug_Payload, """weather_local"": ");
       if Weather /= null and then Weather.Meteo_Len > 0 then
          declare
@@ -651,6 +655,11 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "Tired/Bored", F(State.User_Entity.Mood.Tired), False);
       Append (JSON_Line, "}");
       Append (JSON_Line, ", ");
+      
+      Append (JSON_Line, """pedometer"": {");
+      Append_Pair (JSON_Line, "steps", Ada.Strings.Fixed.Trim(Integer'Image(State.Pedometer.Steps), Ada.Strings.Left), False);
+      Append (JSON_Line, "}, ");
+      
       Append_Pair (JSON_Line, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
       Append_Pair (JSON_Line, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
       Append (JSON_Line, "}");
