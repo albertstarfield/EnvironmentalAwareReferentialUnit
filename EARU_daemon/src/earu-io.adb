@@ -7,6 +7,7 @@ with GNAT.SHA256;
 with Earu.Types;
 with Earu.Shm;
 with Interfaces;
+with Ada.Numerics.Generic_Elementary_Functions;
 
 package body Earu.IO is
    use Earu.Types;
@@ -77,6 +78,48 @@ package body Earu.IO is
       end loop;
       if Last < Str'First then return ""; else return Str (Str'First .. Last); end if;
    end Trim_Null;
+
+   function Calculate_Hinge_Airflow (State : in Earu_State) return Real is
+      package Math is new Ada.Numerics.Generic_Elementary_Functions (Real);
+      Avg_Fan : constant Real := (State.SMC.Fan_RPMs (1) + State.SMC.Fan_RPMs (2)) / 2.0;
+      Lid_Rad : constant Real := State.Lid_Angle * 3.141592653589793 / 180.0;
+      Sin_Val : constant Real := Math.Sin (Lid_Rad);
+      Airflow : Real;
+   begin
+      if Sin_Val < 0.0 then
+         Airflow := 0.0;
+      else
+         Airflow := 15.0 * (Avg_Fan / 6000.0) * Sin_Val;
+      end if;
+      return Airflow;
+   end Calculate_Hinge_Airflow;
+
+   function Calculate_Outflow_Mass_Flow (State : in Earu_State) return Real is
+      package Math is new Ada.Numerics.Generic_Elementary_Functions (Real);
+      Avg_Fan : constant Real := (State.SMC.Fan_RPMs (1) + State.SMC.Fan_RPMs (2)) / 2.0;
+      Lid_Rad : constant Real := State.Lid_Angle * 3.141592653589793 / 180.0;
+      Sin_Val : constant Real := Math.Sin (Lid_Rad);
+      Mass_Flow : Real;
+   begin
+      if Sin_Val < 0.0 then
+         Mass_Flow := 0.0;
+      else
+         Mass_Flow := 0.003 * (Avg_Fan / 6000.0) * Sin_Val;
+      end if;
+      return Mass_Flow;
+   end Calculate_Outflow_Mass_Flow;
+
+   function Calculate_Outflow_Heatflux (State : in Earu_State) return Real is
+      Mass_Flow : constant Real := Calculate_Outflow_Mass_Flow (State);
+      Delta_T : Real := State.SMC.Airflow_Outlet_K - State.SMC.Airflow_Inlet_K;
+      Heatflux : Real;
+   begin
+      if Delta_T < 0.0 then
+         Delta_T := 0.0;
+      end if;
+      Heatflux := Mass_Flow * 1005.0 * Delta_T;
+      return Heatflux;
+   end Calculate_Outflow_Heatflux;
 
    function S (Str : String) return String is
       Result : Unbounded_String;
@@ -239,6 +282,9 @@ package body Earu.IO is
       Append (P_Int_Payload, "}, ");
       Append_Pair (P_Int_Payload, "lid_angle", F(State.Lid_Angle));
       Append_Pair (P_Int_Payload, "lid_speed", F(State.Lid_Speed));
+      Append_Pair (P_Int_Payload, "hinge_airflow", F(Calculate_Hinge_Airflow(State)));
+      Append_Pair (P_Int_Payload, "outflow_mass_flow", F(Calculate_Outflow_Mass_Flow(State)));
+      Append_Pair (P_Int_Payload, "outflow_heatflux", F(Calculate_Outflow_Heatflux(State)));
       Append (P_Int_Payload, """orientation"": {");
       Append_Pair (P_Int_Payload, "pitch", F(State.Orientation.Pitch));
       Append (P_Int_Payload, """q"": [" & F(State.Orientation.Q.W) & ", " & F(State.Orientation.Q.X) & ", " & F(State.Orientation.Q.Y) & ", " & F(State.Orientation.Q.Z) & "], ");
@@ -358,6 +404,8 @@ package body Earu.IO is
       Append_Pair (P_Aug_Payload, "airflow_outlet_k", F(State.SMC.Airflow_Outlet_K));
       Append_Pair (P_Aug_Payload, "ambient_temp_k", F(State.SMC.Ambient_Temp_K));
       Append (P_Aug_Payload, """fan_rpms"": [" & F(State.SMC.Fan_RPMs(1)) & ", " & F(State.SMC.Fan_RPMs(2)) & "], ");
+      Append_Pair (P_Aug_Payload, "PropellerEngine1Tach", F(State.SMC.Fan_RPMs(1)));
+      Append_Pair (P_Aug_Payload, "PropellerEngine2Tach", F(State.SMC.Fan_RPMs(2)));
       Append (P_Aug_Payload, """gas_constants"": {");
       Append_Pair (P_Aug_Payload, "Cp", F(State.SMC.Gas_Constants.Cp));
       Append_Pair (P_Aug_Payload, "R", F(State.SMC.Gas_Constants.R));
@@ -510,6 +558,9 @@ package body Earu.IO is
       
       Append_Pair (JSON_Line, "lid_angle", F(State.Lid_Angle));
       Append_Pair (JSON_Line, "lid_speed", F(State.Lid_Speed));
+      Append_Pair (JSON_Line, "hinge_airflow", F(Calculate_Hinge_Airflow(State)));
+      Append_Pair (JSON_Line, "outflow_mass_flow", F(Calculate_Outflow_Mass_Flow(State)));
+      Append_Pair (JSON_Line, "outflow_heatflux", F(Calculate_Outflow_Heatflux(State)));
       
       Append (JSON_Line, """location"": {");
       Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_Altitude", F(State.Location.Corr_Alt));
@@ -593,6 +644,8 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "airflow_outlet_k", F(State.SMC.Airflow_Outlet_K));
       Append_Pair (JSON_Line, "ambient_temp_k", F(State.SMC.Ambient_Temp_K));
       Append (JSON_Line, """fan_rpms"": [" & F(State.SMC.Fan_RPMs(1)) & ", " & F(State.SMC.Fan_RPMs(2)) & "], ");
+      Append_Pair (JSON_Line, "PropellerEngine1Tach", F(State.SMC.Fan_RPMs(1)));
+      Append_Pair (JSON_Line, "PropellerEngine2Tach", F(State.SMC.Fan_RPMs(2)));
       Append (JSON_Line, """gas_constants"": {");
       Append_Pair (JSON_Line, "Cp", F(State.SMC.Gas_Constants.Cp));
       Append_Pair (JSON_Line, "R", F(State.SMC.Gas_Constants.R));

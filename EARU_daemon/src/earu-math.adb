@@ -386,7 +386,8 @@ package body Earu.Math is
          if V_Mag_Raw > 0.001 then
             declare
                V_Knots : constant Real := V_Mag_Raw * 1.94384;
-               V_Actual_Knots : constant Real := 17.6 * (Exp (0.4 * V_Knots) - 1.0);
+               V_Knots_Clamped : constant Real := Real'Max (0.0, Real'Min (4.0, V_Knots));
+               V_Actual_Knots : constant Real := 17.6 * (Exp (0.4 * V_Knots_Clamped) - 1.0) + (if V_Knots > 4.0 then V_Knots - 4.0 else 0.0);
                Scale : constant Real := (V_Actual_Knots / 1.94384) / V_Mag_Raw;
             begin
                V_Mag_Scaled := V_Actual_Knots / 1.94384;

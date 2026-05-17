@@ -339,6 +339,14 @@ class PrimaryFlightDisplay:
         self.charging: bool = False
         self.hid_idle: float = 0.0
         self.transportation_category: str = "stationary"
+        self.fan_rpms: list[float] = []
+        self.airflow_inlet_c: float = 20.0
+        self.airflow_outlet_c: float = 20.0
+        self.airflow_offset: int = 0
+        self.lid_angle: float = 110.0
+        self.hinge_airflow: float = 0.0
+        self.outflow_mass_flow: float = 0.0
+        self.outflow_heatflux: float = 0.0
 
         # Power & Energy Stats
         self.power_rate: float = 0.0
@@ -979,6 +987,24 @@ class PrimaryFlightDisplay:
                     self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
                     self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
                     self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
+                    self.fan_rpms = [
+                        float(smc.get('PropellerEngine1Tach', 0.0)),
+                        float(smc.get('PropellerEngine2Tach', 0.0))
+                    ]
+                    self.airflow_inlet_c = float(smc.get('airflow_inlet_k', 293.15)) - 273.15
+                    self.airflow_outlet_c = float(smc.get('airflow_outlet_k', 293.15)) - 273.15
+                    self.lid_angle = float(data.get('lid_angle', 110.0))
+                    # Parse hinge_airflow with a solid mathematical fallback based on fan RPMs and screen angle
+                    avg_fan = sum(self.fan_rpms) / len(self.fan_rpms) if self.fan_rpms else 0.0
+                    fallback_flow = 15.0 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
+                    self.hinge_airflow = float(data.get('hinge_airflow', max(0.0, fallback_flow)))
+                    
+                    fallback_mass = 0.003 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
+                    self.outflow_mass_flow = float(data.get('outflow_mass_flow', max(0.0, fallback_mass)))
+                    
+                    delta_t = max(0.0, self.airflow_outlet_c - self.airflow_inlet_c)
+                    fallback_heatflux = self.outflow_mass_flow * 1005.0 * delta_t
+                    self.outflow_heatflux = float(data.get('outflow_heatflux', max(0.0, fallback_heatflux)))
 
                     self.simulated = False
 
@@ -1625,6 +1651,47 @@ class PrimaryFlightDisplay:
             v_f = sf(val)
             self.canvas.create_text(col, row, anchor="nw", text=f"{name}: {v_f:>5.1f}", fill="orange" if v_f > 60 else "green", font=("Monaco", 9))
         
+        # --- Vertical Thermal Bar Chart ---
+        tx = 215
+        ty1 = 100
+        ty2 = 280
+        th = ty2 - ty1
+        
+        self.canvas.create_text(tx + 120, ty1 - 20, text="CORE THERMALS (\u00b0C)", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
+        
+        # Draw background grid lines at 25C, 50C, 75C, 100C
+        for temp_line in [25, 50, 75, 100]:
+            gly = ty2 - (temp_line / 100.0) * th
+            self.canvas.create_line(tx, gly, tx + 240, gly, fill="#222", dash=(2, 2))
+            self.canvas.create_text(tx - 5, gly, text=f"{temp_line}", fill="#666", font=("Monaco", 7), anchor="e")
+            
+        # Draw base line
+        self.canvas.create_line(tx, ty2, tx + 240, ty2, fill="#444")
+        
+        # Iterate over all temperature keys and draw vertical bars
+        for idx, (name, val) in enumerate(temps.items()):
+            v_f = sf(val)
+            pct = min(1.0, max(0.0, v_f / 100.0))
+            
+            bar_x1 = tx + 10 + idx * 21
+            bar_x2 = bar_x1 + 11
+            bar_y1 = ty2 - pct * th
+            
+            # Draw bar background
+            self.canvas.create_rectangle(bar_x1, ty1, bar_x2, ty2, fill="#111", outline="#333")
+            
+            # Draw active fill
+            if pct > 0:
+                bar_color = "red" if v_f > 70 else ("orange" if v_f > 50 else "green")
+                self.canvas.create_rectangle(bar_x1, bar_y1, bar_x2, ty2, fill=bar_color, outline="")
+                
+            # Print value above the bar if space permits
+            if v_f > 0:
+                self.canvas.create_text((bar_x1 + bar_x2)/2, bar_y1 - 5, text=f"{int(v_f)}", fill="white", font=("Monaco", 7), anchor="s")
+                
+            # Print sensor label below the bar
+            self.canvas.create_text((bar_x1 + bar_x2)/2, ty2 + 5, text=name, fill="orange" if v_f > 60 else "green", font=("Monaco", 7, "bold"), anchor="n")
+        
         weather = self.full_data.get('ecosystem_weather', {})
         x_env, y_env = 500, 100
         env_metrics = [
@@ -1663,6 +1730,219 @@ class PrimaryFlightDisplay:
             col = "green" if (n == "SURVIVE" and v == "Yes") or (n == "HIBERNATE" and v == "No") else ("red" if (n == "SURVIVE" and v == "No") or (n == "HIBERNATE" and v == "Yes") else "white")
             if n == "BATT HEALTH": col = "green" if self.battery_health > 80 else "yellow"
             self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
+
+        # --- Vertical Battery Fuel Gauge ---
+        bx = 945
+        by1 = 100
+        by2 = 350
+        bh = by2 - by1
+        pct = min(1.0, max(0.0, self.batt / 100.0))
+        
+        # Label above gauge
+        self.canvas.create_text(bx, by1 - 20, text="BATT FUEL", fill="yellow", font=("Monaco", 9, "bold"), anchor="s")
+        
+        # Fuel tank container outer box
+        self.canvas.create_rectangle(bx - 12, by1, bx + 12, by2, fill="#111", outline="#555", width=2)
+        
+        # Fuel level fill
+        if pct > 0:
+            fuel_y1 = by2 - pct * bh
+            fuel_color = "red" if pct < 0.2 else ("yellow" if pct < 0.5 else "green")
+            self.canvas.create_rectangle(bx - 10, fuel_y1, bx + 10, by2, fill=fuel_color, outline="")
+            
+        # Draw physical tick marks and side labels (E, 1/2, F)
+        ticks = [0.0, 0.25, 0.50, 0.75, 1.0]
+        for t in ticks:
+            ty = by2 - t * bh
+            # Tick lines
+            self.canvas.create_line(bx - 18, ty, bx - 12, ty, fill="#777", width=1)
+            self.canvas.create_line(bx + 12, ty, bx + 18, ty, fill="#777", width=1)
+            
+            # Text indicators next to ticks
+            if t == 1.0:
+                self.canvas.create_text(bx - 22, ty, text="F", fill="green", font=("Monaco", 9, "bold"), anchor="e")
+            elif t == 0.5:
+                self.canvas.create_text(bx - 22, ty, text="1/2", fill="yellow", font=("Monaco", 8), anchor="e")
+            elif t == 0.0:
+                self.canvas.create_text(bx - 22, ty, text="E", fill="red", font=("Monaco", 9, "bold"), anchor="e")
+                
+        # Digital percentage reading below
+        self.canvas.create_text(bx, by2 + 15, text=f"{self.batt}%", fill="white", font=("Monaco", 10, "bold"), anchor="n")
+
+        # --- Dual Fan Propeller Engine Arc Tachometers ---
+        fy = y_env + 310
+        self.canvas.create_text(x_env + 120, fy, text="FAN PROPELLER RPM", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
+        
+        fans = self.fan_rpms if self.fan_rpms else [0.0, 0.0]
+        cy = y_env + 380
+        cx_coords = [x_env + 60, x_env + 180]
+        r = 35
+        needle_r = 30
+        
+        for idx, rpm_val in enumerate(fans[:2]):
+            cx = cx_coords[idx]
+            rpm = sf(rpm_val)
+            rpm_clamped = min(6000.0, max(0.0, rpm))
+            pct = rpm_clamped / 6000.0
+            
+            # Draw baseline gauge arc
+            self.canvas.create_arc(cx - r, cy - r, cx + r, cy + r, start=225, extent=-270, style="arc", width=4, outline="#222")
+            
+            # Active arc sweep with speed color indicators
+            if pct > 0:
+                bar_col = "cyan" if pct < 0.5 else ("yellow" if pct < 0.8 else "red")
+                self.canvas.create_arc(cx - r, cy - r, cx + r, cy + r, start=225, extent=-270 * pct, style="arc", width=4, outline=bar_col)
+                
+            # Needle needle
+            angle_deg = 225 - 270 * pct
+            rad = math.radians(angle_deg)
+            nx = cx + needle_r * math.cos(rad)
+            ny = cy - needle_r * math.sin(rad)
+            self.canvas.create_line(cx, cy, nx, ny, fill="red", width=2)
+            
+            # Center cap
+            self.canvas.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="white", outline="")
+            
+            # Digital telemetry
+            self.canvas.create_text(cx, cy + 45, text=f"FAN {idx} / F{idx}Ac\n{int(rpm)} RPM", fill="white", font=("Monaco", 9, "bold"), justify="center", anchor="n")
+
+        # --- Laptop Body & Airflow Illustration ---
+        # Centered horizontally at x = 240, vertically at y = 550
+        lx = 240
+        ly = 550
+        
+        # Title for the illustration
+        disp_angle = self.lid_angle if self.lid_angle > 0.0 else 110.0
+        self.canvas.create_text(lx, ly - 80, text=f"CHASSIS THERMAL AIRFLOW ({disp_angle:.1f}\u00b0)", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
+        
+        # Draw laptop side profile outline
+        # Keyboard base deck
+        self.canvas.create_polygon(
+            lx - 100, ly + 40,  # back hinge
+            lx + 100, ly + 40,  # front lip
+            lx + 90,  ly + 55,  # front base bottom
+            lx - 90,  ly + 55,  # back base bottom
+            fill="#111", outline="#00ccff", width=2
+        )
+        
+        # Dynamic screen lid rotation based on parsed self.lid_angle
+        # If the incoming telemetry has 0.0 but we want to simulate or show open, we default to 110.0
+        disp_angle = self.lid_angle if self.lid_angle > 0.0 else 110.0
+        lid_angle_clamped = min(180.0, max(0.0, disp_angle))
+        rad_lid = math.radians(lid_angle_clamped)
+        screen_length = 100
+        screen_top_x = (lx - 100) + screen_length * math.cos(rad_lid)
+        screen_top_y = (ly + 40) - screen_length * math.sin(rad_lid)
+        
+        # Screen lid line
+        self.canvas.create_line(lx - 100, ly + 40, screen_top_x, screen_top_y, fill="#00ccff", width=3)
+        self.canvas.create_oval(screen_top_x - 2, screen_top_y - 2, screen_top_x + 2, screen_top_y + 2, fill="cyan", outline="") # Webcam marker
+        
+        # Keyboard key lines inside the base (isometric key deck)
+        self.canvas.create_line(lx - 80, ly + 44, lx + 80, ly + 44, fill="#333", width=1)
+        self.canvas.create_line(lx - 75, ly + 48, lx + 75, ly + 48, fill="#333", width=1)
+        
+        # Vents
+        # Front Inlet Vents (underneath the front-lip)
+        self.canvas.create_line(lx + 80, ly + 48, lx + 80, ly + 53, fill="cyan", width=2)
+        # Rear Outlet Vents (near the hinge)
+        self.canvas.create_line(lx - 85, ly + 45, lx - 85, ly + 52, fill="red", width=2)
+        
+        # --- Draw Airflow Paths with Dynamic Vector Animations ---
+        # If lid angle is closed (< 15 degrees), block airflow illustration
+        if lid_angle_clamped < 15.0:
+            self.canvas.create_text(lx, ly + 15, text="CHASSIS CLOSED - AIRFLOW BLOCKED", fill="orange", font=("Monaco", 9, "bold"), anchor="n")
+        else:
+            inlet_x = lx + 120
+            inlet_y = ly + 48
+            
+            # 1. Inlet Airflow (straight to front deck)
+            self.canvas.create_line(inlet_x, inlet_y, lx + 60, ly + 48, fill="#22ddff", dash=(3, 3), arrow="last", arrowshape=(8, 10, 3))
+            t_inlet = self.airflow_offset / 10.0
+            dot_in_x = inlet_x - t_inlet * 60
+            dot_in_y = inlet_y
+            self.canvas.create_oval(dot_in_x - 3, dot_in_y - 3, dot_in_x + 3, dot_in_y + 3, fill="cyan", outline="")
+            
+            # 2. Split Outlet Airflow (Outflow Back Hinge)
+            # Starts at lx - 85, ly + 45
+            hinge_x = lx - 85
+            hinge_y = ly + 45
+            
+            # Determine path drawing:
+            # - when 10 degrees and below: just straight back
+            # - 89 beyond: parallel with screen lid (hinge angle)
+            # - split in between
+            draw_straight = (disp_angle < 89.0)
+            draw_parallel = (disp_angle > 10.0)
+            
+            t_out = self.airflow_offset / 10.0
+            
+            # Screen direction vector for parallel angle
+            screen_dx = screen_top_x - (lx - 100)
+            screen_dy = screen_top_y - (ly + 40)
+            screen_len = math.sqrt(screen_dx**2 + screen_dy**2)
+            if screen_len > 0:
+                ux = screen_dx / screen_len
+                uy = screen_dy / screen_len
+            else:
+                ux, uy = -0.7, -0.7
+                
+            if draw_straight:
+                # Path 1: Straight back (horizontal to the left, 0 degrees)
+                end_x1 = hinge_x - 60
+                end_y1 = hinge_y
+                self.canvas.create_line(hinge_x, hinge_y, end_x1, end_y1, fill="#ff4422", dash=(3, 3), arrow="last", arrowshape=(8, 10, 3))
+                
+                # Flowing dot along Path 1
+                dot_x1 = hinge_x - t_out * 60
+                dot_y1 = hinge_y
+                self.canvas.create_oval(dot_x1 - 3, dot_y1 - 3, dot_x1 + 3, dot_y1 + 3, fill="red", outline="")
+                
+            if draw_parallel:
+                # Path 2: Parallel with screen lid angle
+                end_x2 = hinge_x + 60 * ux
+                end_y2 = hinge_y + 60 * uy
+                self.canvas.create_line(hinge_x, hinge_y, end_x2, end_y2, fill="#ff7722", dash=(3, 3), arrow="last", arrowshape=(8, 10, 3))
+                
+                # Flowing dot along Path 2
+                dot_x2 = hinge_x + t_out * 60 * ux
+                dot_y2 = hinge_y + t_out * 60 * uy
+                self.canvas.create_oval(dot_x2 - 3, dot_y2 - 3, dot_x2 + 3, dot_y2 + 3, fill="#ffaa44", outline="")
+
+        # --- Inlet Temperature Vertical Bar (Front/Right) ---
+        ix = lx + 120
+        iy1 = ly - 70
+        iy2 = ly + 20
+        ih = iy2 - iy1
+        pct_in = min(1.0, max(0.0, self.airflow_inlet_c / 100.0))
+        
+        self.canvas.create_text(ix, iy1 - 15, text="INLET", fill="cyan", font=("Monaco", 9, "bold"), anchor="s")
+        self.canvas.create_rectangle(ix - 8, iy1, ix + 8, iy2, fill="#111", outline="#00ccff")
+        if pct_in > 0:
+            in_bar_y = iy2 - pct_in * ih
+            in_color = "red" if self.airflow_inlet_c > 60 else ("orange" if self.airflow_inlet_c > 45 else "cyan")
+            self.canvas.create_rectangle(ix - 6, in_bar_y, ix + 6, iy2, fill=in_color, outline="")
+        self.canvas.create_text(ix, iy2 + 10, text=f"{self.airflow_inlet_c:.1f}\u00b0C", fill="cyan", font=("Monaco", 8, "bold"), anchor="n")
+        
+        # --- Outlet Temperature Vertical Bar (Back/Left) ---
+        ox = lx - 150
+        oy1 = ly - 70
+        oy2 = ly + 20
+        oh = oy2 - oy1
+        pct_out = min(1.0, max(0.0, self.airflow_outlet_c / 100.0))
+        
+        self.canvas.create_text(ox, oy1 - 15, text="OUTLET", fill="red", font=("Monaco", 9, "bold"), anchor="s")
+        self.canvas.create_rectangle(ox - 8, oy1, ox + 8, oy2, fill="#111", outline="#ff4422")
+        if pct_out > 0:
+            out_bar_y = oy2 - pct_out * oh
+            out_color = "red" if self.airflow_outlet_c > 60 else ("orange" if self.airflow_outlet_c > 45 else "green")
+            self.canvas.create_rectangle(ox - 6, out_bar_y, ox + 6, oy2, fill=out_color, outline="")
+        self.canvas.create_text(ox, oy2 + 10, text=f"{self.airflow_outlet_c:.1f}\u00b0C", fill="red", font=("Monaco", 8, "bold"), anchor="n")
+        
+        # Display dynamic hinge airflow significance (velocity, mass flow, heatflux)
+        self.canvas.create_text(ox, oy2 + 25, text=f"{self.hinge_airflow:.1f} m/s", fill="#ffaa44", font=("Monaco", 8, "bold"), anchor="n")
+        self.canvas.create_text(ox, oy2 + 37, text=f"{self.outflow_mass_flow * 1000.0:.2f} g/s", fill="#ff8844", font=("Monaco", 8, "bold"), anchor="n")
+        self.canvas.create_text(ox, oy2 + 49, text=f"{self.outflow_heatflux:.1f} J/s", fill="#ff6644", font=("Monaco", 8, "bold"), anchor="n")
 
     def draw_graph(self, x: float, y: float, w: float, h: float, data: list[Any], label: str, color: str, mark_idx: Optional[int] = None, times: Optional[list[float]] = None, extra_markers: Optional[list[tuple[int, str, str]]] = None) -> None:
         self.canvas.create_rectangle(x, y, x+w, y+h, fill="#050505", outline="#333")
@@ -1928,6 +2208,7 @@ class PrimaryFlightDisplay:
             self.opengl_pfd.zoom = self.map_zoom
             self.opengl_pfd.tkExpose(None) # Trigger redraw
 
+        self.airflow_offset = (self.airflow_offset + 1) % 10
         self.draw_glass_cockpit()
         # Limit display update to 15Hz (1000ms / 15 approx 67ms)
         self.root.after(67, self.animate)
