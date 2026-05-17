@@ -433,6 +433,68 @@ To optimize battery usage on the MacBook and guarantee immediate response times 
         ```
     *   **Re-spawn and Fresh Scan:** macOS's `launchd` supervisor automatically and instantaneously restarts `locationd` in a clean state. This forces a complete flush of all stale crowd-sourced Wi-Fi/Bluetooth geolocation cache buffers and triggers immediate, real-time wireless RSSI triangulation scans!
 
+### 11.7 Dynamic Transportation Categorization & Geodetic Dwell Anchors
+
+To intelligently classify and optimize the system's operational regimes under different environmental contexts, the telemetry bridge and the Ada daemon integrate a dynamic **Transportation Categorization & Dwell Anchor Detection** algorithm. 
+
+#### 11.7.1 Gating Conditions & Sensory Density Matrix
+
+The categorizer assesses real-time sensor density and vehicle kinematic variables:
+1.  **BLE Beacon Density ($N_{ble}$):** The number of unique local low-energy Bluetooth transmitters currently visible.
+2.  **Wi-Fi AP Density ($N_{wifi}$):** The number of unique local Wi-Fi Hotspots (BSSIDs) scanned.
+3.  **GPS Altitude ($Alt_{gps}$):** Geodetic altitude in meters or feet.
+4.  **Local Terrain Anchor Elevation ($Alt_{terrain}$):** Local elevation retrieved via topographical API maps.
+5.  **Velocity Magnitude ($V_{mag}$):** Ground-relative speed calculated in knots (kts) or kilometers per hour (kph).
+
+These variables are evaluated against seven fine-grained transportation scenarios, mapped to unique, underscore-separated codenames:
+
+| Code | Codename | $N_{ble}$ | $N_{wifi}$ | Altitude Range ($Alt$) | Speed ($V_{mag}$) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1** | `flight_commercial_aviation_voyage` | $\ge 4$ | $\le 2$ | $\ge 2000 \text{ ft}$ | $\ge 100 \text{ kts}$ |
+| **2** | `flight_general_aviation_voyage` | $\le 3$ | $\ge 3$ | $\ge 2000 \text{ ft}$ | $\ge 100 \text{ kts}$ |
+| **3** | `stella_general_aviation_voyage` | $\le 3$ | $\le 2$ | $\ge 15000 \text{ m}$ | $\ge 100 \text{ kts}$ |
+| **4** | `ground_transportation` | $\ge 4$ | Sparse | $\Delta Alt = [50\text{–}100\text{m}]$ over terrain anchor | $1\text{–}90 \text{ kts}$ for 5 min |
+| **5** | `sea_voyage_maritime_nautics` | $\ge 4$ | Sparse | $\Delta Alt = [50\text{–}100\text{m}]$ over sea level ($Alt_{terrain} \le 0$) | $1\text{–}90 \text{ kts}$ for 5 min |
+| **6** | `sea_voyage_general_maritime` | $\le 1$ | Intermittent | $\Delta Alt = [50\text{–}100\text{m}]$ over sea level ($Alt_{terrain} \le 0$) | $1\text{–}90 \text{ kts}$ for 5 min |
+| **7** | `significant_location_detection` | $\ge 1$ | Dense ($\ge 3$) | Dwelling inside $5\text{m}$ radius for 5 min | $\le 30 \text{ kts}$ for 5 min |
+
+---
+
+#### 11.7.2 Geodetic Haversine Dwell Constraints
+
+For long-term stationary anchor logs (`significant_location_detection`), the system checks the spatial consistency of coordinates logged in the 5-minute rolling buffer queue ($T_{dwell} \ge 300\text{ seconds}$). 
+
+The geographical distance $d_{geodetic}$ between the initial sample point $(\phi_0, \lambda_0)$ and any rolling sample point $(\phi_i, \lambda_i)$ must strictly satisfy the 5-meter boundary:
+$$d_{geodetic}(\phi_0, \lambda_0, \phi_i, \lambda_i) \le 5.0 \text{ meters}$$
+
+Where the spatial distance is evaluated via the geodetically curved haversine model:
+$$d_{geodetic} = 2 R_{earth} \arcsin \left( \sqrt{ \sin^2\left(\frac{\phi_i - \phi_0}{2}\right) + \cos(\phi_0)\cos(\phi_i)\sin^2\left(\frac{\lambda_i - \lambda_0}{2}\right) } \right)$$
+*   **Earth Radius ($R_{earth}$):** Standard geodetic approximation $6,371,000.0\text{ meters}$.
+
+If a coordinate set dwells within this 5-meter boundary consistently for $\ge 5\text{ minutes}$ while experiencing speed $\le 30\text{ kts}$ under active Wi-Fi and Bluetooth LE conditions, a custom geodetic anchor is serialized to:
+`/usr/local/EnvironmentalAwareReferentialUnit/save_state/significant_locations.json`
+
+To avoid redundant log bloating, a spacing gate ensures new anchors are only added if they are separated by more than 10 meters from any previously stored coordinates:
+$$d_{geodetic}(\text{New\_Anchor}, \, \text{Existing\_Anchor}) > 10.0 \text{ meters}$$
+
+---
+
+#### 11.7.3 Shared Memory Transmission & Ada Intercepts
+
+To avoid breaking representation clauses, structural paddings, or binary serialization lengths in the Unix shared memory segments:
+1.  The Python sidecar calculates the active scenario code ($1 \dots 7$) and packages it as an unsigned 32-bit integer inside the standard `Weather_Code` field of `Weather_SHM`.
+2.  The Ada/SPARK telemetry daemon intercepts this field upon update, matches the scenario value, and immediately overrides the default calculated `Location.Transportation_Category` string with the correct underscore-separated codename:
+    ```ada
+    if Weather_SHM.Weather_Code = 1 then
+        Loc.Transportation_Category := Pad_String ("flight_commercial_aviation_voyage");
+    elsif Weather_SHM.Weather_Code = 2 then
+        Loc.Transportation_Category := Pad_String ("flight_general_aviation_voyage");
+    -- ...
+    end if;
+    ```
+
+This enables deterministic, unified category status display across downstream visualization HUDs without requiring any changes to the binary layout of the shared memory pipeline!
+
 ---
 
 ## 12. Energy, Power, and Battery Survivability Mechanics

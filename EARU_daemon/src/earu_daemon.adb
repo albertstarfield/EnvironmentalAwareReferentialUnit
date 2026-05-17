@@ -115,6 +115,34 @@ procedure Earu_Daemon is
                               Gas_Gamma      => Full_State.SMC.Gas_Constants.Gamma
                            );
 
+                           -- Dynamic override for transportation codenames from the bridge
+                           declare
+                              W_Code : constant Integer := Full_State.Weather.Weather_Code;
+                           begin
+                              if W_Code = 1 then
+                                 Loc.Transportation_Category := (others => ' ');
+                                 Loc.Transportation_Category (1 .. 33) := "flight_commercial_aviation_voyage";
+                              elsif W_Code = 2 then
+                                 Loc.Transportation_Category := (others => ' ');
+                                 Loc.Transportation_Category (1 .. 30) := "flight_general_aviation_voyage";
+                              elsif W_Code = 3 then
+                                 Loc.Transportation_Category := (others => ' ');
+                                 Loc.Transportation_Category (1 .. 30) := "stella_general_aviation_voyage";
+                              elsif W_Code = 4 then
+                                 Loc.Transportation_Category := (others => ' ');
+                                 Loc.Transportation_Category (1 .. 21) := "ground_transportation";
+                              elsif W_Code = 5 then
+                                 Loc.Transportation_Category := (others => ' ');
+                                 Loc.Transportation_Category (1 .. 27) := "sea_voyage_maritime_nautics";
+                              elsif W_Code = 6 then
+                                 Loc.Transportation_Category := (others => ' ');
+                                 Loc.Transportation_Category (1 .. 27) := "sea_voyage_general_maritime";
+                              elsif W_Code = 7 then
+                                 Loc.Transportation_Category := (others => ' ');
+                                 Loc.Transportation_Category (1 .. 30) := "significant_location_detection";
+                              end if;
+                           end;
+
                            Earu.Math.Update_Pedometer (Ped, Local_Accel, Local_Q, Loc.Calibrated_G, Real(E_A.Timestamp));
 
                             -- Transition to Altitude INOP event logging

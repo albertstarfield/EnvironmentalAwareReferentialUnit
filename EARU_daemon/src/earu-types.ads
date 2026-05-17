@@ -77,7 +77,7 @@ package Earu.Types is
       Total_Dist    : aliased Real := 0.0;
       Odometer_30m  : aliased Real := 0.0;
       V_Mag         : aliased Real := 0.0;
-      Transportation_Category : aliased String (1 .. 32) := (others => ' ');
+      Transportation_Category : aliased String (1 .. 48) := (others => ' ');
       
       -- Reckoning factors
       Corr_Alt      : aliased Real := 0.0;

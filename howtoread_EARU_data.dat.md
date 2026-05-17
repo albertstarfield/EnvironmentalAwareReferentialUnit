@@ -63,7 +63,7 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `pos` | Meters | Relative Cartesian position `[x, y, z]`. | |
 | `total_distance_m` | Meters | Odometer for total distance traveled. | |
 | `odometer_30m` | Meters | Distance traveled in the last 30 seconds. | |
-| `transportation_category` | String | Mode/category of transit based on velocity and vibration patterns. | "Stationary", "Pedestrian/Walking", "Automotive/Transport", "High-Speed/Flight", "Rocket/Spaceflight" |
+| `transportation_category` | String | Mode/category of transit based on velocity and vibration patterns. | "Stationary", "Pedestrian/Walking", "Automotive/Transport", "High-Speed/Flight", "Rocket/Spaceflight", or one of the 7 override codenames: `flight_commercial_aviation_voyage`, `flight_general_aviation_voyage`, `stella_general_aviation_voyage`, `ground_transportation`, `sea_voyage_maritime_nautics`, `sea_voyage_general_maritime`, `significant_location_detection` |
 | `CorrectionFactor_Reckoning_Velocity` | Ratio | Gain factor for horizontal velocity anchored to GPS (0.5 to 2.0). | |
 | `CorrectionFactor_Reckoning_Heading` | Degrees | Additive offset for heading alignment anchored to GPS gradient. | |
 | `CorrectionFactor_Reckoning_Altitude` | Meters | Additive offset for altitude anchored to GPS/TopoData. | |

@@ -338,6 +338,7 @@ class PrimaryFlightDisplay:
         self.batt: int = 0
         self.charging: bool = False
         self.hid_idle: float = 0.0
+        self.transportation_category: str = "stationary"
 
         # Power & Energy Stats
         self.power_rate: float = 0.0
@@ -932,6 +933,7 @@ class PrimaryFlightDisplay:
                     self.targets['roll'] = self.raw_roll * self.roll_sign
                     
                     loc = data.get('location', {})
+                    self.transportation_category = str(loc.get('transportation_category', 'stationary')).strip()
                     self.targets['alt'] = float(loc.get('alt', 0.0))
                     self.targets['speed'] = float(loc.get('v_mag', 0.0) * 1.94384)
                     self.targets['heading'] = float(loc.get('heading', 0.0))
@@ -1219,7 +1221,7 @@ class PrimaryFlightDisplay:
 
         self.canvas.create_text(10, 40, anchor="nw", text=f"VEL X: {self.vel_x:>+7.3f} | Y: {self.vel_y:>+7.3f} | Z: {self.vel_z:>+7.3f} m/s", fill="cyan", font=("Monaco", 10))
 
-        status = f"R: {self.roll:>+5.1f}\u00b0 P: {self.pitch:>+5.1f}\u00b0 | LAT: {self.lat:.5f} LON: {self.lon:.5f}"
+        status = f"R: {self.roll:>+5.1f}\u00b0 P: {self.pitch:>+5.1f}\u00b0 | LAT: {self.lat:.5f} LON: {self.lon:.5f} | CAT: {self.transportation_category.upper()}"
         self.canvas.create_text(10, h-40, anchor="sw", text=status, fill="white", font=("Monaco", 10, "bold"))
 
     def get_canvas_pos(self, lat: float, lon: float) -> tuple[float, float]:
@@ -1380,10 +1382,14 @@ class PrimaryFlightDisplay:
                 speed_limit = "50 KPH"
                 if self.env_mode == "AIRWAY": speed_limit = "Vmo/Mmo"
                 elif self.env_mode == "WATERWAY": speed_limit = "5-12 KTS"
-                elif self.env_mode == "HIGHWAY": speed_limit = "110 KPH"
+                elif self.env_mode == "HIGHWAY":
+                    if "ground" in self.transportation_category.lower():
+                        speed_limit = "300 KPH"
+                    else:
+                        speed_limit = "110 KPH"
                 
                 brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
-                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0 | {self.env_mode} | LMT: {speed_limit}"
+                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0 | {self.env_mode} ({self.transportation_category.upper()}) | LMT: {speed_limit}"
                 self.draw_text_with_halo(self.map_widget.canvas, w/2, 60, dest_info, "magenta", ("Monaco", 12, "bold"), "center", "overlay_info")
 
             # Status and Controls
@@ -1835,14 +1841,22 @@ class PrimaryFlightDisplay:
         alt_m = self.alt
         speed_kts = self.speed
         
-        if alt_m >= 3048 or speed_kts >= 90:
+        cat_lower = self.transportation_category.lower()
+        if "flight" in cat_lower or "stella" in cat_lower:
             self.env_mode = "AIRWAY"
-        elif alt_m < 2:
+        elif "sea" in cat_lower:
             self.env_mode = "WATERWAY"
-        elif speed_kts > 35:
+        elif "ground" in cat_lower:
             self.env_mode = "HIGHWAY"
         else:
-            self.env_mode = "STANDARD ROAD"
+            if alt_m >= 3048 or speed_kts >= 90:
+                self.env_mode = "AIRWAY"
+            elif alt_m < 2:
+                self.env_mode = "WATERWAY"
+            elif speed_kts > 35:
+                self.env_mode = "HIGHWAY"
+            else:
+                self.env_mode = "STANDARD ROAD"
             
         if self.env_mode != self.last_env_mode:
             self.update_map_theme()
@@ -2120,6 +2134,8 @@ class PrimaryFlightDisplay:
             cal_g = loc.get('calibrated_g', 9.80665)
             
             self.canvas.create_text(450, 420, anchor="nw", text=f"DR CALIBRATION:\nALT CF:  {c_alt:.4f} | HDG CF: {c_hdg:.4f}\nVEL CF:  {c_vel:.4f} | VRT CF: {c_vrt:.4f}\nCALIB G: {cal_g:.6f} m/s²", fill="#44ff44", font=("Monaco", 9))
+            
+            self.canvas.create_text(450, 472, anchor="nw", text=f"ACTIVE CATEGORY: {self.transportation_category.upper()}", fill="#ffff00", font=("Monaco", 9, "bold"))
 
             # 2. Geometry & Position Vectors
             pos = loc.get('pos', [0.0, 0.0, 0.0])

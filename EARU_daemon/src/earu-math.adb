@@ -481,7 +481,7 @@ package body Earu.Math is
 
       -- 9. Transportation Category Classification
       declare
-         Transport : String (1 .. 32) := (others => ' ');
+         Transport : String (1 .. 48) := (others => ' ');
          Is_Rocket : Boolean := False;
          Is_Flight : Boolean := False;
          Is_Auto   : Boolean := False;

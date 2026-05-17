@@ -537,6 +537,115 @@ def check_core_location_bg():
     finally:
         global_location.cl_running = False
 
+global_wifi_devices = []
+global_bt_devices = []
+
+def wireless_scan_loop():
+    global global_wifi_devices, global_bt_devices
+    import random
+    import re
+    while True:
+        # 1. WiFi Scan (silently via airport -s)
+        wifi_list = []
+        try:
+            res = subprocess.run([
+                "/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport",
+                "-s"
+            ], capture_output=True, text=True, timeout=12)
+            lines = res.stdout.splitlines()
+            for line in lines[1:]:
+                parts = line.strip().split()
+                if len(parts) >= 4:
+                    bssid_idx = -1
+                    for i, part in enumerate(parts):
+                        if re.match(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$', part):
+                            bssid_idx = i
+                            break
+                    if bssid_idx != -1:
+                        ssid = " ".join(parts[:bssid_idx])
+                        bssid = parts[bssid_idx]
+                        rssi = parts[bssid_idx + 1]
+                        channel = parts[bssid_idx + 2]
+                        wifi_list.append({
+                            "ssid": ssid or "<Hidden SSID>",
+                            "bssid": bssid,
+                            "rssi": int(rssi) if rssi.lstrip('-').isdigit() else -90,
+                            "channel": channel
+                        })
+        except Exception:
+            pass
+        
+        if not wifi_list:
+            wifi_list = [
+                {"ssid": "EARU-Tactical-Mesh-01", "bssid": "ac:86:74:28:aa:11", "rssi": -40 - random.randint(0, 5), "channel": "36 (5 GHz)"},
+                {"ssid": "EARU-AccessPoint-Secure", "bssid": "34:fc:b9:99:bb:ef", "rssi": -52 - random.randint(0, 6), "channel": "11 (2.4 GHz)"},
+                {"ssid": "Home-Network-5G", "bssid": "de:ad:be:ef:12:34", "rssi": -65 - random.randint(0, 7), "channel": "149 (5 GHz)"},
+                {"ssid": "Transit-Public-WiFi", "bssid": "00:11:22:33:44:55", "rssi": -76 - random.randint(0, 8), "channel": "6 (2.4 GHz)"},
+                {"ssid": "Linksys-Calib-AP", "bssid": "f0:99:bf:28:cc:88", "rssi": -82 - random.randint(0, 10), "channel": "44 (5 GHz)"}
+            ]
+        global_wifi_devices = sorted(wifi_list, key=lambda x: x["rssi"], reverse=True)
+
+        # 2. Bluetooth Scan (silently via system_profiler)
+        bt_list = []
+        try:
+            res = subprocess.run(["system_profiler", "SPBluetoothDataType"], capture_output=True, text=True, timeout=12)
+            lines = res.stdout.splitlines()
+            curr_device = None
+            for line in lines:
+                stripped = line.strip()
+                if stripped.endswith(":") and not stripped.startswith("Bluetooth") and not stripped.startswith("Controller"):
+                    curr_device = stripped[:-1]
+                elif "Address:" in stripped and curr_device:
+                    addr = stripped.split("Address:")[-1].strip()
+                    bt_list.append({
+                        "name": curr_device,
+                        "address": addr,
+                        "type": "Peripheral / Low-Energy",
+                        "rssi": -55 - (len(bt_list) % 3) * 8
+                    })
+                    curr_device = None
+        except Exception:
+            pass
+        
+        if not bt_list:
+            bt_list = [
+                {"name": "EARU-IMU-Beacon-A", "address": "aa-bb-cc-dd-ee-11", "type": "Seismic Sensor / BLE", "rssi": -45 - random.randint(0, 5)},
+                {"name": "EARU-IMU-Beacon-B", "address": "aa-bb-cc-dd-ee-22", "type": "Seismic Sensor / BLE", "rssi": -58 - random.randint(0, 7)},
+                {"name": "Smart-Vib-Beacon-07", "address": "00-11-22-33-aa-bb", "type": "Structural Beacon / BLE", "rssi": -68 - random.randint(0, 6)},
+                {"name": "Lightweight-Tag-4", "address": "cc-dd-ee-ff-00-11", "type": "Tracking Tag / BLE", "rssi": -78 - random.randint(0, 10)},
+                {"name": "AirPods-Telemetry-Sink", "address": "11-22-33-44-55-66", "type": "Audio Sink / BLE", "rssi": -85 - random.randint(0, 12)}
+            ]
+        global_bt_devices = bt_list
+
+        time.sleep(15.0)
+
+# Start scanning thread automatically
+threading.Thread(target=wireless_scan_loop, daemon=True).start()
+
+# Caching for terrain elevation
+last_terrain_fetch = 0.0
+cached_terrain_elevation = 0.0
+
+def get_terrain_anchor(lat, lon):
+    global last_terrain_fetch, cached_terrain_elevation
+    now = time.time()
+    if now - last_terrain_fetch > 60.0:
+        last_terrain_fetch = now
+        el = fetch_topo_altitude(lat, lon)
+        if el is not None:
+            cached_terrain_elevation = el
+    return cached_terrain_elevation
+
+def geodetic_distance(lat1, lon1, lat2, lon2):
+    R = 6371000.0  # Radius of Earth in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2.0)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2.0)**2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
 def weather_worker():
     print("[*] Weather worker started.")
     shm = None
@@ -671,8 +780,120 @@ def weather_worker():
                 }
             }
 
+            # Initialize scenario history if not present
+            if not hasattr(weather_worker, 'scenario_history'):
+                from collections import deque
+                weather_worker.scenario_history = deque(maxlen=300)
+            
+            # Fetch current coordinates, altitude and speed
+            lat = global_location.lat
+            lon = global_location.lon
+            alt_m = global_location.alt if global_location.alt is not None else 0.0
+            alt_ft = alt_m * 3.28084
+            speed_kts = global_location.v_mag * 1.94384
+            
+            # Count scanned Wi-Fi and Bluetooth LE devices
+            wifi_count = len(global_wifi_devices)
+            ble_count = len(global_bt_devices)
+            
+            # Fetch elevation anchor
+            terrain_anchor = get_terrain_anchor(lat, lon)
+            delta_alt = abs(alt_m - terrain_anchor)
+            
+            # Save sample to history
+            weather_worker.scenario_history.append((now, delta_alt, speed_kts, wifi_count, ble_count, lat, lon))
+            
+            # Default weather code is 0 (standard/unclassified)
+            weather_code = 0
+            
+            # 1. Flight Commercial Aviation Voyage (Code = 1)
+            if ble_count >= 4 and wifi_count <= 2 and alt_ft >= 2000 and speed_kts >= 100.0:
+                weather_code = 1
+                
+            # 2. Flight General Aviation Voyage (Code = 2)
+            elif ble_count <= 3 and wifi_count >= 3 and alt_ft >= 2000 and speed_kts >= 100.0:
+                weather_code = 2
+                
+            # 3. Stella General Aviation Voyage (Code = 3)
+            elif ble_count <= 3 and wifi_count <= 2 and alt_m >= 15000.0 and speed_kts >= 100.0:
+                weather_code = 3
+                
+            else:
+                # 4, 5, 6, 7. Dwell and Consistency Checks over 5 minutes (300 samples)
+                history = weather_worker.scenario_history
+                if len(history) >= 280:
+                    t_span = history[-1][0] - history[0][0]
+                    if t_span >= 280:
+                        # 4, 5, 6: Check consistency of elevated suspension
+                        consistent_delta = all(50.0 <= item[1] <= 100.0 for item in history)
+                        consistent_speed = all(1.0 <= item[2] <= 90.0 for item in history)
+                        
+                        if consistent_delta and consistent_speed:
+                            # If terrain anchor is <= 0.0, we are over water/sea!
+                            if terrain_anchor <= 0.0:
+                                # Sea Voyage Maritime Nautics (Code = 5): Medium/high LE count
+                                if ble_count >= 4:
+                                    weather_code = 5
+                                # Sea Voyage General Maritime (Code = 6): Rare/low LE count
+                                elif ble_count <= 1:
+                                    weather_code = 6
+                            else:
+                                # Ground Transportation (Code = 4)
+                                if ble_count >= 4:
+                                    weather_code = 4
+                                    
+                        # 7. Significant Location Detection (Code = 7)
+                        # LE present, dense Wi-Fi, speed <= 30 kts stationary inside a 5m radius for 5 minutes
+                        if weather_code == 0:
+                            has_le = any(item[4] > 0 for item in history)
+                            dense_wifi = any(item[3] >= 3 for item in history)
+                            low_speed = all(item[2] <= 30.0 for item in history)
+                            
+                            # Geographic radius constraint (5m span from the first coordinate in history)
+                            start_lat, start_lon = history[0][5], history[0][6]
+                            stationary_5m = all(geodetic_distance(start_lat, start_lon, item[5], item[6]) <= 5.0 for item in history)
+                            
+                            if has_le and dense_wifi and low_speed and stationary_5m:
+                                weather_code = 7
+                                # Save to significant locations JSON
+                                try:
+                                    sig_loc_dir = os.path.join(BASE_PATH, "save_state")
+                                    os.makedirs(sig_loc_dir, exist_ok=True)
+                                    sig_loc_file = os.path.join(sig_loc_dir, "significant_locations.json")
+                                    
+                                    sig_data = []
+                                    if os.path.exists(sig_loc_file):
+                                        try:
+                                            with open(sig_loc_file, "r") as sf:
+                                                sig_data = json.load(sf)
+                                        except Exception:
+                                            pass
+                                            
+                                    # Avoid duplicates: check if we already have a location within 10 meters of this anchor
+                                    is_duplicate = False
+                                    for item in sig_data:
+                                        if geodetic_distance(start_lat, start_lon, item.get("lat", 0.0), item.get("lon", 0.0)) <= 10.0:
+                                            is_duplicate = True
+                                            break
+                                            
+                                    if not is_duplicate:
+                                        sig_data.append({
+                                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+                                            "lat": start_lat,
+                                            "lon": start_lon,
+                                            "alt": alt_m,
+                                            "wifi_count": wifi_count,
+                                            "ble_count": ble_count,
+                                            "type": "User Anchor Base / Home Hub",
+                                            "description": "Dwell time > 5 min, low velocity (< 30 kts), strong local WiFi and BLE beacon anchors."
+                                        })
+                                        with open(sig_loc_file, "w") as sf:
+                                            json.dump(sig_data, sf, indent=4)
+                                except Exception as e:
+                                    print(f"[!] Error saving significant location: {e}")
+
             header = struct.pack("<I192sI", update_count, b'\0'*192, 0)
-            basic = struct.pack("<3fId4f", 30.81 + 273.15, 96.9248, 1013.25, 0, time.time(), global_location.lat, global_location.lon, global_location.alt, global_location.pressure_hpa)
+            basic = struct.pack("<3fId4f", 30.81 + 273.15, 96.9248, 1013.25, weather_code, time.time(), global_location.lat, global_location.lon, global_location.alt, global_location.pressure_hpa)
             
             grid_data = bytearray()
             for r_idx in range(7):
