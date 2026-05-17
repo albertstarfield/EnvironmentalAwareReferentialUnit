@@ -122,3 +122,58 @@ This program reads raw hardware registers and MEMS sensors directly via Apple's 
 *   `EARU_daemon/` - Native ordinary telemetry daemon source.
 *   `EARU_daemon/python/earu_ml_bridge.py` - Self-bootstrapping thermodynamic Python sidecar.
 *   `EARU_LegacyPython/` - Archived legacy Python modules for development reference.
+
+---
+
+## Frequently Asked Questions (FAQ)
+
+### Q: What is this?
+**A:** The **Environmental Aware Referential Unit (EARU)** is a real-time physical telemetry framework that transforms a standard Apple Silicon MacBook into a unified inertial measurement system, environmental telemetry unit, and localized weather station. It merges a native **highly-optimized compiled 800Hz daemon** for real-time sensor processing with a JIT-compiled **Python sidecar** for dynamic environmental modeling, wind estimation, and emotional affect tracking.
+
+### Q: Why do I need this?
+**A:** If you are a systems engineer, embedded systems programmer, environmental researcher, or low-level software enthusiast, to measure, visualize, and analyze physical phenomena using only your laptop's native hardware. It allows you to:
+*   Perform dead reckoning positioning and spatial attitude tracking.
+*   Synthesize localized weather reports (METAR/TAF) using virtual "soft" sensors.
+*   Detect structural seismic vibrations and calculate logic board solder joint fatigue.
+*   Track dynamic air properties, mass flow rates, and energy survivability indices.
+
+### Q: How is the proxy program structured?
+**A:** The core telemetry daemon is built as compiled native proxy program designed to safely gather and relay sensor readings. It is structured to handle data safely and efficiently, reducing the chance of typical run-time exceptions (such as division by zero or buffer overflows) to keep the telemetry acquisition stable and working.
+
+### Q: What hardware sensors does it utilize?
+**A:** It directly taps into the MacBook's SPU (Sensor Processing Unit) interface and hardware registers to gather high-fidelity data:
+*   **MEMS Accelerometer & Gyroscope** (sampled at $800.0\text{ Hz}$)
+*   **Barometric Pressure Transducer** (SMC registers)
+*   **Logic Board Thermal Resistors** (SMC registers)
+*   **Ambient Light Sensors (ALS)** (SPU interface)
+*   **Smart Battery Controller** (capacity, limits, health, power usage rates)
+*   **Human Interface Device (HID) System** (user activity & keystroke inactivity)
+
+### Q: Is this safe to run on my system?
+**A:** Yes, entirely. The daemon and sidecar operate strictly in **read-only and non-invasive modes**. They do not modify any system files, macOS configurations, or hardware settings. All background processing is optimized via multi-rate scheduling to keep CPU usage minimal and preserve battery life. (different from smcDemandNow)
+
+### Q: Can I use this telemetry stream for my own custom applications and daemons?
+**A:** **Yes, absolutely!** This is one of EARU's primary selling points. Rather than locking these rich physical sensor readings behind closed OS subsystems (such as Apple's "Vehicle Motion Cues") or keeping them as a pure "visual flex" inside our terminal debugger, EARU exposes a unified, standardized binary data format (`EARU_data.dat`) and shared memory interface. You can tap into this real-time stream to fuel your own background daemons, desktop dashboard widgets, automation routines, or custom analytical applications.
+
+### Q: Why does the viewer look like a sophisticated spacecraft?
+**A:** What? What do you mean? I'm just viewing the sensor. Nothing to see here. 👀
+
+### Q: What does this mean for our privacy?
+**A:** Hmm... What do you think? I mean, it only uses local hardware readings without camera or microphone access... but even with simple movement, thermal signatures, and keyboard idle parameters, you can extract a lot. This is PoC of metadata extraction concept that we are all worried about. This can be a privacy nightmare for some (But you do require superuser to read these sensors as far as i remember), but a dream for others. While i'm not an security analyst nor Computer Science just a person happened to use an laptop. My suggestion is just add permission allow or deny on motions. on userspace. that way if the user doesnt want to share their motion data they can just deny it.
+
+### Q: Wait hold on. What language is this written on? I never heard of this before.
+**A:** Hmm... If you know, then you know. I'm pretty sure you do enjoy the ride and the butter 😉 (psst. I hate JavaScript)
+
+### Q: Who are you that able to build this?
+**A:** No one, or someone that having too much daydreaming and hallucinate of what if sci-fi is not sci-fi but actually real.
+
+ 
+
+
+
+
+
+
+
+
+
