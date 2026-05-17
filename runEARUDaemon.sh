@@ -8,23 +8,24 @@ PROJECT_ROOT="/usr/local/EnvironmentalAwareReferentialUnit"
 DAEMON_DIR="$PROJECT_ROOT/EARU_daemon"
 
 # Determine the original non-root user (e.g., albertstarfield) who invoked sudo
-ORIGINAL_USER="${SUDO_USER:-$(whoami)}"
+ORIGINAL_USER="${SUDO_USER:-albertstarfield}"
+if [ "$ORIGINAL_USER" = "root" ]; then
+    ORIGINAL_USER="albertstarfield"
+fi
 
 # Helper to execute command as the original user to keep environment / toolchain clean
 run_as_user() {
-    if [ "$ORIGINAL_USER" = "root" ]; then
-        "$@"
-    else
-        sudo -u "$ORIGINAL_USER" "$@"
-    fi
+    sudo -u "$ORIGINAL_USER" env HOME="/Users/$ORIGINAL_USER" USER="$ORIGINAL_USER" "$@"
 }
 
 # 1. Unload background launchd service if it is loaded to prevent build/run conflicts
 PLIST_PATH="/Library/LaunchDaemons/com.earu.service.plist"
-if sudo launchctl list | grep -q "com.earu.service"; then
-    echo "[*] Unloading background com.earu.service to prevent parallel build conflicts..."
-    sudo launchctl unload "$PLIST_PATH" 2>/dev/null
-    sleep 1
+if [ "$1" != "--service" ]; then
+    if sudo launchctl list | grep -q "com.earu.service"; then
+        echo "[*] Unloading background com.earu.service to prevent parallel build conflicts..."
+        sudo launchctl unload "$PLIST_PATH" 2>/dev/null
+        sleep 1
+    fi
 fi
 
 # 2. Navigate to daemon directory to build

@@ -61,11 +61,11 @@ package Earu.Types is
    type CL_History_Array is array (1 .. 3) of CL_Point;
 
    type Location_Type is record
-      Lat           : aliased Real := 0.0;
-      Lon           : aliased Real := 0.0;
+      Lat           : aliased Real := -6.333012;
+      Lon           : aliased Real := 106.971199;
       Alt           : aliased Real := 0.0;
-      Start_Lat     : aliased Real := 0.0;
-      Start_Lon     : aliased Real := 0.0;
+      Start_Lat     : aliased Real := -6.333012;
+      Start_Lon     : aliased Real := 106.971199;
       Start_Alt     : aliased Real := 0.0;
       Alt_Rate      : aliased Real := 0.0;
       Mach          : aliased Real := 0.0;

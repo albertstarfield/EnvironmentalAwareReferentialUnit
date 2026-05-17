@@ -328,6 +328,9 @@ class PrimaryFlightDisplay:
         self.lon: float = 0.0
         self.alt_rate: float = 0.0
         self.mach: float = 0.0
+        self.vel_x: float = 0.0
+        self.vel_y: float = 0.0
+        self.vel_z: float = 0.0
         self.cpu: float = 0.0
         self.batt: int = 0
         self.charging: bool = False
@@ -391,7 +394,8 @@ class PrimaryFlightDisplay:
 
         self.targets: dict[str, float] = {
             'pitch': 0.0, 'roll': 0.0, 'heading': 0.0, 'alt': 0.0, 'speed': 0.0, 'lat': 0.0, 'lon': 0.0,
-            'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0
+            'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0,
+            'vel_x': 0.0, 'vel_y': 0.0, 'vel_z': 0.0
         }
         self.lerp_factor: float = 0.1
         self.pitch_sign: float = 1.0
@@ -772,6 +776,16 @@ class PrimaryFlightDisplay:
                     self.targets['alt_rate'] = float(loc.get('alt_rate', 0.0) * 196.85)
                     self.targets['mach'] = float(loc.get('mach', 0.0))
                     
+                    vel_list = loc.get('vel', [0.0, 0.0, 0.0])
+                    if isinstance(vel_list, list) and len(vel_list) >= 3:
+                        self.targets['vel_x'] = float(vel_list[0])
+                        self.targets['vel_y'] = float(vel_list[1])
+                        self.targets['vel_z'] = float(vel_list[2])
+                    else:
+                        self.targets['vel_x'] = 0.0
+                        self.targets['vel_y'] = 0.0
+                        self.targets['vel_z'] = 0.0
+                    
                     # Corrected values from EARU
                     self.targets['cf_velocity'] = float(loc.get('CorrectionFactor_Reckoning_Velocity', 1.0))
                     self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
@@ -820,6 +834,9 @@ class PrimaryFlightDisplay:
                 self.targets['pitch'], self.targets['roll'] = 5*math.sin(t*0.5), 15*math.cos(t*0.3)
                 self.targets['heading'], self.targets['alt'] = (t*5)%360, 1000 + 100*math.sin(t*0.1)
                 self.targets['speed'], self.targets['lat'], self.targets['lon'] = 120 + 10*math.sin(t*0.2), -6.175, 106.827
+                self.targets['vel_x'] = 10.0 * math.cos(t * 0.2)
+                self.targets['vel_y'] = 10.0 * math.sin(t * 0.2)
+                self.targets['vel_z'] = 0.5 * math.sin(t * 0.1)
                 self.cpu, self.batt, self.hid_idle = 25+5*math.sin(t), 85, (t % 60)
         except Exception as e:
             print(f"[{datetime.datetime.now()}] GENERAL UPDATE ERROR: {e}")
@@ -947,6 +964,8 @@ class PrimaryFlightDisplay:
             spec = als.get('spectral', [0,0,0,0])
             spec_str = " ".join([str(s) for s in spec])
             self.canvas.create_text(10, 25, anchor="nw", text=f"ALS LUX: {lux:.3f} | SPEC: [{spec_str}]", fill="yellow", font=("Monaco", 10))
+
+        self.canvas.create_text(10, 40, anchor="nw", text=f"VEL X: {self.vel_x:>+7.3f} | Y: {self.vel_y:>+7.3f} | Z: {self.vel_z:>+7.3f} m/s", fill="cyan", font=("Monaco", 10))
 
         status = f"R: {self.roll:>+5.1f}\u00b0 P: {self.pitch:>+5.1f}\u00b0 | LAT: {self.lat:.5f} LON: {self.lon:.5f}"
         self.canvas.create_text(10, h-40, anchor="sw", text=status, fill="white", font=("Monaco", 10, "bold"))
@@ -1089,6 +1108,7 @@ class PrimaryFlightDisplay:
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 80, f"ALT: {int(self.alt*3.28084)} FT / {int(self.alt)}M MSL", "#00ff00", ("Monaco", 16, "bold"), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 105, f"TRIANG_ALT_OFF: {self.cf_altitude:+.1f}m", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 120, f"TRIANG_VSI_GAIN: {self.cf_vertical_rate:.2f}x", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
+            self.draw_text_with_halo(self.map_widget.canvas, 20, h - 135, f"VEL X/Y/Z: {self.vel_x:+.2f} / {self.vel_y:+.2f} / {self.vel_z:+.2f} m/s", "#ffcc00", ("Monaco", 9), "sw", "overlay_info")
             
             # Right Overlays: Horizontal Domain
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 80, f"SPD: {self.speed:.1f} KTS / {self.speed*1.852:.1f} KPH", "#00ff00", ("Monaco", 16, "bold"), "se", "overlay_info")
@@ -1616,6 +1636,9 @@ class PrimaryFlightDisplay:
         # Smoothed high-resolution metrics
         self.alt_rate += (self.targets.get('alt_rate', 0.0) - self.alt_rate) * self.lerp_factor
         self.mach += (self.targets.get('mach', 0.0) - self.mach) * self.lerp_factor
+        self.vel_x += (self.targets.get('vel_x', 0.0) - self.vel_x) * self.lerp_factor
+        self.vel_y += (self.targets.get('vel_y', 0.0) - self.vel_y) * self.lerp_factor
+        self.vel_z += (self.targets.get('vel_z', 0.0) - self.vel_z) * self.lerp_factor
 
         # Continuous Map Interaction
         if self.page == 4:

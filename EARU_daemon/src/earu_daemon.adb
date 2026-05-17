@@ -48,7 +48,7 @@ procedure Earu_Daemon is
       pragma Unreferenced (Ret);
    begin
       Ada.Text_IO.Put_Line ("[*] Automatically invoking Python ML Bridge (Enhanced Parity)...");
-      Ret := C_System (Interfaces.C.To_C ("REAL_SENSOR=1 .venv/bin/python -u EARU_daemon/python/earu_ml_bridge.py > bridge.log 2>&1 &"));
+      Ret := C_System (Interfaces.C.To_C ("REAL_SENSOR=1 /usr/local/EnvironmentalAwareReferentialUnit/.venv/bin/python -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &"));
    end Start_ML_Bridge;
 
    Accel_SHM : IMU_SHM_Ptr := null;
@@ -251,6 +251,7 @@ procedure Earu_Daemon is
                SMC.Fan_RPMs := (Real (Stats_SHM.SMC_Fan1_RPM), Real (Stats_SHM.SMC_Fan2_RPM));
                SMC.Temps := (PSTR => Real (Stats_SHM.SMC_PSTR), TCMz => Real (Stats_SHM.SMC_TCMz), TaLP => Real (Stats_SHM.SMC_TaLP), TaLT => Real (Stats_SHM.SMC_TaLT), TaLW => Real (Stats_SHM.SMC_TaLW), TaRF => Real (Stats_SHM.SMC_TaRF), TaRT => Real (Stats_SHM.SMC_TaRT), TaRW => Real (Stats_SHM.SMC_TaRW), Tg0X => Real (Stats_SHM.SMC_Tg0X), Ts0P => Real (Stats_SHM.SMC_Ts0P), Ts1P => Real (Stats_SHM.SMC_Ts1P));
                SMC.Power := Real (Stats_SHM.Power_W);
+                SMC.Power_Rate_Usage := Real (Stats_SHM.Power_W);
                SMC.Day_Power_Usage_Wh := Real (Stats_SHM.Day_Power_Wh);
                SMC.Est_Today_Power_Wh := Real (Stats_SHM.Est_Today_Wh);
                SMC.Accum_Power_Month_Wh := Real (Stats_SHM.Month_Power_Wh);

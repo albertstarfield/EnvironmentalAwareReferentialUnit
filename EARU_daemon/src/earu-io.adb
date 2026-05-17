@@ -310,6 +310,7 @@ package body Earu.IO is
       Append_Pair (P_Aug_Payload, "mach", F(State.Location.Mach));
       Append_Pair (P_Aug_Payload, "odometer_30m", F(State.Location.Odometer_30m));
       Append (P_Aug_Payload, """pos"": [" & F(State.Location.Pos.X) & ", " & F(State.Location.Pos.Y) & ", " & F(State.Location.Pos.Z) & "], ");
+      Append (P_Aug_Payload, """vel"": [" & F(State.Location.Vel.X) & ", " & F(State.Location.Vel.Y) & ", " & F(State.Location.Vel.Z) & "], ");
       Append_Pair (P_Aug_Payload, "pressure_hpa", F(State.Location.Pressure_HPa));
       Append_Pair (P_Aug_Payload, "total_distance_m", F(State.Location.Total_Dist), False);
       Append (P_Aug_Payload, "}, ");
@@ -515,6 +516,7 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "mach", F(State.Location.Mach));
       Append_Pair (JSON_Line, "odometer_30m", F(State.Location.Odometer_30m));
       Append (JSON_Line, """pos"": [" & F(State.Location.Pos.X) & ", " & F(State.Location.Pos.Y) & ", " & F(State.Location.Pos.Z) & "], ");
+      Append (JSON_Line, """vel"": [" & F(State.Location.Vel.X) & ", " & F(State.Location.Vel.Y) & ", " & F(State.Location.Vel.Z) & "], ");
       Append_Pair (JSON_Line, "pressure_hpa", F(State.Location.Pressure_HPa));
       Append_Pair (JSON_Line, "total_distance_m", F(State.Location.Total_Dist));
       Append_Pair (JSON_Line, "v_mag", F(State.Location.V_Mag), False);

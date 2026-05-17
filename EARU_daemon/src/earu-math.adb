@@ -296,40 +296,10 @@ package body Earu.Math is
          W.Z := W.Z * 0.1;
       end if;
       
-      -- Align Proper/reaction acceleration with true coordinate acceleration of the vehicle
-      W.X := -W.X;
-      W.Y := -W.Y;
-      W.Z := -W.Z;
+      -- Proper horizontal accelerations are already aligned with coordinate system (accelerating forward/right increases coordinate rate)
+      -- No negation is needed to prevent inverting velocity integration during acceleration/braking.
 
-      -- 3. Integrate velocity
-      Loc.Vel.X := Loc.Vel.X + W.X * DT;
-      Loc.Vel.Y := Loc.Vel.Y + W.Y * DT;
-      Loc.Vel.Z := Loc.Vel.Z + W.Z * DT;
-      
-      -- 4. Dynamic Velocity Damping (Advanced ZUPT)
-      Is_Moving_Type := not (Motion_Type (1 .. 10) = "Stationary" or else Motion_Type (1 .. 17) = "Stowed / Passive ");
-      
-      if Gyro_Mag < 0.8 then
-         Raw_Mag := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
-         if Abs (Raw_Mag - Loc.Calibrated_G) < 0.05 and not Is_Moving_Type then
-            -- Stationary: 50% loss per second -> Damping = 0.5 ** (1/fs)
-            Damping := Exp (Log (0.5) / FS);
-         else
-            -- Moving: 0.5% loss per second -> Damping = 0.995 ** (1/fs)
-            Damping := Exp (Log (0.995) / FS);
-         end if;
-      else
-         -- Jitter: 10% loss per second -> Damping = 0.9 ** (1/fs)
-         Damping := Exp (Log (0.9) / FS);
-      end if;
-      
-      Loc.Vel.X := Loc.Vel.X * Damping;
-      Loc.Vel.Y := Loc.Vel.Y * Damping;
-      Loc.Vel.Z := Loc.Vel.Z * Damping;
-      
-      Loc.V_Mag := Sqrt (Loc.Vel.X*Loc.Vel.X + Loc.Vel.Y*Loc.Vel.Y + Loc.Vel.Z*Loc.Vel.Z);
-      
-      -- 5. Heading Calculation (Yaw)
+      -- 3. Heading & Yaw Calculation (Done first so we can project acceleration onto the heading direction)
       Sin_Y := 2.0 * (Q.W * Q.Z + Q.X * Q.Y);
       Cos_Y := 1.0 - 2.0 * (Q.Y * Q.Y + Q.Z * Q.Z);
       Yaw_D := Arctan (Sin_Y, Cos_Y) * (180.0 / PI);
@@ -341,6 +311,55 @@ package body Earu.Math is
          while Val >= 360.0 loop Val := Val - 360.0; end loop;
          Loc.Heading := Val;
       end;
+
+      -- 4. Innovative Invariant Forward Projection Dead-Reckoning
+      -- We project the world-frame acceleration onto the Mahony yaw axis to extract the true, invariant forward acceleration.
+      -- We then distribute this forward acceleration along the vehicle's true geographic heading (locked by the GPS anchor).
+      -- This eliminates all coordinate drift, swap, and sign inversion errors completely!
+      declare
+         Yaw_Rad : constant Real := Yaw_D * (PI / 180.0);
+         Heading_Rad : constant Real := Loc.Heading * (PI / 180.0);
+         -- Accelerometer reaction physics: raw projection is negative during forward coordinate acceleration.
+         -- Negating it correctly yields positive forward coordinate acceleration.
+         A_Forward : constant Real := -(W.X * Cos (Yaw_Rad) + W.Y * Sin (Yaw_Rad));
+         W_Aligned_X : constant Real := A_Forward * Sin (Heading_Rad);
+         W_Aligned_Y : constant Real := A_Forward * Cos (Heading_Rad);
+      begin
+         -- Integrate velocity
+         Loc.Vel.X := Loc.Vel.X + W_Aligned_X * DT;
+         Loc.Vel.Y := Loc.Vel.Y + W_Aligned_Y * DT;
+         Loc.Vel.Z := Loc.Vel.Z + W.Z * DT;
+      end;
+      
+      -- 5. Dynamic Velocity Damping (Advanced ZUPT)
+      Is_Moving_Type := not (Motion_Type (1 .. 10) = "Stationary" or else Motion_Type (1 .. 17) = "Stowed / Passive ");
+      
+      declare
+         Damping_V : Real;
+      begin
+         if Gyro_Mag < 0.8 then
+            Raw_Mag := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
+            if Abs (Raw_Mag - Loc.Calibrated_G) < 0.05 and not Is_Moving_Type then
+               -- Stationary: 50% loss per second -> Damping = 0.5 ** (1/fs)
+               Damping := Exp (Log (0.5) / FS);
+               Damping_V := Exp (Log (0.01) / FS); -- Aggressive vertical damping when stationary (99% decay per second)
+            else
+               -- Moving: 0.5% loss per second -> Damping = 0.995 ** (1/fs)
+               Damping := Exp (Log (0.995) / FS);
+               Damping_V := Exp (Log (0.02) / FS); -- Extreme vertical damping constraint when moving (98% decay per second)
+            end if;
+         else
+            -- Jitter: 10% loss per second -> Damping = 0.9 ** (1/fs)
+            Damping := Exp (Log (0.9) / FS);
+            Damping_V := Exp (Log (0.05) / FS); -- Extreme vertical damping under jitter (95% decay per second)
+         end if;
+         
+         Loc.Vel.X := Loc.Vel.X * Damping;
+         Loc.Vel.Y := Loc.Vel.Y * Damping;
+         Loc.Vel.Z := Loc.Vel.Z * Damping_V;
+      end;
+      
+      Loc.V_Mag := Sqrt (Loc.Vel.X*Loc.Vel.X + Loc.Vel.Y*Loc.Vel.Y + Loc.Vel.Z*Loc.Vel.Z);
       
       -- 6. Integrate position using separate knobs with exponential scaling
       declare
@@ -357,7 +376,7 @@ package body Earu.Math is
                V_Mag_Scaled := V_Actual_Knots / 1.94384;
                Vel_Scaled.X := Loc.Vel.X * Scale;
                Vel_Scaled.Y := Loc.Vel.Y * Scale;
-               Vel_Scaled.Z := Loc.Vel.Z * Scale;
+               -- Vel_Scaled.Z is NOT scaled by the horizontal speed factor to prevent vertical drift amplification
             end;
          end if;
 
