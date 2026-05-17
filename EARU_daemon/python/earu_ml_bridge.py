@@ -191,6 +191,7 @@ def stats_worker():
                     last_total = total
             
             v_mag = math.sqrt(np.sum(vel**2))
+            global_location.v_mag = v_mag
             cpu = psutil.cpu_percent()
             mem = psutil.virtual_memory().percent
             batt = psutil.sensors_battery()
@@ -303,6 +304,7 @@ class LocationState:
         self.alt = 0.0
         self.pressure_hpa = 1013.25
         self.cl_running = False
+        self.v_mag = 0.0
 
 global_location = LocationState()
 
@@ -371,8 +373,15 @@ def weather_worker():
     while True:
         try:
             now = time.time()
-            if now - last_cl_check >= 15.0 and not global_location.cl_running:
+            v_mag_val = getattr(global_location, 'v_mag', 0.0)
+            scan_interval = float(np.interp(v_mag_val, [0.0, 1.0, 2.0], [30.0, 15.0, 4.0]))
+            if now - last_cl_check >= scan_interval and not global_location.cl_running:
                 last_cl_check = now
+                if v_mag_val > 0.5:
+                    try:
+                        subprocess.run(["killall", "-9", "locationd"], capture_output=True)
+                    except Exception:
+                        pass
                 threading.Thread(target=check_core_location_bg, daemon=True).start()
 
             # Replicating the exact structured weather payload to ensure 100% telemetry parity

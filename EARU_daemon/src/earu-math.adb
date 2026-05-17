@@ -1,9 +1,15 @@
 with Ada.Numerics.Generic_Elementary_Functions;
+with Interfaces.C;
+with System;
 
 package body Earu.Math is
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
    use Real_Funcs;
+
+   package C renames Interfaces.C;
+   function C_Time (T : System.Address) return C.long;
+   pragma Import (C, C_Time, "time");
 
    PI : constant Real := 3.14159265358979323846;
 
@@ -290,6 +296,11 @@ package body Earu.Math is
          W.Z := W.Z * 0.1;
       end if;
       
+      -- Align Proper/reaction acceleration with true coordinate acceleration of the vehicle
+      W.X := -W.X;
+      W.Y := -W.Y;
+      W.Z := -W.Z;
+
       -- 3. Integrate velocity
       Loc.Vel.X := Loc.Vel.X + W.X * DT;
       Loc.Vel.Y := Loc.Vel.Y + W.Y * DT;
@@ -340,7 +351,7 @@ package body Earu.Math is
          if V_Mag_Raw > 0.001 then
             declare
                V_Knots : constant Real := V_Mag_Raw * 1.94384;
-               V_Actual_Knots : constant Real := 7.48 * (Exp (0.6 * V_Knots) - 1.0);
+               V_Actual_Knots : constant Real := 17.6 * (Exp (0.4 * V_Knots) - 1.0);
                Scale : constant Real := (V_Actual_Knots / 1.94384) / V_Mag_Raw;
             begin
                V_Mag_Scaled := V_Actual_Knots / 1.94384;
@@ -377,6 +388,39 @@ package body Earu.Math is
             Loc.Lon := Loc.Start_Lon + (Loc.Pos.X / M_Per_Deg_Lon);
          end if;
       end if;
+      -- Dead Reckoning Altitude INOP safety check
+      -- If altitude is at or below Dead Sea level (-430m) with high sinking rate (> 500 fpm),
+      -- or if we are below Earth's maximum depth (-10994m), trigger INOP red flag state.
+      declare
+         use type C.long;
+         Now_T : constant Real := Real (C_Time (System.Null_Address));
+      begin
+         if not Loc.Alt_Inop then
+            declare
+               Alt_Rate_Fpm : constant Real := Loc.Alt_Rate * 196.85039;
+            begin
+               if (Loc.Alt <= -430.0 and Alt_Rate_Fpm < -500.0)
+                  or Loc.Alt < -10994.0
+               then
+                  -- Flag as Altitude INOP, reset altitude to standard/starting altitude,
+                  -- and disable dead reckoning altitude integration for 1 hour (3600.0 seconds).
+                  Loc.Alt_Inop := True;
+                  Loc.Alt_Inop_Until := Now_T + 3600.0;
+                  Loc.Pos.Z := 0.0;
+                  Loc.Alt_Rate := 0.0;
+               end if;
+            end;
+         else
+            -- If we are in the 1-hour INOP period, keep altitude reset to starting altitude
+            if Now_T >= Loc.Alt_Inop_Until then
+               Loc.Alt_Inop := False;
+            else
+               Loc.Pos.Z := 0.0;
+               Loc.Alt_Rate := 0.0;
+            end if;
+         end if;
+      end;
+
       Loc.Alt := Loc.Start_Alt + Loc.Pos.Z + Loc.Corr_Alt;
       Loc.Alt_Rate := Loc.Vel.Z * Loc.Corr_VRate;
       

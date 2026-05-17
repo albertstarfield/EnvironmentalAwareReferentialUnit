@@ -296,6 +296,7 @@ package body Earu.IO is
       
       Append (P_Aug_Payload, """location"": {");
       Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_Altitude", F(State.Location.Corr_Alt));
+      Append_Pair (P_Aug_Payload, "alt_inop", (if State.Location.Alt_Inop then "true" else "false"));
       Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_Heading", F(State.Location.Corr_Heading));
       Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_Velocity", F(State.Location.Corr_Velocity));
       Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_VerticalRate", F(State.Location.Corr_VRate));
@@ -500,6 +501,7 @@ package body Earu.IO is
       
       Append (JSON_Line, """location"": {");
       Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_Altitude", F(State.Location.Corr_Alt));
+      Append_Pair (JSON_Line, "alt_inop", (if State.Location.Alt_Inop then "true" else "false"));
       Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_Heading", F(State.Location.Corr_Heading));
       Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_Velocity", F(State.Location.Corr_Velocity));
       Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_VerticalRate", F(State.Location.Corr_VRate));

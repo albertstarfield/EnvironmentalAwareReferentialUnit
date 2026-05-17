@@ -86,12 +86,12 @@ package body Earu.Bridge is
       -- Electromech Hinge fatigue
       Lid_Penalty := (if State.Lid_Speed > 10.0 then (State.Lid_Speed - 10.0) / 300.0 else 0.0);
       Electromech_P := Real'Min (0.9, (RMS / 0.4) + Lid_Penalty);
-      Electromech_P := Real'Min (1.0, Electromech_P * Humidity_Stress + Env_Fatigue * 0.1);
+      Electromech_P := Real'Max (0.0, Real'Min (1.0, Electromech_P * Humidity_Stress + Env_Fatigue * 0.1));
       State.Seismic_Activity.Damage_Fatigue.Electromech_Fatigue_Prob := Electromech_P;
 
       -- Unfactored external interference
       Unfactored_P := (if State.Electron_Travel.Interference then 0.25 else 0.0);
-      Unfactored_P := Real'Min (1.0, Unfactored_P + Env_Fatigue * 0.2);
+      Unfactored_P := Real'Max (0.0, Real'Min (1.0, Unfactored_P + Env_Fatigue * 0.2));
 
       -- Aggregated Risk
       State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := Real'Max (

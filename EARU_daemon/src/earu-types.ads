@@ -83,6 +83,8 @@ package Earu.Types is
       Corr_Heading  : aliased Real := 0.0;
       Corr_Velocity : aliased Real := 1.0;
       Corr_VRate    : aliased Real := 1.0;
+      Alt_Inop      : aliased Boolean := False;
+      Alt_Inop_Until: aliased Real := 0.0;
 
       Vel           : aliased Vector3 := (others => <>);
       CL_History    : aliased CL_History_Array := (others => (others => 0.0));

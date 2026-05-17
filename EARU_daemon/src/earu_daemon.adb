@@ -1,5 +1,6 @@
 with Earu.Math;
 with Earu.Shm;
+with System;
 with Earu.Types;
 with Earu.IO;
 with Earu.State_Store;
@@ -112,6 +113,27 @@ procedure Earu_Daemon is
                               Gas_R          => Full_State.SMC.Gas_Constants.R,
                               Gas_Gamma      => Full_State.SMC.Gas_Constants.Gamma
                            );
+
+                            -- Transition to Altitude INOP event logging
+                            if Loc.Alt_Inop and not Full_State.Location.Alt_Inop then
+                               declare
+                                  Ev : Event_Type;
+                                  Now_T : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+                                  TS : constant String := Ada.Calendar.Formatting.Image (Now_T);
+                               begin
+                                  Ev.Time := Real (C_Time (null));
+                                  Ev.TStr := (others => ' ');
+                                  Ev.TStr (1 .. Integer'Min (TS'Length, 12)) := TS (TS'Last - 11 .. TS'Last);
+                                  Ev.Amp := 1.0;
+                                  Ev.NSrc := 1;
+                                  Ev.Sev := (others => ' '); Ev.Sev (1 .. 4) := "INOP";
+                                  Ev.Sym := (others => ' '); Ev.Sym (1 .. 1) := "X";
+                                  Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 8) := "ALT_INOP";
+                                  Ev.Src := (others => ' '); Ev.Src (1 .. 4) := "MATH";
+                                  Earu.State_Store.State_Buffer.Add_Event (Ev);
+                               end;
+                            end if;
+
                            Earu.State_Store.State_Buffer.Update_Location (Loc);
                         end;
 
