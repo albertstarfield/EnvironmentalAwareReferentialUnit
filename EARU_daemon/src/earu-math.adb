@@ -279,6 +279,22 @@ package body Earu.Math is
       Sound_Product : Real;
       Speed_Of_Sound : Real;
    begin
+      -- Dynamic Gravity Calibration (EMA IIR Filter)
+      -- If the device is extremely still (Gyro magnitude < 0.5 deg/s),
+      -- we slowly adapt Calibrated_G to the observed raw accelerometer magnitude.
+      if Gyro_Mag < 0.5 then
+         declare
+            Raw_Mag : constant Real := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
+         begin
+            if Loc.Calibrated_G = 1.0 then
+               Loc.Calibrated_G := Raw_Mag;
+            else
+               -- 10-second time constant at 100Hz (Alpha = 0.001)
+               Loc.Calibrated_G := Loc.Calibrated_G * 0.999 + Raw_Mag * 0.001;
+            end if;
+         end;
+      end if;
+
       -- 1. Rotate and subtract gravity
       W := Rotate_And_Subtract_Gravity (Q, Accel, Loc.Calibrated_G);
       

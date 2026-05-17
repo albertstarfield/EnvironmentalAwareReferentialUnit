@@ -693,16 +693,13 @@ class PrimaryFlightDisplay:
             tk.Misc.tkraise(self.canvas) # pyrefly: ignore
             if self.opengl_pfd: tk.Misc.tkraise(self.opengl_pfd) # pyrefly: ignore
         elif self.page == 4:
+            if self.opengl_pfd:
+                self.opengl_pfd.place_forget()
+                self.opengl_pfd.visible = False
             if self.search_frame: self.search_frame.pack_forget()
             self.canvas.place_forget()
             
-            if HAS_OPENGL and self.opengl_pfd:
-                if self.map_widget: self.map_widget.pack_forget()
-                self.opengl_pfd.mode = "MAP"
-                self.opengl_pfd.visible = True
-                self.opengl_pfd.place(relx=0, rely=0, relwidth=1, relheight=1)
-                self.opengl_pfd.tkraise()
-            elif self.map_widget:
+            if self.map_widget:
                 self.map_widget.pack(fill=tk.BOTH, expand=True)
                 if self.auto_center:
                     self.map_widget.set_position(self.lat, self.lon)
@@ -1748,6 +1745,8 @@ class PrimaryFlightDisplay:
         tendency = float(weather.get('pressure_tendency_hpa', 0.0))
         hum = float(smc.get('humidity_pct', 0.0))
         curr_t = time.time()
+        
+        # Color background based on weather conditions
         if t_c < 2 and spread < 3:
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
             cond_icon = "SNOWING"
@@ -1763,22 +1762,52 @@ class PrimaryFlightDisplay:
         else:
             self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
             cond_icon = "SHINY"
+            
         self.canvas.create_text(w/2, 40, text=f"METAR/TAF - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
-        now = datetime.datetime.now(datetime.timezone.utc); time_str = now.strftime("%d%H%MZ")
-        vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
-        clouds = "CLR"
-        if spread < 2: clouds = "VV001"
-        elif spread < 5: clouds = "BKN015"
-        elif spread < 10: clouds = "SCT035"
-        temp_part = f"{round(t_c):02d}/{round(dp_c):02d}"
-        if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
-        metar = f"METAR EARU {time_str} 00000KT {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
+        
+        # Parse dynamically compiled METAR and TAF from telemetry data
+        metar_taf = weather.get('metar_taf', {})
+        metar_report = metar_taf.get('metar')
+        taf_report = metar_taf.get('taf')
+        
+        if not metar_report:
+            # Fallback local calculation
+            now = datetime.datetime.now(datetime.timezone.utc); time_str = now.strftime("%d%H%MZ")
+            vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
+            clouds = "CLR"
+            if spread < 2: clouds = "VV001"
+            elif spread < 5: clouds = "BKN015"
+            elif spread < 10: clouds = "SCT035"
+            temp_part = f"{round(t_c):02d}/{round(dp_c):02d}"
+            if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
+            metar_report = f"METAR EARU {time_str} 00000KT {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
+            
+        if not taf_report:
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            start_time = now_utc.strftime("%d%H")
+            end_time = (now_utc + datetime.timedelta(hours=24)).strftime("%d%H")
+            taf_report = f"TAF EARU {now_utc.strftime('%d%H%MZ')} {start_time}/{end_time} 00000KT 10SM CLR"
+            
         y = 100.0
         self.canvas.create_text(50, y, anchor="nw", text="CURRENT REPORT (METAR):", fill="cyan", font=("Monaco", 12, "bold"))
-        self.canvas.create_text(50, y+30, anchor="nw", text=metar, fill="white", font=("Monaco", 14, "bold"), width=w-100)
-        y += 120
+        self.canvas.create_text(50, y+30, anchor="nw", text=metar_report, fill="white", font=("Monaco", 14, "bold"), width=w-100)
+        
+        y += 110
+        self.canvas.create_text(50, y, anchor="nw", text="FORECAST (TAF):", fill="cyan", font=("Monaco", 12, "bold"))
+        self.canvas.create_text(50, y+30, anchor="nw", text=taf_report, fill="white", font=("Monaco", 12), width=w-100)
+        
+        y += 130
         self.canvas.create_text(50, y, anchor="nw", text="PHYSICAL BASIS DATA:", fill="cyan", font=("Monaco", 12, "bold"))
-        basis = [f"STATION PRESSURE: {press:.2f} hPa", f"DEWPOINT SPREAD:  {spread:.2f} K", f"AIR DENSITY:      {float(weather.get('air_fluid_density',0.0)):.4f} kg/m3", f"BARO TENDENCY:    {tendency:+.4f} hPa/hr", f"REL. HUMIDITY:    {hum:.1f} %"]
+        wind_speed_kts = metar_taf.get('wind_speed_kts', 0.0)
+        wind_dir_deg = metar_taf.get('wind_dir_deg', 0.0)
+        basis = [
+            f"STATION PRESSURE: {press:.2f} hPa", 
+            f"DEWPOINT SPREAD:  {spread:.2f} K", 
+            f"AIR DENSITY:      {float(weather.get('air_fluid_density',0.0)):.4f} kg/m3", 
+            f"BARO TENDENCY:    {tendency:+.4f} hPa/hr", 
+            f"REL. HUMIDITY:    {hum:.1f} %",
+            f"DERIVED WIND:     {wind_speed_kts:.1f} kts @ {wind_dir_deg:.0f}°"
+        ]
         for i, b in enumerate(basis): self.canvas.create_text(70, y+30+i*25, anchor="nw", text=b, fill="white", font=("Monaco", 10))
 
     def draw_wind_page(self, w: float, h: float) -> None:

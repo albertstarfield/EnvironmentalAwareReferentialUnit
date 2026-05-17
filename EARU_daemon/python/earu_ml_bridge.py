@@ -353,10 +353,25 @@ class LocationState:
     def __init__(self):
         self.lat = -6.2
         self.lon = 106.8
-        self.alt = 0.0
+        self.alt = 20.0
         self.pressure_hpa = 1013.25
         self.cl_running = False
         self.v_mag = 0.0
+
+def fetch_topo_altitude(lat, lon):
+    """Fetch ground elevation from OpenTopoData (ASTER 30m) as a fallback."""
+    try:
+        url = f"https://api.opentopodata.org/v1/aster30m?locations={lat},{lon}"
+        resp = requests.get(url, timeout=5.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "OK" and data.get("results"):
+                elev = data["results"][0].get("elevation")
+                if elev is not None:
+                    return float(elev)
+    except Exception:
+        pass
+    return None
 
 global_location = LocationState()
 
@@ -377,11 +392,13 @@ def check_core_location_bg():
                 cmd = [cl_path, "-f", "%latitude,%longitude,%altitude,%direction,%h_accuracy,%v_accuracy", "-once"]
                 
             # Retry loop for kCLErrorDomain error 0 / transient location service glitches
-            for attempt in range(5):
+            attempt = 0
+            while True:
+                attempt += 1
                 try:
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)
                     with open("CoreLocationCLI.log", "a") as log_f:
-                        log_f.write(f"--- {time.strftime('%Y-%m-%dT%H:%M:%S')} (Attempt {attempt+1}) ---\n")
+                        log_f.write(f"--- {time.strftime('%Y-%m-%dT%H:%M:%S')} (Attempt {attempt}) ---\n")
                         log_f.write(f"Cmd: {cmd}\n")
                         log_f.write(f"Exit Code: {res.returncode}\n")
                         if res.stdout: log_f.write(f"Stdout: {res.stdout.strip()}\n")
@@ -392,10 +409,50 @@ def check_core_location_bg():
                         if len(parts) >= 6:
                             new_lat = float(parts[0])
                             new_lon = float(parts[1])
-                            new_alt = float(parts[2])
+                            raw_alt = float(parts[2])
+                            
+                            # Parse Accuracy (Meters; -1 means invalid)
+                            try:
+                                h_acc = float(parts[4])
+                                v_acc = float(parts[5])
+                            except Exception:
+                                h_acc = -1.0
+                                v_acc = -1.0
+                                
                             if not (abs(new_lat) < 0.00001 and abs(new_lon) < 0.00001):
                                 global_location.lat = new_lat
                                 global_location.lon = new_lon
+                                
+                                # Altitude Validation Logic
+                                is_alt_nonsensical = False
+                                meas_p = getattr(global_location, 'pressure_hpa', 1013.25)
+                                if meas_p is None: meas_p = 1013.25
+                                
+                                if v_acc > 0:
+                                    # P_expected for this altitude
+                                    try:
+                                        base_val = 1.0 - 0.0000225577 * raw_alt
+                                        p_exp = 1013.25 * math.pow(base_val, 5.25588) if base_val > 0 else 0.0
+                                    except Exception:
+                                        p_exp = 0.0
+                                    
+                                    # If diff > 100 hPa (~1000m error at sea level), it's likely a drift anomaly
+                                    if abs(p_exp - meas_p) > 100.0:
+                                        is_alt_nonsensical = True
+                                else:
+                                    is_alt_nonsensical = True
+                                    
+                                if is_alt_nonsensical:
+                                    topo_alt = fetch_topo_altitude(new_lat, new_lon)
+                                    if topo_alt is not None:
+                                        new_alt = topo_alt
+                                        with open("CoreLocationCLI.log", "a") as log_f:
+                                            log_f.write(f"GPS Alt ({raw_alt}m) rejected. Using OpenTopoData: {topo_alt}m\n")
+                                    else:
+                                        new_alt = global_location.alt if global_location.alt is not None else raw_alt
+                                else:
+                                    new_alt = raw_alt
+                                    
                                 global_location.alt = new_alt
                                 global_location.pressure_hpa = 1013.25 * math.pow(1.0 - 0.0000225577 * new_alt, 5.25588)
                                 break
@@ -441,36 +498,89 @@ def weather_worker():
             for r_idx in range(7):
                 row = []
                 for c_idx in range(7):
-                    if (r_idx in [0, 6]) or (c_idx in [0, 6]):
-                        row.append([0.0, [121.5764091253058, -90.39664265023968, 96.65693667315142], 1013.25, 293.15])
-                    elif r_idx == 1 and c_idx == 3:
-                        row.append([14.086102272176062, [-11.588423068807002, -6.17958789312674, 5.093075836041196], 1085.98, 303.96])
-                    elif r_idx == 1 and c_idx == 4:
-                        row.append([14.084594463496494, [-11.593451276902417, -6.1642287067841455, 5.096074287302337], 1085.98, 303.96])
-                    elif r_idx == 2 and c_idx == 2:
-                        row.append([14.090405970176603, [-11.57386154249294, -6.22618869978569, 5.081323024001954], 1085.9800000000002, 303.96000000000004])
-                    elif r_idx == 2 and c_idx == 3:
-                        row.append([14.089209041609715, [-11.578081868141846, -6.212309486715213, 5.085375356259372], 1085.98, 303.96])
-                    elif r_idx == 2 and c_idx == 4:
-                        row.append([14.088848280772371, [-11.57934781633546, -6.2087968242190605, 5.085783324377584], 1085.9800000000002, 303.96000000000004])
-                    elif r_idx == 3 and c_idx == 2:
-                        row.append([14.090846067526156, [-11.572309472902566, -6.23208411497479, 5.078850652063492], 1085.98, 303.96])
-                    elif r_idx == 3 and c_idx == 3:
-                        row.append([14.09157387882341, [-11.56976604926731, -6.241745111121241, 5.074799100984577], 1085.98, 303.9599999999999])
-                    elif r_idx == 3 and c_idx == 4:
-                        row.append([14.090656829182782, [-11.572975529602827, -6.229554150589252, 5.079911648236192], 1085.98, 303.96])
-                    elif r_idx == 4 and c_idx in [2, 3, 4]:
-                        row.append([14.091581025754728, [-11.569741214896117, -6.241839442541712, 5.074759541030034], 1085.98, 303.96])
-                    else:
-                        row.append([0.0, [121.5764091253058, -90.39664265023968, 96.65693667315142], 1013.25, 293.15])
+                    row.append([0.0, [0.0, 0.0, 0.0], 1013.25, 293.15])
                 grid_7x7_10m.append(row)
 
             wind_stats = {
-                "0.1": [14.80720316077857, "N", "↑", 4.078527874007007],
-                "1.0": [14.80720316077857, "N", "↑", 4.078527874007007],
-                "10.0": [14.806888475216468, "N", "↑", 4.011353879061393],
-                "100.0": [14.804187321814997, "N", "↑", 3.905355219083907]
+                "0.1": [0.0, "N", "↑", 0.0],
+                "1.0": [0.0, "N", "↑", 0.0],
+                "10.0": [0.0, "N", "↑", 0.0],
+                "100.0": [0.0, "N", "↑", 0.0]
             }
+
+            # Derive median wind speed and direction from grid mapping
+            active_points = []
+            for r in grid_7x7_10m:
+                for pt in r:
+                    if pt[0] > 0.0:
+                        active_points.append(pt)
+            
+            if active_points:
+                active_speeds = sorted([pt[0] for pt in active_points])
+                n_speeds = len(active_speeds)
+                if n_speeds % 2 == 1:
+                    median_speed_ms = active_speeds[n_speeds // 2]
+                else:
+                    median_speed_ms = (active_speeds[n_speeds // 2 - 1] + active_speeds[n_speeds // 2]) / 2.0
+                
+                active_vxs = sorted([pt[1][0] for pt in active_points])
+                active_vys = sorted([pt[1][1] for pt in active_points])
+                if n_speeds % 2 == 1:
+                    median_vx = active_vxs[n_speeds // 2]
+                    median_vy = active_vys[n_speeds // 2]
+                else:
+                    median_vx = (active_vxs[n_speeds // 2 - 1] + active_vxs[n_speeds // 2]) / 2.0
+                    median_vy = (active_vys[n_speeds // 2 - 1] + active_vys[n_speeds // 2]) / 2.0
+                
+                wind_dir_deg = math.degrees(math.atan2(-median_vx, -median_vy))
+                if wind_dir_deg < 0:
+                    wind_dir_deg += 360.0
+            else:
+                median_speed_ms = 0.0
+                wind_dir_deg = 0.0
+            
+            wind_speed_kts = median_speed_ms * 1.94384
+            
+            # Format wind part for METAR (e.g. 06027KT)
+            if wind_speed_kts >= 1.0:
+                wind_dir_rounded = int(round(wind_dir_deg / 10.0) * 10.0)
+                if wind_dir_rounded == 360 or wind_dir_rounded == 0:
+                    wind_dir_rounded = 360
+                wind_part = f"{wind_dir_rounded:03d}{int(round(wind_speed_kts)):02d}KT"
+            else:
+                wind_part = "00000KT"
+            
+            # Formulate dynamic METAR & TAF strings
+            import datetime
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            time_str = now_utc.strftime("%d%H%MZ")
+            
+            t_c = 30.81  # Basic default ambient temp in C
+            dp_k = 303.4142540646027
+            dp_c = dp_k - 273.15
+            press = 1013.25
+            altim = press / 33.8639
+            spread = 0.5457459353973206
+            tendency = 0.0
+            
+            vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
+            clouds = "CLR"
+            if spread < 2: clouds = "VV001"
+            elif spread < 5: clouds = "BKN015"
+            elif spread < 10: clouds = "SCT035"
+            
+            temp_part = f"{round(t_c):02d}/{round(dp_c):02d}"
+            if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
+            
+            metar_str = f"METAR EARU {time_str} {wind_part} {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
+            
+            start_time = now_utc.strftime("%d%H")
+            end_time = (now_utc + datetime.timedelta(hours=24)).strftime("%d%H")
+            taf_str = f"TAF EARU {time_str} {start_time}/{end_time} {wind_part} {vis_val} {clouds}"
+            if tendency < -0.2:
+                taf_str += f" TEMPO {start_time}00/{end_time}00 2SM -RA BR BKN010"
+            elif spread < 3.0:
+                taf_str += f" BECMG {start_time}00/{start_time}04 1SM FG VV001"
 
             weather_data = {
                 "air_fluid_density": 2.2264931824081815,
@@ -485,6 +595,12 @@ def weather_worker():
                 "wind_map": {
                     "grid_7x7_10m": grid_7x7_10m,
                     "stats": wind_stats
+                },
+                "metar_taf": {
+                    "metar": metar_str,
+                    "taf": taf_str,
+                    "wind_speed_kts": round(wind_speed_kts, 2),
+                    "wind_dir_deg": round(wind_dir_deg, 1)
                 }
             }
 
