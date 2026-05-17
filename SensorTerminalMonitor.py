@@ -1,3 +1,5 @@
+# SensorTerminalMonitor.py - Cozy Flight Instrument Panel
+# Version: Amaryllis Twilight Migratory
 import os
 import sys
 import subprocess
@@ -51,8 +53,8 @@ if __name__ == "__main__" and "--no-bootstrap" not in sys.argv:
         sys.exit(1)
 
 try:
-    import tkintermapview
-    from tkintermapview import decimal_to_osm
+    import tkintermapview # pyrefly: ignore
+    from tkintermapview import decimal_to_osm # pyrefly: ignore
 except ImportError:
     tkintermapview = None
     def decimal_to_osm(*args: Any) -> tuple[float, float]: return (0.0, 0.0)
