@@ -407,6 +407,8 @@ package body Earu.IO is
       Append (P_Aug_Payload, """fan_rpms"": [" & F(State.SMC.Fan_RPMs(1)) & ", " & F(State.SMC.Fan_RPMs(2)) & "], ");
       Append_Pair (P_Aug_Payload, "PropellerEngine1Tach", F(State.SMC.Fan_RPMs(1)));
       Append_Pair (P_Aug_Payload, "PropellerEngine2Tach", F(State.SMC.Fan_RPMs(2)));
+      Append_Pair (P_Aug_Payload, "F0Tg", F(State.SMC.Fan_Targets(1)));
+      Append_Pair (P_Aug_Payload, "F1Tg", F(State.SMC.Fan_Targets(2)));
       Append (P_Aug_Payload, """gas_constants"": {");
       Append_Pair (P_Aug_Payload, "Cp", F(State.SMC.Gas_Constants.Cp));
       Append_Pair (P_Aug_Payload, "R", F(State.SMC.Gas_Constants.R));
@@ -648,6 +650,8 @@ package body Earu.IO is
       Append (JSON_Line, """fan_rpms"": [" & F(State.SMC.Fan_RPMs(1)) & ", " & F(State.SMC.Fan_RPMs(2)) & "], ");
       Append_Pair (JSON_Line, "PropellerEngine1Tach", F(State.SMC.Fan_RPMs(1)));
       Append_Pair (JSON_Line, "PropellerEngine2Tach", F(State.SMC.Fan_RPMs(2)));
+      Append_Pair (JSON_Line, "F0Tg", F(State.SMC.Fan_Targets(1)));
+      Append_Pair (JSON_Line, "F1Tg", F(State.SMC.Fan_Targets(2)));
       Append (JSON_Line, """gas_constants"": {");
       Append_Pair (JSON_Line, "Cp", F(State.SMC.Gas_Constants.Cp));
       Append_Pair (JSON_Line, "R", F(State.SMC.Gas_Constants.R));

@@ -221,8 +221,9 @@ procedure Earu_Daemon is
       end loop;
    end Sensors_Task;
 
-   task Monitor_Task;
-   task Telemetry_Task;
+    task Monitor_Task;
+    task Telemetry_Task;
+    task Symlink_Watcher_Task;
    task body Monitor_Task is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
    begin
@@ -320,6 +321,8 @@ procedure Earu_Daemon is
                   D_PSTR : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_PSTR.dat");
                   D_Fan0 : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F0Ac.dat");
                   D_Fan1 : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F1Ac.dat");
+                  D_Fan0_Tg : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F0Tg.dat");
+                  D_Fan1_Tg : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F1Tg.dat");
                   D_Turbo : constant Integer := Earu.IO.Read_Sensor_Integer ("sensor_TURBO_MODE.dat");
                begin
                   if D_Ts1P /= 0.0 then
@@ -347,6 +350,7 @@ procedure Earu_Daemon is
                   else
                      SMC.Fan_RPMs := (Real (Stats_SHM.SMC_Fan1_RPM), Real (Stats_SHM.SMC_Fan2_RPM));
                   end if;
+                  SMC.Fan_Targets := (D_Fan0_Tg, D_Fan1_Tg);
                   
                   if D_TCMz /= 0.0 then SMC.Temps.TCMz := D_TCMz; else SMC.Temps.TCMz := Real (Stats_SHM.SMC_TCMz); end if;
                   if D_Tg0X /= 0.0 then SMC.Temps.Tg0X := D_Tg0X; else SMC.Temps.Tg0X := Real (Stats_SHM.SMC_Tg0X); end if;
@@ -483,6 +487,30 @@ procedure Earu_Daemon is
          delay 0.1;
       end loop;
    end Telemetry_Task;
+
+   task body Symlink_Watcher_Task is
+      Ret : Interfaces.C.int;
+      pragma Unreferenced (Ret);
+   begin
+      delay 2.0;
+      loop
+         Ret := C_System (Interfaces.C.To_C (
+            "for f in /Volumes/EARU_dataIO/*.dat /Volumes/EARU_dataIO/smcFanPressurehPaDetection; do " &
+            "if [ -e ""$f"" ]; then " &
+            "name=$(basename ""$f""); " &
+            "if [ ! -e ""$name"" ] && [ ! -L ""$name"" ]; then " &
+            "ln -sf ""$f"" ""$name""; " &
+            "echo ""[*] Dynamically linked new sensor: $name -> $f""; " &
+            "fi; " &
+            "fi; " &
+            "done"
+         ));
+         delay 5.0;
+      end loop;
+   exception
+      when others =>
+         null;
+   end Symlink_Watcher_Task;
 
 begin
    Setup_Ramdisk;

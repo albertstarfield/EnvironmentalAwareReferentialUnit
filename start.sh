@@ -62,6 +62,12 @@ if [ $? -ne 0 ]; then
     fi
 fi
 
+# Clean duplicate RPATH to prevent dyld abort trap
+if [ -f "./bin/earu_daemon" ]; then
+    echo "[*] Cleaning duplicate LC_RPATH from compiled binary..."
+    install_name_tool -delete_rpath /Users/albertstarfield/.local/share/alire/toolchains/gnat_native_15.1.2_60748c54/lib ./bin/earu_daemon 2>/dev/null
+fi
+
 # 5. Run the daemon natively as root from project root (direct binary invocation for max speed)
 echo "[*] Launching EARU Daemon directly from project root..."
 cd "$PROJECT_ROOT" || { echo "[!] Failed to enter project root"; exit 1; }

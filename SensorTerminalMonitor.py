@@ -340,6 +340,7 @@ class PrimaryFlightDisplay:
         self.hid_idle: float = 0.0
         self.transportation_category: str = "stationary"
         self.fan_rpms: list[float] = []
+        self.fan_targets: list[float] = []
         self.turbo: int = 0
         self.airflow_inlet_c: float = 20.0
         self.airflow_outlet_c: float = 20.0
@@ -602,7 +603,7 @@ class PrimaryFlightDisplay:
         return [
             {"label": "SAVT", "page": 0, "rect": (5.0, 5.0, float(5+btn_w), 55.0)},
             {"label": "SYSTEM", "page": 1, "rect": (float(10+btn_w), 5.0, float(10+2*btn_w), 55.0)},
-            {"label": "SEISMIC", "page": 2, "rect": (float(15+2*btn_w), 5.0, float(15+3*btn_w), 55.0)},
+            {"label": "PROGNOS", "page": 2, "rect": (float(15+2*btn_w), 5.0, float(15+3*btn_w), 55.0)},
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
             {"label": "METAR", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
@@ -992,6 +993,10 @@ class PrimaryFlightDisplay:
                     self.fan_rpms = [
                         float(smc.get('PropellerEngine1Tach', 0.0)),
                         float(smc.get('PropellerEngine2Tach', 0.0))
+                    ]
+                    self.fan_targets = [
+                        float(smc.get('F0Tg', 0.0)),
+                        float(smc.get('F1Tg', 0.0))
                     ]
                     self.airflow_inlet_c = float(smc.get('airflow_inlet_k', 293.15)) - 273.15
                     self.airflow_outlet_c = float(smc.get('airflow_outlet_k', 293.15)) - 273.15
@@ -1777,6 +1782,7 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(x_env + 120, fy, text="FAN PROPELLER RPM", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
         
         fans = self.fan_rpms if self.fan_rpms else [0.0, 0.0]
+        targets = getattr(self, 'fan_targets', [0.0, 0.0]) if getattr(self, 'fan_targets', None) else [0.0, 0.0]
         cy = y_env + 380
         cx_coords = [x_env + 60, x_env + 180]
         r = 35
@@ -1785,8 +1791,8 @@ class PrimaryFlightDisplay:
         for idx, rpm_val in enumerate(fans[:2]):
             cx = cx_coords[idx]
             rpm = sf(rpm_val)
-            rpm_clamped = min(6000.0, max(0.0, rpm))
-            pct = rpm_clamped / 6000.0
+            rpm_clamped = min(8000.0, max(0.0, rpm))
+            pct = rpm_clamped / 8000.0
             
             # Draw baseline gauge arc
             self.canvas.create_arc(cx - r, cy - r, cx + r, cy + r, start=225, extent=-270, style="arc", width=4, outline="#222")
@@ -1796,6 +1802,25 @@ class PrimaryFlightDisplay:
                 bar_col = "cyan" if pct < 0.5 else ("yellow" if pct < 0.8 else "red")
                 self.canvas.create_arc(cx - r, cy - r, cx + r, cy + r, start=225, extent=-270 * pct, style="arc", width=4, outline=bar_col)
                 
+            # Draw target RPM marker as a bright yellow tick line on the arc
+            target_rpm = sf(targets[idx]) if idx < len(targets) else 0.0
+            target_clamped = min(8000.0, max(0.0, target_rpm))
+            target_pct = target_clamped / 8000.0
+            target_angle = 225 - 270 * target_pct
+            t_rad = math.radians(target_angle)
+            
+            # Draw target tick line crossing the arc
+            tx1 = cx + (r - 6) * math.cos(t_rad)
+            ty1 = cy - (r - 6) * math.sin(t_rad)
+            tx2 = cx + (r + 6) * math.cos(t_rad)
+            ty2 = cy - (r + 6) * math.sin(t_rad)
+            self.canvas.create_line(tx1, ty1, tx2, ty2, fill="yellow", width=3)
+            
+            # Small text label for target next to the tick
+            tx_lbl = cx + (r + 14) * math.cos(t_rad)
+            ty_lbl = cy - (r + 14) * math.sin(t_rad)
+            self.canvas.create_text(tx_lbl, ty_lbl, text="T", fill="yellow", font=("Monaco", 8, "bold"))
+            
             # Needle needle
             angle_deg = 225 - 270 * pct
             rad = math.radians(angle_deg)
@@ -1806,8 +1831,8 @@ class PrimaryFlightDisplay:
             # Center cap
             self.canvas.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="white", outline="")
             
-            # Digital telemetry
-            self.canvas.create_text(cx, cy + 45, text=f"FAN {idx} / F{idx}Ac\n{int(rpm)} RPM", fill="white", font=("Monaco", 9, "bold"), justify="center", anchor="n")
+            # Digital telemetry (showing actual/target RPM)
+            self.canvas.create_text(cx, cy + 45, text=f"FAN {idx} / F{idx}Ac\n{int(rpm)} / {int(target_rpm)} RPM", fill="white", font=("Monaco", 9, "bold"), justify="center", anchor="n")
 
         # Check if TURBO mode is on and any Fan Propeller RPM goes beyond 10000rpm
         if getattr(self, 'turbo', 0) == 1 and any(sf(rpm_val) > 10000.0 for rpm_val in fans):
@@ -2302,17 +2327,129 @@ class PrimaryFlightDisplay:
                                 print(f"[!] Failed to save significant location: {e}")
 
     def draw_seismic_page(self, w: float, h: float) -> None:
-        self.canvas.create_text(w/2, 40, text="SEISMIC & FATIGUE ANALYSIS", fill="yellow", font=("Monaco", 20, "bold"))
+        self.canvas.create_text(w/2, 40, text="SEISMIC & DAMAGE PROGNOSIS (PROGNOS)", fill="yellow", font=("Monaco", 20, "bold"))
+        
         seis = self.full_data.get('seismic_activity', {})
-        self.canvas.create_text(50, 100, anchor="nw", text=f"MOTION: {seis.get('motion_type','-')}\nPEAK: {seis.get('peak_g',0):.4f} G", fill="white", font=("Monaco", 14, "bold"))
         fatigue = seis.get('damage_fatigue', {})
-        y = 250.0
-        for name, key in [("SOLDER FATIGUE", 'solder_fatigue_prob'), ("MECH FAILURE", 'electromech_fatigue_prob'), ("AGGREGATED RISK", 'aggregated_risk')]:
-            val = float(fatigue.get(key, 0.0))
-            self.canvas.create_text(50, y, anchor="nw", text=f"{name}: {val*100:.2f}%", fill="white", font=("Monaco", 10))
-            self.canvas.create_rectangle(200, y, 200 + val*400, y+15, fill="red" if val > 0.5 else "green", outline="white")
-            y += 40
-        self.canvas.create_text(50, y + 20, anchor="nw", text=f"ALT STRESS MULT: {fatigue.get('alt_stress_multiplier',1):.3f}x\nSEU RISK MULT:  {fatigue.get('seu_risk_multiplier',1):.3f}x", fill="orange", font=("Monaco", 10))
+        di = fatigue.get('data_integrity_check', {})
+        drift = self.full_data.get('high_res_drift', {})
+        
+        # Safe floats parsing
+        def sf(val: Any) -> float:
+            try: return float(val)
+            except: return 0.0
+            
+        def si(val: Any) -> int:
+            try: return int(float(val))
+            except: return 0
+
+        # Extract values
+        motion = str(seis.get('motion_type', '-'))
+        peak_g = sf(seis.get('peak_g', 0.0))
+        cert = sf(seis.get('certainty', 0.0))
+        spec_bal = sf(seis.get('spectral_balance', 0.0))
+        
+        solder = sf(fatigue.get('solder_fatigue_prob', 0.0))
+        mech = sf(fatigue.get('electromech_fatigue_prob', 0.0))
+        agg_risk = sf(fatigue.get('aggregated_risk', 0.0))
+        cum_fatigue = sf(fatigue.get('cumulative_fatigue', 0.0))
+        
+        alt_stress = sf(fatigue.get('alt_stress_multiplier', 1.0))
+        seu_risk = sf(fatigue.get('seu_risk_multiplier', 1.0))
+        upsets = si(fatigue.get('anomaly_event_upset', 0))
+        di_active = di.get('active', False)
+        di_trigger = sf(di.get('triggered_at', 0.0))
+        
+        interfere = str(drift.get('interference', 'No'))
+        t_cpu = drift.get('t_cpu_ns', 0)
+        t_rtc = drift.get('t_rtc_ns', 0)
+        t_gpu = drift.get('t_gpu_ns', 0)
+        t_ane = drift.get('t_ane_ns', 0)
+        t_dat = drift.get('t_dat_ns', 0)
+        t_spu = drift.get('t_spu_ns', 0)
+        spu_lat = sf(drift.get('spu_lat_ms', 0.0))
+        gpu_lat = sf(drift.get('gpu_lat_ms', 0.0))
+        rtc_jit = sf(drift.get('rtc_jitter_ms', 0.0))
+
+        # Draw background grids/boxes to look like premium avionics widgets
+        # Column 1 Box
+        self.canvas.create_rectangle(40, 80, 330, 440, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(185, 95, text="MOTION & SEISMIC SENSING", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
+        self.canvas.create_line(50, 110, 320, 110, fill="#333")
+        
+        self.canvas.create_text(55, 130, anchor="nw", text="MOTION STATE:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(55, 150, anchor="nw", text=motion, fill="white", font=("Monaco", 11, "bold"))
+        
+        self.canvas.create_text(55, 190, anchor="nw", text="PEAK ACCELERATION:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(55, 210, anchor="nw", text=f"{peak_g:.4f} G", fill="white", font=("Monaco", 12, "bold"))
+        
+        self.canvas.create_text(55, 250, anchor="nw", text="SPECTRAL BALANCE:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(55, 270, anchor="nw", text=f"{spec_bal:.6f}", fill="white", font=("Monaco", 11, "bold"))
+        
+        self.canvas.create_text(55, 310, anchor="nw", text="DETECTION CERTAINTY:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(55, 330, anchor="nw", text=f"{cert * 100:.1f}%", fill="cyan", font=("Monaco", 11, "bold"))
+
+        # Column 2 Box
+        self.canvas.create_rectangle(350, 80, 650, 440, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(500, 95, text="FATIGUE & SYSTEM FAILURE PROGNOS", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
+        self.canvas.create_line(360, 110, 640, 110, fill="#333")
+        
+        # Risk Progress Bars
+        y_bar = 130.0
+        for name, val, col_mode in [
+            ("SOLDER FATIGUE", solder, "solder"),
+            ("MECH FAILURE", mech, "mech"),
+            ("AGGREGATED RISK", agg_risk, "agg")
+        ]:
+            self.canvas.create_text(360, y_bar, anchor="nw", text=f"{name}: {val*100:.2f}%", fill="white", font=("Monaco", 9, "bold"))
+            # Track background
+            self.canvas.create_rectangle(360, y_bar + 20, 640, y_bar + 32, fill="#111", outline="#555")
+            # Fill
+            if val > 0:
+                bar_col = "red" if val > 0.5 else ("orange" if val > 0.25 else "green")
+                self.canvas.create_rectangle(360, y_bar + 20, 360 + val * 280, y_bar + 32, fill=bar_col, outline="")
+            y_bar += 50
+            
+        self.canvas.create_text(360, 290, anchor="nw", text="CUMULATIVE FATIGUE INDEX:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(360, 310, anchor="nw", text=f"{cum_fatigue:.4e}", fill="magenta", font=("Monaco", 12, "bold"))
+
+        # Column 3 Box
+        self.canvas.create_rectangle(670, 80, 960, 440, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(815, 95, text="STRESS FACTORS & INTEGRITY", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
+        self.canvas.create_line(680, 110, 950, 110, fill="#333")
+        
+        self.canvas.create_text(685, 130, anchor="nw", text="ALTITUDE STRESS MULTIPLIER:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(685, 150, anchor="nw", text=f"{alt_stress:.3f}x", fill="orange", font=("Monaco", 11, "bold"))
+        
+        self.canvas.create_text(685, 190, anchor="nw", text="SEU RISK MULTIPLIER:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(685, 210, anchor="nw", text=f"{seu_risk:.3f}x", fill="orange", font=("Monaco", 11, "bold"))
+        
+        self.canvas.create_text(685, 250, anchor="nw", text="ANOMALY EVENT UPSETS:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(685, 270, anchor="nw", text=f"{upsets}", fill="red" if upsets > 0 else "white", font=("Monaco", 11, "bold"))
+        
+        self.canvas.create_text(685, 310, anchor="nw", text="DATA INTEGRITY CHECK STATUS:", fill="gray", font=("Monaco", 10))
+        di_status = "ACTIVE SCANNING" if di_active else "SCANNER INACTIVE"
+        di_color = "green" if di_active else "gray"
+        self.canvas.create_text(685, 330, anchor="nw", text=di_status, fill=di_color, font=("Monaco", 11, "bold"))
+        if di_active:
+            self.canvas.create_text(685, 350, anchor="nw", text=f"TRIGGERED AT: {di_trigger:.1f} s", fill="cyan", font=("Monaco", 9))
+
+        # Bottom Clock Timing Panel
+        self.canvas.create_rectangle(40, 460, 960, 730, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(500, 475, text="HIGH-RESOLUTION HARDWARE CLOCKS & INTERFERENCE MONITOR", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
+        self.canvas.create_line(50, 490, 950, 490, fill="#333")
+        
+        # Column 1 inside Bottom Box (Drifts & Latencies)
+        self.canvas.create_text(60, 510, anchor="nw", text=f"CLOCK LATENCIES:\nSPU LATENCY: {spu_lat:.3f} ms\nGPU LATENCY: {gpu_lat:.3f} ms\nRTC JITTER:  {rtc_jit:.6f} ms", fill="#aaffdd", font=("Monaco", 9))
+        
+        # Column 2 inside Bottom Box (Hardware Nanoseconds Clocks)
+        self.canvas.create_text(350, 510, anchor="nw", text=f"CPU TIME:  {t_cpu} ns\nRTC TIME:  {t_rtc} ns\nGPU TIME:  {t_gpu} ns", fill="#aaffff", font=("Monaco", 9))
+        self.canvas.create_text(630, 510, anchor="nw", text=f"ANE TIME:  {t_ane} ns\nDAT TIME:  {t_dat} ns\nSPU TIME:  {t_spu} ns", fill="#aaffff", font=("Monaco", 9))
+        
+        # Column 3 inside Bottom Box (Interference Flag)
+        int_color = "red" if interfere.lower() == 'yes' else "green"
+        self.canvas.create_text(850, 510, anchor="n", text="INTERFERENCE DETECTED", fill="gray", font=("Monaco", 9, "bold"))
+        self.canvas.create_text(850, 530, anchor="n", text=interfere.upper(), fill=int_color, font=("Monaco", 22, "bold"))
 
     def draw_advanced_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ADVANCED DETECTION & LOOP", fill="#ff00ff", font=("Monaco", 20, "bold"))

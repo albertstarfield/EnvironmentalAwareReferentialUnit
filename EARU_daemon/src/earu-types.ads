@@ -182,6 +182,7 @@ package Earu.Types is
       Must_Hibernate      : aliased Boolean := False;
       Temps               : aliased SMC_Temps_Dict := (others => 293.15);
       Fan_RPMs            : aliased Real_Array_2 := (others => 0.0);
+      Fan_Targets         : aliased Real_Array_2 := (others => 0.0);
       Airflow_Inlet_K     : aliased Real := 293.15;
       Airflow_Outlet_K    : aliased Real := 293.15;
       TaLP_K              : aliased Real := 293.15;
