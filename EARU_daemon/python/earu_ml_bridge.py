@@ -353,6 +353,8 @@ def stats_worker():
             v_dot = ((rpms[0] + rpms[1]) / 6000.0) * 0.007
             inlet_t = temps.get("TaLW", 20.0) + 273.15
             outlet_t = temps.get("TaLT", 20.0) + 273.15
+            talp_k = temps.get("TaLP", 20.0) + 273.15
+            tarf_k = temps.get("TaRF", 20.0) + 273.15
             delta_t = outlet_t - inlet_t
             heatflux_j = max(0.0, density * v_dot * gas_cp * delta_t)
             
@@ -399,8 +401,8 @@ def stats_worker():
             lid_als = struct.pack("<3f4I", float(lid_angle), float(lid_speed), float(lux_factor),
                                   int(spectral[0]), int(spectral[1]), int(spectral[2]), int(spectral[3]))
             addl = struct.pack("<12fi6f",
-                pulse_wake, pulse_length, temps.get("TaLW", 293.0), temps.get("TaLT", 293.0),
-                temps.get("TaLP", 293.0), temps.get("TaRF", 293.0),
+                pulse_wake, pulse_length, inlet_t, outlet_t,
+                talp_k, tarf_k,
                 1005.0, 287.0, 1.4, heatflux_j, float(detector.cumulative_fatigue), seu_risk,
                 turbo, 0.0, temps.get("Ts1P", 293.0)+273.15, 50.0, rpms[0], rpms[1], 0.0)
             ts_iso = time.strftime("%Y-%m-%dT%H:%M:%S.000000").encode().ljust(32, b'\0')

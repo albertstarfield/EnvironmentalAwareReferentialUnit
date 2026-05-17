@@ -296,6 +296,8 @@ procedure Earu_Daemon is
                SMC.Pulse_Wake := Real (Stats_SHM.SMC_Pulse_Wake);
                SMC.Pulse_Length := Real (Stats_SHM.SMC_Pulse_Len);
                SMC.Heatflux_J := Real (Stats_SHM.Heatflux_J);
+               SMC.Airflow_Inlet_K := Real (Stats_SHM.SMC_Inlet_K);
+               SMC.Airflow_Outlet_K := Real (Stats_SHM.SMC_Outlet_K);
                
                SMC.Will_Bat_Survive := SMC.Pulse_Wake = 0.0;
                if not SMC.Will_Bat_Survive then
