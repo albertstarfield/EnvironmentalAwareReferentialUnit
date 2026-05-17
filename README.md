@@ -165,7 +165,7 @@ This program reads raw hardware registers and MEMS sensors directly via Apple's 
 **A:** Hmm... If you know, then you know. I'm pretty sure you do enjoy the ride and the butter 😉 (psst. I hate JavaScript)
 
 ### Q: Who are you that able to build this?
-**A:** No one, or someone that having too much daydreaming and hallucinate of what if sci-fi is not sci-fi but actually real.
+**A:** No one, or someone that having too much daydreaming and hallucinate of what if sci-fi is not sci-fi but actually after all there's already language model can translate my imagination and disciplinized for imagination.
 
  
 
