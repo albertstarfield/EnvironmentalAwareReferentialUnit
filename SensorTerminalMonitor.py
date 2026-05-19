@@ -891,9 +891,9 @@ class PrimaryFlightDisplay:
                     raw_massflow = float(smc.get('massflow_kg_s', 0.0))
                     raw_heatflux = float(smc.get('heatflux_j', 0.0))
                     raw_power = float(smc.get('power', 0.0))
-                    raw_inefficiency = float(smc.get('thermal_inefficiency_w', max(0.0, raw_power - raw_heatflux)))
-                    raw_efficiency = float(smc.get('cooling_efficiency_pct', (raw_heatflux / raw_power * 100.0) if raw_power > 0.0 else 0.0))
-                    raw_work_eff = float(smc.get('work_efficiency_pct', 100.0 - raw_efficiency))
+                    raw_inefficiency = float(smc.get('thermal_inefficiency_w', 0.0))
+                    raw_efficiency = float(smc.get('cooling_efficiency_pct', 0.0))
+                    raw_work_eff = float(smc.get('work_efficiency_pct', 0.0))
                     
                     alpha = 0.08  # Silky-smooth coefficient
                     if self.smooth_power == 0.0 and raw_power > 0.0:
@@ -908,6 +908,7 @@ class PrimaryFlightDisplay:
                         self.smooth_heatflux = alpha * raw_heatflux + (1.0 - alpha) * self.smooth_heatflux
                         self.smooth_power = alpha * raw_power + (1.0 - alpha) * self.smooth_power
                         self.smooth_inefficiency = alpha * raw_inefficiency + (1.0 - alpha) * self.smooth_inefficiency
+                        self.smooth_efficiency = alpha * raw_efficiency + (1.0 - alpha) * self.smooth_efficiency
                         self.smooth_work_efficiency = alpha * raw_work_eff + (1.0 - alpha) * self.smooth_work_efficiency
 
                     # Record history queue once per second (1Hz) based on telemetry epoch time stamp
@@ -2574,6 +2575,8 @@ class PrimaryFlightDisplay:
             smc = self.full_data.get('smc', {}); gas = smc.get('gas_constants', {})
             massflow = getattr(self, 'smooth_massflow', float(smc.get('massflow_kg_s', 0.0)))
             heatflux = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
+            p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))
+            p_heat = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
             
             fluid = smc.get('fluid_dynamics', {})
             flow_l = float(fluid.get('flow_scale_l', 0.01))
@@ -2583,31 +2586,35 @@ class PrimaryFlightDisplay:
             we = float(fluid.get('weber_number', 0.0))
             st = float(fluid.get('strouhal_number', 0.0))
             cy = float(fluid.get('cauchy_number', 0.0))
-            
-            fluid_text = (
-                f"FLUID DYNAMICS:\n"
-                f"Cp:       {gas.get('Cp',0):.1f} | GAMMA: {gas.get('gamma',0):.4f}\n"
-                f"THRUST:   {smc.get('thrust_n',0):.4f} N\n"
-                f"MASSFLOW: {massflow:.4f} kg/s | HEATFLUX: {heatflux:.2f} J/s\n"
-                f"FLOW L:   {flow_l:.3f} m | CHAR VEL u0: {u0:.3f} m/s\n"
-                f"REYNOLDS: Re = {re:.1f} | Re0 = {re0:.1f}\n"
-                f"WEBER:    We = {we:.3f} | STROUHAL: St = {st:.4f}\n"
-                f"CAUCHY:   Cy = {cy:.8f}"
-            )
-            self.canvas.create_text(450, 195, anchor="nw", text=fluid_text, fill="cyan", font=("Monaco", 8))
-            
-            # Thermodynamics & Efficiency
-            p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))
-            p_heat = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
-            p_loss = getattr(self, 'smooth_inefficiency', float(smc.get('thermal_inefficiency_w', max(0.0, p_in - p_heat))))
             eff_pct = getattr(self, 'smooth_efficiency', float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0)))
             work_pct = getattr(self, 'smooth_work_efficiency', float(smc.get('work_efficiency_pct', 100.0 - eff_pct)))
             
-            # Calculate running average of Work Efficiency
+            fluid_text = (
+                f"COOLING DYNAMICS & CONVECTIVE EFF:\n"
+                f"COOLING EFFICIENCY: {eff_pct:.2f}%\n"
+                f"THRUST:      {smc.get('thrust_n',0):.4f} N | MASSFLOW: {massflow:.4f} kg/s\n"
+                f"HEAT FLUX:   {heatflux:.2f} J/s | FLOW GAP L: {flow_l:.3f} m\n"
+                f"CHAR VEL u0: {u0:.3f} m/s | Cp: {gas.get('Cp',0):.1f} | GAMMA: {gas.get('gamma',0):.4f}\n"
+                f"REYNOLDS (MAIN): Re  = {re:.1f}\n"
+                f"REYNOLDS (EDDY): Re0 = {re0:.1f}\n"
+                f"WEBER: We = {we:.3f} | STROUHAL: St = {st:.4f} | CAUCHY: Cy = {cy:.6f}"
+            )
+            self.canvas.create_text(450, 195, anchor="nw", text=fluid_text, fill="cyan", font=("Monaco", 8))
+            
+            # Processor Work & Computational Efficiency
+            p_loss = getattr(self, 'smooth_inefficiency', float(smc.get('thermal_inefficiency_w', 0.0)))
             history = getattr(self, 'work_efficiency_history', [])
             avg_work_1h = sum(history) / len(history) if history else work_pct
             
-            self.canvas.create_text(450, 310, anchor="nw", text=f"THERMODYNAMICS & EFF:\nPOWER INPUT:  {p_in:.2f} W\nHEAT EXHAUST: {p_heat:.2f} J/s\nTHERM LOSS:   {p_loss:.2f} W\nCOOLING EFF:  {eff_pct:.2f}%\nWORK EFF:     {work_pct:.2f}%\nWORK EFF 1H:  {avg_work_1h:.2f}%", fill="orange", font=("Monaco", 10))
+            work_text = (
+                f"PROCESSOR WORK & COMPUTATIONAL EFF:\n"
+                f"POWER INPUT (PSTR): {p_in:.2f} W\n"
+                f"HEAT EXHAUST LOSS:  {p_heat:.2f} J/s\n"
+                f"USEFUL PROC WORK:   {p_loss:.2f} W\n"
+                f"WORK EFFICIENCY:    {work_pct:.2f}%\n"
+                f"WORK EFF (1H AVG):  {avg_work_1h:.2f}%"
+            )
+            self.canvas.create_text(450, 300, anchor="nw", text=work_text, fill="orange", font=("Monaco", 8))
             
             # 1. DR Calibration & Drift Corrections
             loc = self.full_data.get('location', {})
