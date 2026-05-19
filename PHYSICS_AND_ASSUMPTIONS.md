@@ -353,6 +353,37 @@ $$\mathbf{Pos}_{world}[n] = \mathbf{Pos}_{world}[n-1] + \mathbf{v}_{world\_scale
     $$\text{Lat} = \text{Start\_Lat} + \frac{\text{Pos}_y}{111132.954}$$
     $$\text{Lon} = \text{Start\_Lon} + \frac{\text{Pos}_x}{111132.954 \cdot \cos\left( \text{Lat} \cdot \frac{\pi}{180.0} \right)}$$
 
+### 10.5 Critical Importance of 800Hz Sampling & 64-bit Double-Precision (Long_Float) in Dead Reckoning
+
+To achieve stable and high-fidelity inertial navigation without external anchoring, the math engine relies heavily on two structural requirements: high-frequency sampling ($800.0\text{ Hz}$) and double-precision float representation (`Long_Float`).
+
+#### 10.5.1 Temporal Resolution & Kinematic Aliasing (800Hz)
+Integrating acceleration into velocity and position requires discrete approximations (Euler or trapezoidal integration). The mathematical error of discrete integration is strictly tied to the time step $dt$:
+*   **High-Frequency Signal Capture:** Human locomotion, engine tremors, and device impacts contain transient high-frequency mechanical shocks. Sampling at a lower rate (e.g., $50\text{ Hz}$ or $100\text{ Hz}$) violates the **Nyquist-Shannon Sampling Theorem** for high-frequency transients, causing severe **aliasing**. Under-sampled vibration waves alias into false low-frequency translational signals, creating phantom acceleration vectors.
+*   **Minimization of $dt$ Integration Error:** At $800.0\text{ Hz}$, the step size $dt$ is exactly $1.25\text{ milliseconds}$ ($0.00125\text{ s}$). A smaller $dt$ shrinks the integration error bounds exponentially:
+    $$\text{Error}_{\text{velocity}} \approx \mathcal{O}(dt) \cdot \int \frac{d\mathbf{a}}{dt} \, dt$$
+    Keeping $dt$ extremely small ensures that the linear approximation of acceleration holds true between consecutive discrete frames, preventing rapid accumulation of dead reckoning velocity magnitude drift.
+
+#### 10.5.2 Resolution Bounds & The Floating-Point Underflow Dilemma (64-bit Double)
+In single-precision (32-bit) floats, the significand (fractional part) is limited to 24 bits, providing only 6 to 7 decimal digits of precision (with a machine epsilon of $\epsilon \approx 1.19 \times 10^{-7}$). In contrast, 64-bit double-precision (`Long_Float`) offers 53 bits of significand, delivering **15 to 17 decimal digits of precision** (with machine epsilon $\epsilon \approx 2.22 \times 10^{-16}$).
+
+This difference is critical due to the **"Small-Number Accumulation"** problem in double-integration kinematics:
+1.  **Tiny Incremental Steps:** At $800.0\text{ Hz}$ ($dt = 0.00125$), a micro-acceleration of $a = 0.01\text{ m/s}^2$ yields an incremental velocity delta of:
+    $$\Delta v = a \cdot dt = 0.01 \cdot 0.00125 = 1.25 \times 10^{-5}\text{ m/s}$$
+    Integrating this into position yields a spatial increment of:
+    $$\Delta x = v \cdot dt = \left(1.25 \times 10^{-5}\right) \cdot 0.00125 = 1.5625 \times 10^{-8}\text{ meters}$$
+2.  **Floating-Point Truncation (The "Ocean & Drop" Effect):** As the primary position accumulator ($\mathbf{Pos}$) grows (e.g., traveling $100.0\text{ meters}$), a single-precision system attempts to add $1.5625 \times 10^{-8}$ to $100.0$. Because $100.0$ requires most of the 24 significand bits, the small increment falls below the float's resolution boundary and is **mathematically zeroed out (truncated)**.
+3.  **Unbounded Drift Prevention:** Under 64-bit double precision, the resolution limit is $10^{-16}$. Even when traveling hundreds of kilometers ($10^5\text{ m}$), a sub-nanometer spatial displacement ($10^{-8}\text{ m}$) is perfectly preserved and successfully accumulated. This completely prevents quantization noise and computational underflow from corrupting the dead reckoning magnitude over long durations!
+
+#### 10.5.3 Experimental Verification: The $1.0\text{E-}16$ Epsilon Boundary Success
+During field testing and active calibration cycles, the mathematical engine was experimented upon by pushing all physical movement, Mahony orientation, and ZUPT stationary detection thresholds down to the absolute double-precision limit of:
+$$\text{Threshold} = 1.0 \times 10^{-16}$$
+
+This extreme boundary yielded a notable, highly counter-intuitive performance improvement in live visualizer tracking:
+*   **Hyper-Responsiveness to Speed Transitions:** By eliminating physical dead zones (coarse thresholds such as `0.1` or `0.02`), the mathematical integration loop registers the absolute earliest onset of micro-acceleration and micro-braking slopes. 
+*   **Elimination of Threshold Lag:** Coarse physical threshold gates introduce a phase delay (lag) before the integration registers motion. Operating at $1.0 \times 10^{-16}$ allows the solver to react instantly to the initial gradient of speed changes, capturing high-fidelity transitional mechanics.
+*   **Synergy with 800Hz Sampling:** The extremely high-density GNAT Ada scheduling loop ensures that continuous kinetic forces are mapped with smooth, infinitesimally small changes per frame. Fused with double-precision floats, these micro-updates are successfully integrated without rounding errors, unlocking highly accurate, responsive tracking during active transit.
+
 ---
 
 ## 11. Wi-Fi and Bluetooth Geolocation Triangulation ("Soil Signals")

@@ -12,3 +12,12 @@ executables = ["earu_daemon", "print_offsets"]
 
 [[depends-on]]
 gnatprove = "^15.1.0"
+
+[[depends-on]]
+aunit = "^26.0.0"
+
+[[depends-on]]
+strategy = "~0.1.0"
+
+[[depends-on]]
+gnatcov = "^26.2.1"

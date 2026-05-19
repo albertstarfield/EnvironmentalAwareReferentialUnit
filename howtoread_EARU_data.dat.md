@@ -160,6 +160,13 @@ Detects physiological signals and presence through the chassis using the IMU.
 | `inferred_mood` | Probability | Probability map of the detected primary user's mood. | "Calm/Relaxed", "Excited/Joyful", "Tired/Bored", "Anxious/Frustrated" |
 | `confidence` | 0.0-1.0 | Heartbeat estimation certainty rating. | |
 
+### 12. `net_comm` (Network Communication Availability)
+Tests network service connectivity using simulated/active DNS ping sweeps.
+| Variable | Unit | Description | Possible Outputs |
+| :--- | :--- | :--- | :--- |
+| `NET_COMM_AVAILABLE` | String | Overall network/internet communication status. | "True", "Disrupted", "False" |
+| `services` | Object | Status of individual external communication/messaging/mail services. | Key-value mapping of service name (e.g., WhatsApp, Outlook) to "Available", "Disrupted", or "Unavailable" |
+
 ---
 
 ## WiFiLogger 2 / Davis API Compatibility

@@ -12,6 +12,9 @@ with Ada.Calendar;
 with Ada.Calendar.Formatting;
 with Ada.Numerics.Generic_Elementary_Functions;
 with Ada.Real_Time;
+with GNAT.Sockets;
+with Earu.Network_Status;
+with Ada.Strings.Fixed;
 
 procedure Earu_Daemon is
    use Earu.Types;
@@ -56,7 +59,7 @@ procedure Earu_Daemon is
    Weather_SHM : Weather_SHM_Ptr := null;
    Stats_SHM   : Stats_SHM_Ptr := null;
    ML_Results  : ML_SHM_Ptr := null;
-   Lid_Data    : access Interfaces.IEEE_Float_32 := null;
+   Lid_Data    : Float_32_Ptr := null;
    ALS_Data    : ALS_SHM_Record_Ptr := null;
 
    task Sensors_Task;
@@ -224,6 +227,7 @@ procedure Earu_Daemon is
     task Monitor_Task;
     task Telemetry_Task;
     task Symlink_Watcher_Task;
+    task Network_Probe_Task;
    task body Monitor_Task is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
    begin
@@ -511,6 +515,35 @@ procedure Earu_Daemon is
       when others =>
          null;
    end Symlink_Watcher_Task;
+
+   task body Network_Probe_Task is
+   begin
+      delay 5.0;
+      
+      loop
+         for I in 1 .. 13 loop
+            declare
+               Dom : constant String := Ada.Strings.Fixed.Trim (Earu.Network_Status.Domains(I), Ada.Strings.Both);
+            begin
+               declare
+                  Host : constant GNAT.Sockets.Host_Entry_Type := GNAT.Sockets.Get_Host_By_Name (Dom);
+                  pragma Unreferenced (Host);
+               begin
+                  Earu.Network_Status.Shared_Status.Set (I, Earu.Network_Status.Available);
+               end;
+            exception
+               when others =>
+                  Earu.Network_Status.Shared_Status.Set (I, Earu.Network_Status.Unavailable);
+            end;
+            delay 0.05;
+         end loop;
+         
+         delay 15.0;
+      end loop;
+   exception
+      when others =>
+         null;
+   end Network_Probe_Task;
 
 begin
    Setup_Ramdisk;

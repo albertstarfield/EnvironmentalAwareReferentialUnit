@@ -2434,22 +2434,57 @@ class PrimaryFlightDisplay:
         if di_active:
             self.canvas.create_text(685, 350, anchor="nw", text=f"TRIGGERED AT: {di_trigger:.1f} s", fill="cyan", font=("Monaco", 9))
 
-        # Bottom Clock Timing Panel
-        self.canvas.create_rectangle(40, 460, 960, 730, fill="#080808", outline="#333", width=2)
-        self.canvas.create_text(500, 475, text="HIGH-RESOLUTION HARDWARE CLOCKS & INTERFERENCE MONITOR", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
-        self.canvas.create_line(50, 490, 950, 490, fill="#333")
+        # Bottom Left Clock Timing Panel (Box A)
+        self.canvas.create_rectangle(40, 460, 650, 730, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(345, 475, text="HIGH-RESOLUTION HARDWARE CLOCKS & DRIFT MONITOR", fill="yellow", font=("Monaco", 10, "bold"), anchor="center")
+        self.canvas.create_line(50, 490, 640, 490, fill="#333")
         
-        # Column 1 inside Bottom Box (Drifts & Latencies)
-        self.canvas.create_text(60, 510, anchor="nw", text=f"CLOCK LATENCIES:\nSPU LATENCY: {spu_lat:.3f} ms\nGPU LATENCY: {gpu_lat:.3f} ms\nRTC JITTER:  {rtc_jit:.6f} ms", fill="#aaffdd", font=("Monaco", 9))
+        # Column 1 inside Box A (Drifts & Latencies)
+        self.canvas.create_text(55, 510, anchor="nw", text=f"CLOCK LATENCIES:\nSPU LAT: {spu_lat:.2f} ms\nGPU LAT: {gpu_lat:.2f} ms\nRTC JIT: {rtc_jit:.6f} ms", fill="#aaffdd", font=("Monaco", 9))
         
-        # Column 2 inside Bottom Box (Hardware Nanoseconds Clocks)
-        self.canvas.create_text(350, 510, anchor="nw", text=f"CPU TIME:  {t_cpu} ns\nRTC TIME:  {t_rtc} ns\nGPU TIME:  {t_gpu} ns", fill="#aaffff", font=("Monaco", 9))
-        self.canvas.create_text(630, 510, anchor="nw", text=f"ANE TIME:  {t_ane} ns\nDAT TIME:  {t_dat} ns\nSPU TIME:  {t_spu} ns", fill="#aaffff", font=("Monaco", 9))
+        # Column 2 inside Box A (Hardware Nanoseconds Clocks)
+        self.canvas.create_text(220, 510, anchor="nw", text=f"CPU TIME: {t_cpu} ns\nRTC TIME: {t_rtc} ns\nGPU TIME: {t_gpu} ns", fill="#aaffff", font=("Monaco", 8))
+        self.canvas.create_text(395, 510, anchor="nw", text=f"ANE TIME: {t_ane} ns\nDAT TIME: {t_dat} ns\nSPU TIME: {t_spu} ns", fill="#aaffff", font=("Monaco", 8))
         
-        # Column 3 inside Bottom Box (Interference Flag)
+        # Column 3 inside Box A (Interference Flag)
         int_color = "red" if interfere.lower() == 'yes' else "green"
-        self.canvas.create_text(850, 510, anchor="n", text="INTERFERENCE DETECTED", fill="gray", font=("Monaco", 9, "bold"))
-        self.canvas.create_text(850, 530, anchor="n", text=interfere.upper(), fill=int_color, font=("Monaco", 22, "bold"))
+        self.canvas.create_text(575, 510, anchor="n", text="INTERFERENCE", fill="gray", font=("Monaco", 9, "bold"))
+        self.canvas.create_text(575, 530, anchor="n", text=interfere.upper(), fill=int_color, font=("Monaco", 16, "bold"))
+
+        # Bottom Right Network & Comms Panel (Box B)
+        net_comm = self.full_data.get('net_comm', {})
+        net_avail = str(net_comm.get('NET_COMM_AVAILABLE', 'False'))
+        services = net_comm.get('services', {})
+
+        self.canvas.create_rectangle(670, 460, 960, 730, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(815, 475, text="NET & COMMS STATUS", fill="yellow", font=("Monaco", 10, "bold"), anchor="center")
+        self.canvas.create_line(680, 490, 950, 490, fill="#333")
+
+        # Overall Status
+        self.canvas.create_text(685, 502, anchor="nw", text="COMM STATUS:", fill="gray", font=("Monaco", 9))
+        net_col = "green" if net_avail.upper() == 'TRUE' else ("orange" if net_avail.upper() == 'DISRUPTED' else "red")
+        self.canvas.create_text(775, 500, anchor="nw", text=net_avail.upper(), fill=net_col, font=("Monaco", 11, "bold"))
+
+        # 2-Column Services Micro-Grid
+        srv_list = [
+            'WeChat', 'WhatsApp', 'Facebook', 'Instagram', 'Line', 'Telegram', 'Signal',
+            'Matrix', 'Outlook', 'Gmail', 'Yahoo', 'Slack', 'Microsoft365'
+        ]
+        for idx, sname in enumerate(srv_list):
+            sval = str(services.get(sname, 'Unavailable'))
+            dot_color = "green" if sval == 'Available' else ("orange" if sval == 'Disrupted' else "red")
+            
+            # Divide into Column 1 (0-6) and Column 2 (7-12)
+            if idx < 7:
+                col_x = 685
+                col_y = 530 + idx * 27
+            else:
+                col_x = 825
+                col_y = 530 + (idx - 7) * 27
+
+            # Draw tiny status light
+            self.canvas.create_oval(col_x, col_y + 2, col_x + 8, col_y + 10, fill=dot_color, outline="")
+            self.canvas.create_text(col_x + 14, col_y, anchor="nw", text=sname, fill="white", font=("Monaco", 8))
 
     def draw_advanced_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ADVANCED DETECTION & LOOP", fill="#ff00ff", font=("Monaco", 20, "bold"))

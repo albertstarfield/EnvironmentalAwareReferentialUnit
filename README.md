@@ -46,24 +46,72 @@ graph TD
 
 ## Prerequisites & Requirements
 
-To compile and run the ordinary daemon and its cozy sensor debugger on your MacBook, you will need a few standard developer tools:
+To compile the ordinary daemon, run the interactive sensor debugger, and execute the quality approval suite, you will need the following tools:
 
-1. **Apple Silicon MacBook:** Native SPU HID readings are designed specifically for Apple Silicon M-series chips (M2, M3, M4, M5, etc.).
-2. **Xcode Command Line Tools:** Essential for native compilation of C-bindings, building scripts, and Homebrew:
-   ```bash
-   xcode-select --install
-   ```
-3. **Homebrew:** The standard macOS package manager, required to install terminal utilities and compiler toolchains.
-4. **Alire (`alr`):** The build and dependency manager for GNAT compiler suites, used to compile the ordinary daemon core. Install it easily via:
-   ```bash
-   brew install alire
-   ```
-5. **Python 3.12+ / PIP / Anaconda:** Python environment to run the thermodynamic sidecar and OpenGL dashboard. The scripts will automatically bootstrap local virtualenvs (`.venv` and `.venv_pfd`) for package management.
-6. **CoreLocationCLI:** A helper command-line utility used to query local GPS coordinates and altitude for the positioning reckoners:
-   ```bash
-   brew install corelocationcli
-   ```
-7. **smcDemandNow Daemon:** A privileged utility compiled as part of the core daemon sequence that allows the bridge sidecar to query active fan states and override SMC thermal control loop constraints on-demand during alert events.
+### 1. Core Development Toolchain
+*   **Apple Silicon MacBook**: Native SPU HID readings are optimized specifically for Apple Silicon (M2, M3, M4, M5, etc.).
+*   **Xcode Command Line Tools**: Essential for native C-bindings, building scripts, and Homebrew:
+    ```bash
+    xcode-select --install
+    ```
+*   **Homebrew**: The standard macOS package manager, used to install Alire and terminal utilities.
+*   **Python 3.12+**: Python environment for the thermodynamic sidecar and OpenGL dashboard. The project automatically handles bootstrapping local virtualenvs (`.venv` and `.venv_pfd`) for you.
+*   **CoreLocationCLI**: Query local GPS coordinates and altitude for dead reckoning:
+    ```bash
+    brew install corelocationcli
+    ```
+*   **smcDemandNow Daemon**: Built automatically to fetch/override SMC fan and thermals under alert states.
+
+### 2. GNAT & SPARK Verification Toolchain (Alire)
+*   **Alire (`alr`)**: The package and build manager for Ada and SPARK:
+    ```bash
+    brew install alire
+    ```
+*   **GNAT Native Compiler & GNATprove**: The compiler and formal verification tools are automatically configured within Alire. To verify your selected toolchain, run:
+    ```bash
+    alr toolchain
+    ```
+*   **Execution Context**: All compilation and static analysis commands must be run within the Alire environment wrapper:
+    ```bash
+    alr exec -- gnatprove -P earu_daemon.gpr
+    ```
+
+### 3. Test Frameworks & Dependencies
+*   **AUnit (`aunit`)**: The standard Ada unit testing framework. It is declared as a package dependency in `alire.toml` and is automatically fetched, compiled, and linked by Alire during project build/test execution.
+*   **Strategy (`strategy`)**: The property-based testing framework for Ada. It is automatically resolved and built by Alire as a package dependency.
+*   **Ahven (`ahven`)**: A lightweight unit testing library modeled after JUnit.
+    > [!NOTE]
+    > `ahven` is not in the default community Alire index. If you need it for legacy test modules:
+    > 1. Download the source package from the [Ahven Official Site](http://www.ahven-framework.com/).
+    > 2. Build and install it manually or integrate it as a local Alire index pin.
+    > 3. Alternatively, you can use the `utilada_unit` package, which is in the Alire index and includes Ahven compatibility layers.
+
+### 4. Code Coverage Toolchain
+*   **GNATcov**: The GNAT Coverage analysis tool.
+    *   **Installation via Alire**: You can choose an Alire-managed GNATcov toolchain using:
+        ```bash
+        alr toolchain --select gnatcov
+        ```
+    *   **Coverage Reports**: Run the coverage check with `--annotate=xcov` to output rich source-annotated reports:
+        ```bash
+        alr exec -- gnatcov run -P earu_daemon.gpr --annotate=xcov ./bin/earu_daemon
+        ```
+
+### 5. AFL++ Fuzz Testing Toolchain
+*   **AFL++ (American Fuzzy Lop)**: A state-of-the-art fuzzer utilized to discover memory errors and edge-case exceptions in compiled binaries.
+    *   **Installation**: Install AFL++ via Homebrew:
+        ```bash
+        brew install afl++
+        ```
+    *   **Ada Instrumentation**:
+        To instrument your Ada code for fuzzing, you must compile the daemon using one of the AFL++ compiler wrappers (like `afl-gcc` or `afl-clang-fast`):
+        ```bash
+        CC=afl-gcc alr build
+        ```
+    *   **Running Fuzzer**: Create seed input corpus and run the fuzzer:
+        ```bash
+        afl-fuzz -i inputs_dir -o outputs_dir ./bin/earu_daemon
+        ```
 
 ---
 

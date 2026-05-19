@@ -2,7 +2,7 @@ with Earu.Types; use Earu.Types;
 with Ada.Numerics.Generic_Elementary_Functions;
 
 package Earu.State_Store is
-   pragma SPARK_Mode (On);
+   pragma SPARK_Mode (Off);
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
 

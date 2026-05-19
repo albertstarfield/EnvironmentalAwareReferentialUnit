@@ -5,6 +5,7 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with GNAT.SHA256;
 with Earu.Types;
+with Earu.Network_Status;
 with Earu.Shm;
 with Interfaces;
 with Ada.Numerics.Generic_Elementary_Functions;
@@ -241,7 +242,7 @@ package body Earu.IO is
    ) is
       File : Ada.Text_IO.File_Type;
       Tmp_Path : constant String := Path & ".tmp";
-      JSON_Line : Unbounded_String;
+            JSON_Line : Unbounded_String;
       P_Aug_Payload : Unbounded_String;
       P_Ext_Payload : Unbounded_String;
       P_Int_Payload : Unbounded_String;
@@ -250,6 +251,52 @@ package body Earu.IO is
       begin
          Append (To, """" & Key & """: " & Value & (if Comma then ", " else ""));
       end Append_Pair;
+
+      procedure Append_Net_Comm (Buf : in out Unbounded_String) is
+         use Earu.Network_Status;
+         Stats : constant Status_Array := Shared_Status.Get_All;
+         
+         Num_Available   : Natural := 0;
+         Num_Unavailable : Natural := 0;
+         Overall_Status  : String (1 .. 9) := (others => ' ');
+         Overall_Len     : Positive := 5;
+      begin
+         for I in 1 .. 13 loop
+            if Stats (I) = Available then
+               Num_Available := Num_Available + 1;
+            elsif Stats (I) = Unavailable then
+               Num_Unavailable := Num_Unavailable + 1;
+            end if;
+         end loop;
+
+         if Num_Available = 13 then
+            Overall_Status (1 .. 4) := "True";
+            Overall_Len := 4;
+         elsif Num_Unavailable = 13 then
+            Overall_Status (1 .. 5) := "False";
+            Overall_Len := 5;
+         else
+            Overall_Status (1 .. 9) := "Disrupted";
+            Overall_Len := 9;
+         end if;
+
+         Append (Buf, """net_comm"": {");
+         Append_Pair (Buf, "NET_COMM_AVAILABLE", S(Overall_Status (1 .. Overall_Len)));
+         Append (Buf, """services"": {");
+         
+         for I in 1 .. 13 loop
+            declare
+               S_Name : constant String := Ada.Strings.Fixed.Trim (Names (I), Ada.Strings.Both);
+               S_Val  : constant String := (if Stats (I) = Available then "Available" 
+                                           elsif Stats (I) = Disrupted then "Disrupted"
+                                           else "Unavailable");
+            begin
+               Append_Pair (Buf, S_Name, S(S_Val), I < 13);
+            end;
+         end loop;
+         Append (Buf, "}");
+         Append (Buf, "}, ");
+      end Append_Net_Comm;
 
       function Hash (Input : String) return String is
       begin return GNAT.SHA256.Digest (Input); end Hash;
@@ -487,6 +534,7 @@ package body Earu.IO is
          end;
       else Append (P_Aug_Payload, "{}"); end if;
       Append (P_Aug_Payload, ", ");
+      Append_Net_Comm (P_Aug_Payload);
       Append_Pair (P_Aug_Payload, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
       Append_Pair (P_Aug_Payload, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
       Append (P_Aug_Payload, "}");
@@ -720,7 +768,7 @@ package body Earu.IO is
       Append (JSON_Line, """pedometer"": {");
       Append_Pair (JSON_Line, "steps", Ada.Strings.Fixed.Trim(Integer'Image(State.Pedometer.Steps), Ada.Strings.Left), False);
       Append (JSON_Line, "}, ");
-      
+      Append_Net_Comm (JSON_Line);
       Append_Pair (JSON_Line, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
       Append_Pair (JSON_Line, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
       Append (JSON_Line, "}");

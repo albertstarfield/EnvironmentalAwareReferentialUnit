@@ -70,11 +70,11 @@ package body Earu.Shm is
       return Stats_SHM_Ptr (Stats_Conv.To_Pointer (Addr));
    end Open_Stats_SHM;
 
-   function Open_Lid_SHM (Name : String) return access Interfaces.IEEE_Float_32 is
+   function Open_Lid_SHM (Name : String) return Float_32_Ptr is
       Addr : System.Address := Map_Generic (Name, 12);
    begin
       if Addr = System.Null_Address then return null; end if;
-      return Lid_Data_Conv.To_Pointer (Addr + Storage_Offset (8));
+      return Float_32_Ptr (Lid_Data_Conv.To_Pointer (Addr + Storage_Offset (8)));
    end Open_Lid_SHM;
 
    function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr is

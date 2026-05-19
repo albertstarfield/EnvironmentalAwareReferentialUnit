@@ -43,7 +43,7 @@ package body Earu.Math is
       Ax := Accel.X; Ay := Accel.Y; Az := Accel.Z;
       Gx := Gyro.X * Rad_Conv; Gy := Gyro.Y * Rad_Conv; Gz := Gyro.Z * Rad_Conv;
       Norm := Sqrt (Ax*Ax + Ay*Ay + Az*Az);
-      if Norm < 0.1 then return; end if;
+      if Norm < 1.0E-16 then return; end if;
       Ax := Ax / Norm; Ay := Ay / Norm; Az := Az / Norm;
       Vx := 2.0 * (Q.X * Q.Z - Q.W * Q.Y);
       Vy := 2.0 * (Q.W * Q.X + Q.Y * Q.Z);
@@ -305,12 +305,13 @@ package body Earu.Math is
       
       A_Dyn_Mag := Sqrt (W.X*W.X + W.Y*W.Y + W.Z*W.Z);
       
-      -- 2. Jitter Filter (Dampen acceleration input by 90% during violent jitter)
-      if Gyro_Mag > 15.0 or A_Dyn_Mag > 5.0 then
-         W.X := W.X * 0.1;
-         W.Y := W.Y * 0.1;
-         W.Z := W.Z * 0.1;
-      end if;
+      -- 2. Jitter Filter (Disabled to allow raw, un-dampened small and large movements)
+      --  if Gyro_Mag > 15.0 or A_Dyn_Mag > 5.0 then
+      --     W.X := W.X * 0.1;
+      --     W.Y := W.Y * 0.1;
+      --     W.Z := W.Z * 0.1;
+      --  end if;
+      null;
       
       -- Proper horizontal accelerations are already aligned with coordinate system (accelerating forward/right increases coordinate rate)
       -- No negation is needed to prevent inverting velocity integration during acceleration/braking.
@@ -353,9 +354,9 @@ package body Earu.Math is
       declare
          Damping_V : Real;
       begin
-         if Gyro_Mag < 0.8 then
+         if Gyro_Mag < 1.0E-16 then
             Raw_Mag := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
-            if Abs (Raw_Mag - Loc.Calibrated_G) < 0.05 and not Is_Moving_Type then
+            if Abs (Raw_Mag - Loc.Calibrated_G) < 1.0E-16 and not Is_Moving_Type then
                -- Stationary: 50% loss per second -> Damping = 0.5 ** (1/fs)
                Damping := Exp (Log (0.5) / FS);
                Damping_V := Exp (Log (0.01) / FS); -- Aggressive vertical damping when stationary (99% decay per second)
@@ -569,7 +570,7 @@ package body Earu.Math is
             Adj_Alpha := Max_Alpha * Dist_Confidence;
 
             -- Velocity Gain Anchor
-            if Loc.V_Mag > 0.1 and CL_V_Mag > 0.1 and Adj_Alpha > 0.0 then
+            if Loc.V_Mag > 1.0E-16 and CL_V_Mag > 1.0E-16 and Adj_Alpha > 0.0 then
                Error_Ratio := CL_V_Mag / Loc.V_Mag;
 
                if Error_Ratio > 1.5 or Error_Ratio < 0.5 then
@@ -584,7 +585,7 @@ package body Earu.Math is
             end if;
 
             -- Vertical Rate Gain Anchor
-            if Abs (Loc.Alt_Rate) > 0.05 and Abs (CL_V_Vert) > 0.05 and Adj_Alpha > 0.0 then
+            if Abs (Loc.Alt_Rate) > 1.0E-16 and Abs (CL_V_Vert) > 1.0E-16 and Adj_Alpha > 0.0 then
                declare
                   Error_Ratio_V : constant Real := CL_V_Vert / Loc.Alt_Rate;
                begin
@@ -668,7 +669,7 @@ package body Earu.Math is
       V_Mag        : Real;
       V_Mag_Smooth : Real;
       
-      Threshold : constant Real := 0.02;
+      Threshold : constant Real := 1.0E-16;
       Min_Step_Interval : constant Real := 0.35;
    begin
       -- 0. Calculate precise DT
