@@ -192,6 +192,14 @@ package Earu.Types is
       Heatflux_J          : aliased Real := 0.0;
       Pulse_Wake          : aliased Real := 0.0;
       Pulse_Length        : aliased Real := 0.0;
+      Flow_Scale_L        : aliased Real := 0.01;
+      Char_Velocity_U0    : aliased Real := 0.0;
+      Turbulence_Int_Up   : aliased Real := 0.0;
+      Reynolds_Number_Re0 : aliased Real := 0.0;
+      Reynolds_Number     : aliased Real := 0.0;
+      Weber_Number        : aliased Real := 0.0;
+      Strouhal_Number     : aliased Real := 0.0;
+      Cauchy_Number       : aliased Real := 0.0;
    end record;
 
    type System_Stats_Type is record

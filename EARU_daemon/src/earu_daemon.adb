@@ -38,11 +38,13 @@ procedure Earu_Daemon is
       pragma Unreferenced (Ret);
    begin
       Ada.Text_IO.Put_Line ("[*] Cleaning up stale RAM disks...");
+      Ret := C_System (Interfaces.C.To_C ("if [ -f /Volumes/EARU_dataIO/EARU_data.dat ]; then cp /Volumes/EARU_dataIO/EARU_data.dat ./EARU_data_backup.dat; fi"));
       Ret := C_System (Interfaces.C.To_C ("for d in /Volumes/EARU_dataIO*; do diskutil unmount force ""$d"" 2>/dev/null; done"));
       Ret := C_System (Interfaces.C.To_C ("hdiutil detach -force /dev/disk* 2>/dev/null"));
       Ada.Text_IO.Put_Line ("[*] Initializing fresh EARU RAM Disk...");
       Ret := C_System (Interfaces.C.To_C ("DEV=$(hdiutil attach -nomount ram://131072 | awk '{print $1}'); if [ -n ""$DEV"" ]; then diskutil apfs create ""$DEV"" EARU_dataIO; fi"));
       Ret := C_System (Interfaces.C.To_C ("chmod 777 /Volumes/EARU_dataIO"));
+      Ret := C_System (Interfaces.C.To_C ("if [ -f ./EARU_data_backup.dat ]; then cp ./EARU_data_backup.dat /Volumes/EARU_dataIO/EARU_data.dat; fi"));
       Ret := C_System (Interfaces.C.To_C ("ln -sf /Volumes/EARU_dataIO/EARU_data.dat EARU_data.dat"));
    end Setup_Ramdisk;
 
@@ -71,9 +73,11 @@ procedure Earu_Daemon is
       Err_Int : Vector3 := (0.0, 0.0, 0.0);
       Vib : Vibration_State_Type := (others => <>);
    begin
+      Earu.IO.Configure_Realtime (2, 1, 2);
       while Accel_SHM = null loop delay 0.1; end loop;
       Last_Total := Accel_SHM.Total;
       loop
+         Earu.IO.Start_Realtime_Loop_Cycle;
          declare
             N_New : constant Unsigned_64 := Accel_SHM.Total - Last_Total;
             Batch : constant Unsigned_64 := (if N_New > Unsigned_64 (RING_CAP) then Unsigned_64 (RING_CAP) else N_New);
@@ -220,6 +224,7 @@ procedure Earu_Daemon is
             end;
          end if;
 
+         Earu.IO.End_Realtime_Loop_Cycle;
          delay 0.001;
       end loop;
    end Sensors_Task;
@@ -460,8 +465,10 @@ procedure Earu_Daemon is
       Elapsed : Ada.Real_Time.Time_Span;
       Duration_Ms : Real;
    begin
+      Earu.IO.Configure_Realtime (100, 10, 100);
       delay 5.0;
       loop
+         Earu.IO.Start_Realtime_Loop_Cycle;
          begin
             Start_Time := Ada.Real_Time.Clock;
             declare
@@ -488,6 +495,7 @@ procedure Earu_Daemon is
             when E : others =>
                Ada.Text_IO.Put_Line ("[!] Telemetry_Task error: " & Ada.Exceptions.Exception_Information (E));
          end;
+         Earu.IO.End_Realtime_Loop_Cycle;
          delay 0.1;
       end loop;
    end Telemetry_Task;
@@ -546,8 +554,38 @@ procedure Earu_Daemon is
    end Network_Probe_Task;
 
 begin
+   Earu.IO.Configure_Realtime (2, 1, 2);
    Setup_Ramdisk;
    Earu.State_Store.State_Buffer.Initialize_State;
+
+   declare
+      Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Q_W, Q_X, Q_Y, Q_Z : Earu.Types.Real;
+      Load_Ok : Boolean;
+   begin
+      Earu.IO.Load_Initial_State (
+         "/Volumes/EARU_dataIO/EARU_data.dat",
+         Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue,
+         Q_W, Q_X, Q_Y, Q_Z, Load_Ok
+      );
+      if Load_Ok then
+         declare
+            State : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+         begin
+            State.Location.Lat := Lat;
+            State.Location.Lon := Lon;
+            State.Location.Alt := Alt;
+            State.Location.Heading := Heading;
+            State.Location.Total_Dist := Total_Dist;
+            State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue := Cumulative_Fatigue;
+            State.Orientation.Q := (W => Q_W, X => Q_X, Y => Q_Y, Z => Q_Z);
+            Earu.State_Store.State_Buffer.Update_Location (State.Location);
+            Earu.State_Store.State_Buffer.Update_Damage_Fatigue (State.Seismic_Activity.Damage_Fatigue);
+            Earu.State_Store.State_Buffer.Update_Sensors (State.Accel, State.Gyro, State.Orientation.Q);
+            Ada.Text_IO.Put_Line ("[ok] Live state successfully restored from persistent data storage!");
+         end;
+      end if;
+   end;
+
    Start_ML_Bridge;
    Ada.Text_IO.Put_Line ("[*] Initializing Shared Memory (Waiting for Python Sidecar bootstrap)...");
    for I in 1 .. 60 loop

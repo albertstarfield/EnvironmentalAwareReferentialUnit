@@ -151,6 +151,19 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `PulsingSuggestionMaintenanceWindowWake` | Seconds | Suggested background wake interval to stretch battery life. |
 | `PulsingSuggestionMaintenanceWindowWakeLength` | Seconds | Suggested duration for each background wake. |
 
+### 10.1. `fluid_dynamics` (Advanced Flow & Turbulence Parameters)
+Sub-object inside the `smc` segment detailing dimensionless numbers and boundary layer mechanics:
+| Variable | Unit | Description |
+| :--- | :--- | :--- |
+| `flow_scale_l` | meters | Convective cooling channel physical characteristic scale ($L = 0.01\text{ m}$). |
+| `char_velocity_u0` | m/s | Characteristic velocity $u_0 \equiv u(\ell_0)$ of turbulent eddy scales. |
+| `turbulence_int_up` | m/s | Root-mean-square (r.m.s.) turbulence velocity intensity $u' \equiv \sqrt{\frac{2}{3}k}$. |
+| `reynolds_number_re0` | - | Eddy Reynolds number $Re_0 \equiv \frac{u_0 \ell_0}{\nu}$ under local fluid viscosity. |
+| `reynolds_number` | - | Main flow convective Reynolds number $Re \equiv \frac{U L}{\nu}$. |
+| `weber_number` | - | Weber number $We \equiv \frac{\rho U^2 L}{\sigma}$ representing condensation/moisture droplet stability. |
+| `strouhal_number` | - | Strouhal number $St \equiv \frac{f L}{U}$ representing fan blade shedding frequency oscillations. |
+| `cauchy_number` | - | Cauchy number $Cy \equiv \frac{U^2}{\gamma R T}$ representing inertial vs compressibility elastic forces. |
+
 ### 11. `user_entity_detection` (BCG Heartbeat & Mood)
 Detects physiological signals and presence through the chassis using the IMU.
 | Variable | Unit | Description | Possible Outputs |

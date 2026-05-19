@@ -117,6 +117,13 @@ package body Earu.Math is
       P_Pa : Real;
       V_Dot : Real;
       Delta_T : Real;
+      U : Real;
+      Kinetic_K : Real;
+      U_Prime : Real;
+      Nu : Real;
+      Blade_Freq : Real;
+      Dynamic_Viscosity : constant Real := 1.81E-5; -- Pa*s
+      Water_Surface_Tension : constant Real := 0.072; -- N/m
    begin
       -- 1. Dew Point Calculation (Magnus-Tetens)
       TC := Ambient_Temp_K - 273.15;
@@ -153,6 +160,27 @@ package body Earu.Math is
       else
          SMC.Thrust_N := 0.0;
       end if;
+
+      -- 4. Advanced Fluid Dynamics Equations (Turbulence, Reynolds, Weber, Strouhal, Cauchy)
+      SMC.Flow_Scale_L := 0.01; -- 1.0 cm characteristic length scale
+      U := (if V_Dot > 0.0 then V_Dot / 0.0005 else 0.0);
+      
+      Kinetic_K := 0.06 * (U ** 2);
+      U_Prime := Sqrt ((2.0 / 3.0) * Kinetic_K);
+      SMC.Char_Velocity_U0 := U_Prime;
+      SMC.Turbulence_Int_Up := U_Prime;
+      
+      Nu := (if Eco.Air_Fluid_Density > 0.01 then Dynamic_Viscosity / Eco.Air_Fluid_Density else Dynamic_Viscosity / 1.225);
+      
+      SMC.Reynolds_Number_Re0 := (if Nu > 0.0 then (SMC.Char_Velocity_U0 * SMC.Flow_Scale_L) / Nu else 0.0);
+      SMC.Reynolds_Number := (if Nu > 0.0 then (U * SMC.Flow_Scale_L) / Nu else 0.0);
+      
+      SMC.Weber_Number := (if Eco.Air_Fluid_Density > 0.01 then (Eco.Air_Fluid_Density * (U ** 2) * SMC.Flow_Scale_L) / Water_Surface_Tension else 0.0);
+      
+      Blade_Freq := ((SMC.Fan_RPMs(1) + SMC.Fan_RPMs(2)) / 2.0 / 60.0) * 37.0; -- average blade passing frequency
+      SMC.Strouhal_Number := (if U > 0.001 then (Blade_Freq * SMC.Flow_Scale_L) / U else 0.0);
+      
+      SMC.Cauchy_Number := (if SMC.Gas_Constants.Gamma > 0.01 and SMC.Gas_Constants.R > 0.01 and Ambient_Temp_K > 0.01 then (U ** 2) / (SMC.Gas_Constants.Gamma * SMC.Gas_Constants.R * Ambient_Temp_K) else 0.0);
 
       -- Update category
       if RH > 95.0 then

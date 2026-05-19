@@ -2570,7 +2570,26 @@ class PrimaryFlightDisplay:
             massflow = getattr(self, 'smooth_massflow', float(smc.get('massflow_kg_s', 0.0)))
             heatflux = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
             
-            self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {massflow:.4f}kg/s\nHEATFLUX: {heatflux:.4f} J/s", fill="cyan", font=("Monaco", 10))
+            fluid = smc.get('fluid_dynamics', {})
+            flow_l = float(fluid.get('flow_scale_l', 0.01))
+            u0 = float(fluid.get('char_velocity_u0', 0.0))
+            re0 = float(fluid.get('reynolds_number_re0', 0.0))
+            re = float(fluid.get('reynolds_number', 0.0))
+            we = float(fluid.get('weber_number', 0.0))
+            st = float(fluid.get('strouhal_number', 0.0))
+            cy = float(fluid.get('cauchy_number', 0.0))
+            
+            fluid_text = (
+                f"FLUID DYNAMICS:\n"
+                f"Cp:       {gas.get('Cp',0):.1f} | GAMMA: {gas.get('gamma',0):.4f}\n"
+                f"THRUST:   {smc.get('thrust_n',0):.4f} N\n"
+                f"MASSFLOW: {massflow:.4f} kg/s | HEATFLUX: {heatflux:.2f} J/s\n"
+                f"FLOW L:   {flow_l:.3f} m | CHAR VEL u0: {u0:.3f} m/s\n"
+                f"REYNOLDS: Re = {re:.1f} | Re0 = {re0:.1f}\n"
+                f"WEBER:    We = {we:.3f} | STROUHAL: St = {st:.4f}\n"
+                f"CAUCHY:   Cy = {cy:.8f}"
+            )
+            self.canvas.create_text(450, 195, anchor="nw", text=fluid_text, fill="cyan", font=("Monaco", 8))
             
             # Thermodynamics & Efficiency
             p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))

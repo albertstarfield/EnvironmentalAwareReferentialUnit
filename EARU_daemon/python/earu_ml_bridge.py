@@ -49,13 +49,17 @@ import math
 import json
 import sys
 from collections import deque
+global_scenario_history = deque(maxlen=300)
+global_last_confirmed_ground = False
+
+
 
 # Add parent dir to path to import EARU (Root is two levels up from EARU_daemon/python/)
 root_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.append(root_dir)
 sys.path.append(os.path.join(root_dir, "EARU_LegacyPython"))
 try:
-    from EARU import VibrationDetector
+    from EARU import VibrationDetector  # pyrefly: ignore
 except Exception as e:
     print(f"[!] Warning: Could not import VibrationDetector from EARU.py. Exception: {e}")
     class VibrationDetector:
@@ -256,14 +260,15 @@ def stats_worker():
             if not imu_shm:
                 try: imu_shm = shared_memory.SharedMemory(name=IMU_SHM_NAME)
                 except: pass
-            if imu_shm:
-                w_idx, total, restarts = struct.unpack("<IQI", imu_shm.buf[:16].tobytes())
+            if imu_shm and imu_shm.buf is not None:
+                imu_buf = imu_shm.buf
+                w_idx, total, restarts = struct.unpack("<IQI", imu_buf[:16].tobytes())
                 if total > last_total:
                     new_samples = min(total - last_total, 8000)
                     for i in range(new_samples):
                         idx = (last_total + i) % 8000
                         offset = 16 + idx * 20
-                        x, y, z, ts = struct.unpack("<iiid", imu_shm.buf[offset:offset+20].tobytes())
+                        x, y, z, ts = struct.unpack("<iiid", imu_buf[offset:offset+20].tobytes())
                         fx, fy, fz = x/65536.0, y/65536.0, z/65536.0
                         detector.process(fx, fy, fz, ts)
                         dt = 0.01
@@ -279,11 +284,12 @@ def stats_worker():
             if not shm_lid:
                 try: shm_lid = shared_memory.SharedMemory(name="vib_detect_shm_lid")
                 except: pass
-            if shm_lid:
+            if shm_lid and shm_lid.buf is not None:
+                lid_buf = shm_lid.buf
                 try:
-                    cnt, = struct.unpack_from('<I', shm_lid.buf, 0)
+                    cnt, = struct.unpack_from('<I', lid_buf, 0)
                     if cnt != last_lid_count:
-                        new_lid_angle, = struct.unpack_from('<f', shm_lid.buf, 8)
+                        new_lid_angle, = struct.unpack_from('<f', lid_buf, 8)
                         lid_angle = new_lid_angle
                         now = time.time()
                         if last_lid_angle is not None:
@@ -303,13 +309,14 @@ def stats_worker():
             if not shm_als:
                 try: shm_als = shared_memory.SharedMemory(name="vib_detect_shm_als")
                 except: pass
-            if shm_als:
+            if shm_als and shm_als.buf is not None:
+                als_buf = shm_als.buf
                 try:
-                    cnt, = struct.unpack_from('<I', shm_als.buf, 0)
+                    cnt, = struct.unpack_from('<I', als_buf, 0)
                     if cnt != last_als_count:
-                        new_lux, = struct.unpack_from('<f', shm_als.buf, 8 + 40)
+                        new_lux, = struct.unpack_from('<f', als_buf, 8 + 40)
                         lux_factor = max(0.0, min(1.0, new_lux))
-                        spectral = [struct.unpack_from('<I', shm_als.buf, 8 + o)[0] for o in [20, 24, 28, 32]]
+                        spectral = [struct.unpack_from('<I', als_buf, 8 + o)[0] for o in [20, 24, 28, 32]]
                         last_als_count = cnt
                 except Exception as e:
                     pass
@@ -434,8 +441,8 @@ def stats_worker():
             load = struct.pack("<3fI", load_avg[0], load_avg[1], load_avg[2], 0)
             uptime_sys = time.time() - psutil.boot_time()
             uptime_earu = time.time() - start_time
-            sys_det = struct.pack("<Q2f", int(hid_idle_ns), float(uptime_sys), float(uptime_earu))
-            lid_als = struct.pack("<3f4I", float(lid_angle), float(lid_speed), float(lux_factor),
+            sys_det = struct.pack("<Q2f", int(hid_idle_ns), uptime_sys, uptime_earu)
+            lid_als = struct.pack("<3f4I", lid_angle, lid_speed, lux_factor,
                                   int(spectral[0]), int(spectral[1]), int(spectral[2]), int(spectral[3]))
             addl = struct.pack("<12fi6f",
                 pulse_wake, pulse_length, inlet_t, outlet_t,
@@ -446,7 +453,8 @@ def stats_worker():
             pmset_b = pmset.encode().ljust(1024, b'\0')
             
             payload = header + stats_p1 + times_ns + lats + smc + pwr + bat + load + sys_det + lid_als + addl + ts_iso + pmset_b
-            shm.buf[:len(payload)] = payload
+            if shm is not None and shm.buf is not None:
+                shm.buf[:len(payload)] = payload
             update_count += 1
             time.sleep(1)
         except Exception as e:
@@ -686,6 +694,7 @@ def geodetic_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 def weather_worker():
+    global global_last_confirmed_ground
     print("[*] Weather worker started.")
     shm = None
     try: shm = shared_memory.SharedMemory(name=WEATHER_SHM_NAME)
@@ -727,11 +736,13 @@ def weather_worker():
             active_points = []
             for r in grid_7x7_10m:
                 for pt in r:
-                    if pt[0] > 0.0:
+                    pt_val_0 = pt[0]
+                    pt_0_val = float(pt_val_0) if isinstance(pt_val_0, (int, float)) else 0.0
+                    if pt_0_val > 0.0:
                         active_points.append(pt)
             
             if active_points:
-                active_speeds = sorted([pt[0] for pt in active_points])
+                active_speeds = sorted([float(p[0]) if isinstance(p[0], (int, float)) else 0.0 for p in active_points])
                 n_speeds = len(active_speeds)
                 if n_speeds % 2 == 1:
                     median_speed_ms = active_speeds[n_speeds // 2]
@@ -819,11 +830,6 @@ def weather_worker():
                 }
             }
 
-            # Initialize scenario history if not present
-            if not hasattr(weather_worker, 'scenario_history'):
-                from collections import deque
-                weather_worker.scenario_history = deque(maxlen=300)
-            
             # Fetch current coordinates, altitude and speed
             lat = global_location.lat
             lon = global_location.lon
@@ -840,36 +846,43 @@ def weather_worker():
             delta_alt = abs(alt_m - terrain_anchor)
             
             # Save sample to history
-            weather_worker.scenario_history.append((now, delta_alt, speed_kts, wifi_count, ble_count, lat, lon))
+            global_scenario_history.append((now, delta_alt, speed_kts, wifi_count, ble_count, lat, lon))
             
             # Default weather code is 0 (standard/unclassified)
             weather_code = 0
             
             # 1. Flight Commercial Aviation Voyage (Code = 1)
-            if ble_count >= 4 and wifi_count <= 2 and alt_ft >= 2000 and speed_kts >= 100.0:
+            if ble_count >= 4 and wifi_count <= 2 and alt_ft >= 3000.0 and speed_kts >= 100.0:
                 weather_code = 1
+                global_last_confirmed_ground = False
                 
             # 2. Flight General Aviation Voyage (Code = 2)
-            elif ble_count <= 3 and wifi_count >= 3 and alt_ft >= 2000 and speed_kts >= 100.0:
+            elif ble_count <= 3 and wifi_count >= 3 and alt_ft >= 3000.0 and speed_kts >= 100.0:
                 weather_code = 2
+                global_last_confirmed_ground = False
                 
             # 3. Stella General Aviation Voyage (Code = 3)
             elif ble_count <= 3 and wifi_count <= 2 and alt_m >= 15000.0 and speed_kts >= 100.0:
                 weather_code = 3
+                global_last_confirmed_ground = False
                 
             else:
                 # 4, 5, 6, 7. Dwell and Consistency Checks over 5 minutes (300 samples)
-                history = weather_worker.scenario_history
+                history = global_scenario_history
                 if len(history) >= 280:
                     t_span = history[-1][0] - history[0][0]
                     if t_span >= 280:
                         # 4, 5, 6: Check consistency of elevated suspension
                         consistent_delta = all(50.0 <= item[1] <= 100.0 for item in history)
-                        consistent_speed = all(1.0 <= item[2] <= 90.0 for item in history)
+                        
+                        # Ground mode confirmation speed allowance (up to 300 kph / 162 kts if previously confirmed)
+                        max_speed_limit = 162.0 if global_last_confirmed_ground else 90.0
+                        consistent_speed = all(1.0 <= item[2] <= max_speed_limit for item in history)
                         
                         if consistent_delta and consistent_speed:
                             # If terrain anchor is <= 0.0, we are over water/sea!
                             if terrain_anchor <= 0.0:
+                                global_last_confirmed_ground = False
                                 # Sea Voyage Maritime Nautics (Code = 5): Medium/high LE count
                                 if ble_count >= 4:
                                     weather_code = 5
@@ -880,6 +893,9 @@ def weather_worker():
                                 # Ground Transportation (Code = 4)
                                 if ble_count >= 4:
                                     weather_code = 4
+                                    global_last_confirmed_ground = True
+                        else:
+                            global_last_confirmed_ground = False
                                     
                         # 7. Significant Location Detection (Code = 7)
                         # LE present, dense Wi-Fi, speed <= 30 kts stationary inside a 5m radius for 5 minutes
@@ -894,10 +910,19 @@ def weather_worker():
                             
                             if has_le and dense_wifi and low_speed and stationary_5m:
                                 weather_code = 7
-                                # Save to significant locations JSON
                                 try:
                                     sig_loc_dir = os.path.join(BASE_PATH, "save_state")
-                                    os.makedirs(sig_loc_dir, exist_ok=True)
+                                    try:
+                                        os.makedirs(sig_loc_dir, exist_ok=True)
+                                    except PermissionError:
+                                        fallback_dirs = ["/Volumes/EARU_dataIO/save_state", "/tmp/save_state"]
+                                        for fd in fallback_dirs:
+                                            try:
+                                                os.makedirs(fd, exist_ok=True)
+                                                sig_loc_dir = fd
+                                                break
+                                            except Exception:
+                                                pass
                                     sig_loc_file = os.path.join(sig_loc_dir, "significant_locations.json")
                                     
                                     sig_data = []
@@ -926,8 +951,16 @@ def weather_worker():
                                             "type": "User Anchor Base / Home Hub",
                                             "description": "Dwell time > 5 min, low velocity (< 30 kts), strong local WiFi and BLE beacon anchors."
                                         })
-                                        with open(sig_loc_file, "w") as sf:
-                                            json.dump(sig_data, sf, indent=4)
+                                        try:
+                                            with open(sig_loc_file, "w") as sf:
+                                                json.dump(sig_data, sf, indent=4)
+                                        except PermissionError:
+                                            sig_loc_dir = "/tmp/save_state"
+                                            os.makedirs(sig_loc_dir, exist_ok=True)
+                                            sig_loc_file = os.path.join(sig_loc_dir, "significant_locations.json")
+                                            with open(sig_loc_file, "w") as sf:
+                                                json.dump(sig_data, sf, indent=4)
+                                            print(f"[!] Primary significant location file permission denied. Fell back to {sig_loc_file}")
                                 except Exception as e:
                                     print(f"[!] Error saving significant location: {e}")
 
@@ -950,13 +983,24 @@ def weather_worker():
             for r_idx in range(7):
                 for c_idx in range(7):
                     pt = grid_7x7_10m[r_idx][c_idx]
-                    grid_data += struct.pack("<6f", pt[0], pt[1][0], pt[1][1], pt[1][2], pt[2], pt[3])
+                    pt_val_0 = pt[0]
+                    pt_0 = float(pt_val_0) if isinstance(pt_val_0, (int, float)) else 0.0
+                    pt_1 = pt[1]
+                    pt_1_0 = float(pt_1[0]) if isinstance(pt_1, list) and len(pt_1) > 0 else 0.0
+                    pt_1_1 = float(pt_1[1]) if isinstance(pt_1, list) and len(pt_1) > 1 else 0.0
+                    pt_1_2 = float(pt_1[2]) if isinstance(pt_1, list) and len(pt_1) > 2 else 0.0
+                    pt_val_2 = pt[2]
+                    pt_2 = float(pt_val_2) if isinstance(pt_val_2, (int, float)) else 0.0
+                    pt_val_3 = pt[3]
+                    pt_3 = float(pt_val_3) if isinstance(pt_val_3, (int, float)) else 0.0
+                    grid_data += struct.pack("<6f", pt_0, pt_1_0, pt_1_1, pt_1_2, pt_2, pt_3)
                     
             json_sorted = json.dumps(weather_data, sort_keys=True, separators=(',', ':')).encode()
             meteo = struct.pack("<2I", len(json_sorted), 0) + json_sorted.ljust(32768, b'\0')
             
             payload = header + basic + grid_data + meteo
-            shm.buf[:len(payload)] = payload
+            if shm is not None and shm.buf is not None:
+                shm.buf[:len(payload)] = payload
             update_count += 1
             
             time.sleep(1)
@@ -982,7 +1026,8 @@ def ml_worker():
                 163.63636363636365, 0.4660326838493347,
                 163.63636363636365, 0.46603265404701233
             )
-            shm.buf[:len(header)+len(mood)+len(detected)] = header + mood + detected
+            if shm is not None and shm.buf is not None:
+                shm.buf[:len(header)+len(mood)+len(detected)] = header + mood + detected
             update_count += 1
             time.sleep(1)
         except Exception as e:
@@ -1013,12 +1058,14 @@ def mock_sensor_worker():
     restarts = 0
     start_t = time.time()
     
-    # Initialize headers
-    struct.pack_into("<IQI", shm_acc.buf, 0, w_idx, total, restarts)
-    struct.pack_into("<IQI", shm_gyr.buf, 0, w_idx, total, restarts)
-    
-    # Pack lid and als
-    struct.pack_into("<f", shm_lid.buf, 0, 0.0) # lid angle
+    # Initialize headers and buffers if not None
+    acc_buf = shm_acc.buf
+    gyr_buf = shm_gyr.buf
+    lid_buf = shm_lid.buf
+    if acc_buf is not None and gyr_buf is not None and lid_buf is not None:
+        struct.pack_into("<IQI", acc_buf, 0, w_idx, total, restarts)
+        struct.pack_into("<IQI", gyr_buf, 0, w_idx, total, restarts)
+        struct.pack_into("<f", lid_buf, 0, 0.0) # lid angle
     # ALS: pack lux, spectral channels...
     # In verify_hash.py expectation:
     # "als": {"lux_factor": 0.0, "spectral": [0, 0, 0, 0]}
@@ -1040,14 +1087,17 @@ def mock_sensor_worker():
             gz = int(26.42822265625 * 65536)
             
             offset = 16 + w_idx * 20
-            struct.pack_into("<iiid", shm_acc.buf, offset, ax, ay, az, elapsed)
-            struct.pack_into("<iiid", shm_gyr.buf, offset, gx, gy, gz, elapsed)
-            
-            w_idx = (w_idx + 1) % 8000
-            total += 1
-            
-            struct.pack_into("<IQI", shm_acc.buf, 0, w_idx, total, restarts)
-            struct.pack_into("<IQI", shm_gyr.buf, 0, w_idx, total, restarts)
+            acc_buf = shm_acc.buf
+            gyr_buf = shm_gyr.buf
+            if acc_buf is not None and gyr_buf is not None:
+                struct.pack_into("<iiid", acc_buf, offset, ax, ay, az, elapsed)
+                struct.pack_into("<iiid", gyr_buf, offset, gx, gy, gz, elapsed)
+                
+                w_idx = (w_idx + 1) % 8000
+                total += 1
+                
+                struct.pack_into("<IQI", acc_buf, 0, w_idx, total, restarts)
+                struct.pack_into("<IQI", gyr_buf, 0, w_idx, total, restarts)
             
             time.sleep(0.01) # 100 Hz
         except Exception as e:
@@ -1080,7 +1130,7 @@ def main():
     
     if use_real:
         try:
-            from earu._spu import sensor_worker
+            from earu._spu import sensor_worker  # pyrefly: ignore
             print("[*] PHYSICAL HARDWARE SENSORS ACTIVATED (Real MacBook Accelerometer/Gyro)")
             sensor_proc = mp.Process(
                 target=sensor_worker,

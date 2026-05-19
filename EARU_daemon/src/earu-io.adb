@@ -235,6 +235,293 @@ package body Earu.IO is
       return To_String (Result);
    end Base64_Encode;
 
+   function Hash (Input : String) return String is
+   begin
+      return GNAT.SHA256.Digest (Input);
+   end Hash;
+
+   function Base64_Decode (Data : String) return String is
+      Alphabet : constant String := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      
+      function Char_To_Val (C : Character) return Integer is
+      begin
+         for I in 1 .. 64 loop
+            if Alphabet (I) = C then
+               return I - 1;
+            end if;
+         end loop;
+         return 0;
+      end Char_To_Val;
+      
+      Result : String (1 .. Data'Length);
+      Len    : Natural := 0;
+      I      : Integer := Data'First;
+      Val    : Integer;
+      Triple : Interfaces.Unsigned_32;
+      C1, C2, C3, C4 : Character;
+      V1, V2, V3, V4 : Integer;
+   begin
+      if Data'Length = 0 then
+         return "";
+      end if;
+      while I <= Data'Last - 3 loop
+         C1 := Data (I);
+         C2 := Data (I + 1);
+         C3 := Data (I + 2);
+         C4 := Data (I + 3);
+         
+         V1 := Char_To_Val (C1);
+         V2 := Char_To_Val (C2);
+         V3 := Char_To_Val (C3);
+         V4 := Char_To_Val (C4);
+         
+         Triple := Interfaces.Shift_Left (Interfaces.Unsigned_32 (V1), 18) or
+                   Interfaces.Shift_Left (Interfaces.Unsigned_32 (V2), 12) or
+                   Interfaces.Shift_Left (Interfaces.Unsigned_32 (V3), 6) or
+                   Interfaces.Unsigned_32 (V4);
+                   
+         Len := Len + 1;
+         Result (Len) := Character'Val (Interfaces.Shift_Right (Triple, 16) and 16#FF#);
+         
+         if C3 /= '=' then
+            Len := Len + 1;
+            Result (Len) := Character'Val (Interfaces.Shift_Right (Triple, 8) and 16#FF#);
+         end if;
+         
+         if C4 /= '=' then
+            Len := Len + 1;
+            Result (Len) := Character'Val (Triple and 16#FF#);
+         end if;
+         
+         I := I + 4;
+      end loop;
+      return Result (1 .. Len);
+   exception
+      when others => return "";
+   end Base64_Decode;
+
+   procedure Load_Initial_State (
+      Path               : String;
+      Lat, Lon, Alt      : out Earu.Types.Real;
+      Heading            : out Earu.Types.Real;
+      Total_Dist         : out Earu.Types.Real;
+      Cumulative_Fatigue : out Earu.Types.Real;
+      Q_W, Q_X, Q_Y, Q_Z : out Earu.Types.Real;
+      Success            : out Boolean
+   ) is
+      File : Ada.Text_IO.File_Type;
+      Primary_Line : Unbounded_String;
+      Recovery_Line : Unbounded_String;
+      JSON_Str : Unbounded_String;
+      Verified : Boolean := False;
+
+      function Get_Real_Value (JSON : String; Key : String; Default : Real := 0.0) return Real is
+         Idx : Integer := Ada.Strings.Fixed.Index (JSON, """" & Key & """:");
+      begin
+         if Idx = 0 then
+            return Default;
+         end if;
+         Idx := Idx + Key'Length + 2;
+         while Idx <= JSON'Last and then JSON (Idx) = ' ' loop
+            Idx := Idx + 1;
+         end loop;
+         declare
+            Start_Pos : constant Integer := Idx;
+         begin
+            while Idx <= JSON'Last and then JSON (Idx) /= ',' and then JSON (Idx) /= '}' and then JSON (Idx) /= ']' and then JSON (Idx) /= ' ' loop
+               Idx := Idx + 1;
+            end loop;
+            if Start_Pos < Idx then
+               return Real'Value (JSON (Start_Pos .. Idx - 1));
+            else
+               return Default;
+            end if;
+         end;
+      exception
+         when others => return Default;
+      end Get_Real_Value;
+
+      procedure Get_Quaternion_Value (JSON : String; Q_W, Q_X, Q_Y, Q_Z : out Real; Q_Success : out Boolean) is
+         Idx : Integer := Ada.Strings.Fixed.Index (JSON, """q"": [");
+      begin
+         Q_Success := False;
+         Q_W := 1.0; Q_X := 0.0; Q_Y := 0.0; Q_Z := 0.0;
+         if Idx = 0 then
+            Idx := Ada.Strings.Fixed.Index (JSON, """q"":[");
+         end if;
+         if Idx = 0 then
+            return;
+         end if;
+         Idx := Idx + 6;
+         while Idx <= JSON'Last and then JSON (Idx) = ' ' loop
+            Idx := Idx + 1;
+         end loop;
+         
+         declare
+            W_Start : constant Integer := Idx;
+            W_End, X_Start, X_End, Y_Start, Y_End, Z_Start, Z_End : Integer;
+         begin
+            while Idx <= JSON'Last and then JSON (Idx) /= ',' loop Idx := Idx + 1; end loop;
+            W_End := Idx - 1;
+            Idx := Idx + 1;
+            while Idx <= JSON'Last and then (JSON (Idx) = ' ' or JSON (Idx) = ',') loop Idx := Idx + 1; end loop;
+            X_Start := Idx;
+            while Idx <= JSON'Last and then JSON (Idx) /= ',' loop Idx := Idx + 1; end loop;
+            X_End := Idx - 1;
+            Idx := Idx + 1;
+            while Idx <= JSON'Last and then (JSON (Idx) = ' ' or JSON (Idx) = ',') loop Idx := Idx + 1; end loop;
+            Y_Start := Idx;
+            while Idx <= JSON'Last and then JSON (Idx) /= ',' loop Idx := Idx + 1; end loop;
+            Y_End := Idx - 1;
+            Idx := Idx + 1;
+            while Idx <= JSON'Last and then (JSON (Idx) = ' ' or JSON (Idx) = ',') loop Idx := Idx + 1; end loop;
+            Z_Start := Idx;
+            while Idx <= JSON'Last and then JSON (Idx) /= ']' loop Idx := Idx + 1; end loop;
+            Z_End := Idx - 1;
+            
+            Q_W := Real'Value (JSON (W_Start .. W_End));
+            Q_X := Real'Value (JSON (X_Start .. X_End));
+            Q_Y := Real'Value (JSON (Y_Start .. Y_End));
+            Q_Z := Real'Value (JSON (Z_Start .. Z_End));
+            Q_Success := True;
+         exception
+            when others => Q_Success := False;
+         end;
+      end Get_Quaternion_Value;
+
+   begin
+      Success := False;
+      Lat := -6.333012; Lon := 106.971199; Alt := 0.0;
+      Heading := 0.0; Total_Dist := 0.0; Cumulative_Fatigue := 0.0;
+      Q_W := 1.0; Q_X := 0.0; Q_Y := 0.0; Q_Z := 0.0;
+
+      -- 1. Try to open the file
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
+      exception
+         when others =>
+            Ada.Text_IO.Put_Line ("[!] Telemetry file EARU_data.dat not found. Initializing fresh state.");
+            return;
+      end;
+
+      -- 2. Read first and second line
+      begin
+         if not Ada.Text_IO.End_Of_File (File) then
+            Primary_Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
+         end if;
+         if not Ada.Text_IO.End_Of_File (File) then
+            Recovery_Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
+         end if;
+         Ada.Text_IO.Close (File);
+      exception
+         when others =>
+            if Ada.Text_IO.Is_Open (File) then
+               Ada.Text_IO.Close (File);
+            end if;
+      end;
+
+      -- 3. Verify primary line's parity
+      declare
+         S_Primary : constant String := To_String (Primary_Line);
+         P_Marker : constant String := ", ""parity"": """;
+         Marker_Idx : constant Integer := Ada.Strings.Fixed.Index (S_Primary, P_Marker);
+      begin
+         if Marker_Idx > 0 then
+            declare
+               Part1 : constant String := S_Primary (S_Primary'First .. Marker_Idx - 1) & "}";
+               Part2 : constant String := S_Primary (Marker_Idx + P_Marker'Length .. S_Primary'Last - 2);
+               Calc_Hash : constant String := Hash (Part1);
+            begin
+               if Calc_Hash = Part2 then
+                  JSON_Str := To_Unbounded_String (S_Primary);
+                  Verified := True;
+                  Ada.Text_IO.Put_Line ("[*] Primary telemetry parity check passed successfully.");
+               else
+                  Ada.Text_IO.Put_Line ("[!] Primary telemetry parity check FAILED! Trying recovery...");
+               end if;
+            end;
+         end if;
+      end;
+
+      -- 4. Fallback to recovery if primary check failed
+      if not Verified then
+         declare
+            S_Recovery : constant String := To_String (Recovery_Line);
+            Rec_Prefix : constant String := "[RECOVERY_V1:";
+            Prefix_Idx : constant Integer := Ada.Strings.Fixed.Index (S_Recovery, Rec_Prefix);
+         begin
+            if Prefix_Idx > 0 then
+               declare
+                  Remaining : constant String := S_Recovery (Prefix_Idx + Rec_Prefix'Length .. S_Recovery'Last);
+                  Colon_Idx : constant Integer := Ada.Strings.Fixed.Index (Remaining, ":");
+               begin
+                  if Colon_Idx > 0 then
+                     declare
+                        B64_Str : constant String := Remaining (Remaining'First .. Colon_Idx - 1);
+                        Hash_Str : constant String := Remaining (Colon_Idx + 1 .. Remaining'Last - 1);
+                        Decoded_Str : constant String := Base64_Decode (B64_Str);
+                        Calc_Hash : constant String := Hash (Decoded_Str);
+                     begin
+                        if Calc_Hash = Hash_Str then
+                           JSON_Str := To_Unbounded_String (Decoded_Str);
+                           Verified := True;
+                           Ada.Text_IO.Put_Line ("[ok] Primary telemetry restored successfully from recovery parity footer!");
+                           
+                           -- SELF-PATCH: Rewrite healed file atomically!
+                           declare
+                              Tmp_Path : constant String := Path & ".tmp";
+                              Out_File : Ada.Text_IO.File_Type;
+                              Ret : Interfaces.C.int;
+                              pragma Unreferenced (Ret);
+                              function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
+                              pragma Import (C, rename, "rename");
+                              C_Tmp : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Tmp_Path);
+                              C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+                           begin
+                              Ada.Text_IO.Create (Out_File, Ada.Text_IO.Out_File, Tmp_Path);
+                              Ada.Text_IO.Put_Line (Out_File, Decoded_Str);
+                              Ada.Text_IO.Put_Line (Out_File, S_Recovery);
+                              Ada.Text_IO.Close (Out_File);
+                              
+                              Ret := rename (C_Tmp, C_Path);
+                              Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
+                              Ada.Text_IO.Put_Line ("[ok] Self-patched corrupted data file atomically.");
+                           exception
+                              when others =>
+                                 Ada.Text_IO.Put_Line ("[!] Self-patch execution failed.");
+                           end;
+                        else
+                           Ada.Text_IO.Put_Line ("[!] Recovery parity footer checksum also failed.");
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end if;
+
+      -- 5. Extract values from verified JSON
+      if Verified then
+         declare
+            S_JSON : constant String := To_String (JSON_Str);
+            Q_Success : Boolean;
+         begin
+            Lat := Get_Real_Value (S_JSON, "lat", Lat);
+            Lon := Get_Real_Value (S_JSON, "lon", Lon);
+            Alt := Get_Real_Value (S_JSON, "alt", Alt);
+            Heading := Get_Real_Value (S_JSON, "heading", Heading);
+            Total_Dist := Get_Real_Value (S_JSON, "total_distance_m", Total_Dist);
+            Cumulative_Fatigue := Get_Real_Value (S_JSON, "cumulative_fatigue", Cumulative_Fatigue);
+            
+            Get_Quaternion_Value (S_JSON, Q_W, Q_X, Q_Y, Q_Z, Q_Success);
+            Success := True;
+         exception
+            when others =>
+               Success := False;
+         end;
+      end if;
+   end Load_Initial_State;
+
    procedure Write_EARU_Data (
       State   : Earu.Types.Earu_State; 
       Path    : String; 
@@ -297,9 +584,6 @@ package body Earu.IO is
          Append (Buf, "}");
          Append (Buf, "}, ");
       end Append_Net_Comm;
-
-      function Hash (Input : String) return String is
-      begin return GNAT.SHA256.Digest (Input); end Hash;
 
    begin
       -- --- P_INT_PAYLOAD ---
@@ -460,6 +744,16 @@ package body Earu.IO is
       Append_Pair (P_Aug_Payload, "Cp", F(State.SMC.Gas_Constants.Cp));
       Append_Pair (P_Aug_Payload, "R", F(State.SMC.Gas_Constants.R));
       Append_Pair (P_Aug_Payload, "gamma", F(State.SMC.Gas_Constants.Gamma), False);
+      Append (P_Aug_Payload, "}, ");
+      Append (P_Aug_Payload, """fluid_dynamics"": {");
+      Append_Pair (P_Aug_Payload, "flow_scale_l", F(State.SMC.Flow_Scale_L));
+      Append_Pair (P_Aug_Payload, "char_velocity_u0", F(State.SMC.Char_Velocity_U0));
+      Append_Pair (P_Aug_Payload, "turbulence_int_up", F(State.SMC.Turbulence_Int_Up));
+      Append_Pair (P_Aug_Payload, "reynolds_number_re0", F(State.SMC.Reynolds_Number_Re0));
+      Append_Pair (P_Aug_Payload, "reynolds_number", F(State.SMC.Reynolds_Number));
+      Append_Pair (P_Aug_Payload, "weber_number", F(State.SMC.Weber_Number));
+      Append_Pair (P_Aug_Payload, "strouhal_number", F(State.SMC.Strouhal_Number));
+      Append_Pair (P_Aug_Payload, "cauchy_number", F(State.SMC.Cauchy_Number), False);
       Append (P_Aug_Payload, "}, ");
       Append_Pair (P_Aug_Payload, "heatflux_j", F(State.SMC.Heatflux_J));
       Append_Pair (P_Aug_Payload, "humidity_pct", F(State.SMC.Humidity_Pct));
@@ -705,6 +999,16 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "R", F(State.SMC.Gas_Constants.R));
       Append_Pair (JSON_Line, "gamma", F(State.SMC.Gas_Constants.Gamma), False);
       Append (JSON_Line, "}, ");
+      Append (JSON_Line, """fluid_dynamics"": {");
+      Append_Pair (JSON_Line, "flow_scale_l", F(State.SMC.Flow_Scale_L));
+      Append_Pair (JSON_Line, "char_velocity_u0", F(State.SMC.Char_Velocity_U0));
+      Append_Pair (JSON_Line, "turbulence_int_up", F(State.SMC.Turbulence_Int_Up));
+      Append_Pair (JSON_Line, "reynolds_number_re0", F(State.SMC.Reynolds_Number_Re0));
+      Append_Pair (JSON_Line, "reynolds_number", F(State.SMC.Reynolds_Number));
+      Append_Pair (JSON_Line, "weber_number", F(State.SMC.Weber_Number));
+      Append_Pair (JSON_Line, "strouhal_number", F(State.SMC.Strouhal_Number));
+      Append_Pair (JSON_Line, "cauchy_number", F(State.SMC.Cauchy_Number), False);
+      Append (JSON_Line, "}, ");
       Append_Pair (JSON_Line, "heatflux_j", F(State.SMC.Heatflux_J));
       Append_Pair (JSON_Line, "humidity_pct", F(State.SMC.Humidity_Pct));
       Append_Pair (JSON_Line, "inOrderToSurviveDayMustHibernate", YN(State.SMC.Must_Hibernate));
@@ -772,26 +1076,75 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
       Append_Pair (JSON_Line, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
       Append (JSON_Line, "}");
+
+      declare
+         S_Without_Parity : constant String := To_String (JSON_Line) & "}";
+         P_Hash           : constant String := Hash (S_Without_Parity);
+      begin
+         Append (JSON_Line, ", ""parity"": """ & P_Hash & """");
+      end;
+
       Append (JSON_Line, "}");
 
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Tmp_Path);
-      Ada.Text_IO.Put_Line (File, To_String (JSON_Line));
       declare
-         S_Final : constant String := To_String (JSON_Line);
-         B64 : constant String := Base64_Encode (S_Final);
-         H : constant String := Hash (S_Final);
-      begin Ada.Text_IO.Put_Line (File, "[RECOVERY_V1:" & B64 & ":" & H & "]"); end;
-      Ada.Text_IO.Close (File);
-      declare
-         Ret : Interfaces.C.int;
-         pragma Unreferenced (Ret);
-         function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
-         pragma Import (C, rename, "rename");
-         C_Tmp : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Tmp_Path);
-         C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+         use Ada.Strings.Unbounded;
+         Success : Boolean := False;
+         Actual_Path : Unbounded_String := To_Unbounded_String (Path);
+         Actual_Tmp_Path : Unbounded_String := To_Unbounded_String (Tmp_Path);
       begin
-         Ret := rename (C_Tmp, C_Path);
-         Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
+         begin
+            Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, To_String (Actual_Tmp_Path));
+            Ada.Text_IO.Put_Line (File, To_String (JSON_Line));
+            declare
+               S_Final : constant String := To_String (JSON_Line);
+               B64 : constant String := Base64_Encode (S_Final);
+               H : constant String := Hash (S_Final);
+            begin
+               Ada.Text_IO.Put_Line (File, "[RECOVERY_V1:" & B64 & ":" & H & "]");
+            end;
+            Ada.Text_IO.Close (File);
+            Success := True;
+         exception
+            when others =>
+               begin
+                  Actual_Path := To_Unbounded_String ("EARU_data.dat");
+                  Actual_Tmp_Path := To_Unbounded_String ("EARU_data.dat.tmp");
+                  Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, To_String (Actual_Tmp_Path));
+                  Ada.Text_IO.Put_Line (File, To_String (JSON_Line));
+                  declare
+                     S_Final : constant String := To_String (JSON_Line);
+                     B64 : constant String := Base64_Encode (S_Final);
+                     H : constant String := Hash (S_Final);
+                  begin
+                     Ada.Text_IO.Put_Line (File, "[RECOVERY_V1:" & B64 & ":" & H & "]");
+                  end;
+                  Ada.Text_IO.Close (File);
+                  Success := True;
+                  Ada.Text_IO.Put_Line ("[!] Telemetry primary write failed. Safely fell back to workspace path.");
+               exception
+                  when others =>
+                     Ada.Text_IO.Put_Line ("[!] All attempts to write telemetry file failed.");
+               end;
+         end;
+
+         if Success then
+            begin
+               declare
+                  Ret : Interfaces.C.int;
+                  pragma Unreferenced (Ret);
+                  function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
+                  pragma Import (C, rename, "rename");
+                  C_Tmp : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (To_String (Actual_Tmp_Path));
+                  C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (To_String (Actual_Path));
+               begin
+                  Ret := rename (C_Tmp, C_Path);
+                  Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
+               end;
+            exception
+               when others =>
+                  Ada.Text_IO.Put_Line ("[!] Atomic rename failed for telemetry file.");
+            end;
+         end if;
       end;
    end Write_EARU_Data;
 

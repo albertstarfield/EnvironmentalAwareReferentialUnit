@@ -9,8 +9,9 @@ project Earu_Daemon is
    for Main use ("earu_daemon.adb", "print_offsets.adb");
 
    package Compiler is
+      for Driver ("C") use "/usr/bin/clang";
       for Default_Switches ("Ada") use ("-g", "-O2", "-gnatwa", "-gnatW8");
-      for Default_Switches ("C") use ("-g", "-O2");
+      for Default_Switches ("C") use ("-g", "-O2", "-isysroot", "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk");
    end Compiler;
 
    package Linker is

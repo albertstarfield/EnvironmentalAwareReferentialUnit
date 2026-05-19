@@ -1975,6 +1975,10 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(ox, oy2 + 25, text=f"{self.hinge_airflow:.1f} m/s", fill="#ffaa44", font=("Monaco", 8, "bold"), anchor="n")
         self.canvas.create_text(ox, oy2 + 37, text=f"{self.outflow_mass_flow * 1000.0:.2f} g/s", fill="#ff8844", font=("Monaco", 8, "bold"), anchor="n")
         self.canvas.create_text(ox, oy2 + 49, text=f"{self.outflow_heatflux:.1f} J/s", fill="#ff6644", font=("Monaco", 8, "bold"), anchor="n")
+        
+        # --- Murphy's Law System Reminder ---
+        self.canvas.create_text(w/2, h - 30, text="SYSTEM LAW REMINDER: \"Anything that can go wrong will go wrong.\" (Murphy's Law)", fill="#ff3333", font=("Monaco", 10, "bold"), anchor="center")
+
 
     def draw_graph(self, x: float, y: float, w: float, h: float, data: list[Any], label: str, color: str, mark_idx: Optional[int] = None, times: Optional[list[float]] = None, extra_markers: Optional[list[tuple[int, str, str]]] = None) -> None:
         self.canvas.create_rectangle(x, y, x+w, y+h, fill="#050505", outline="#333")
@@ -2571,7 +2575,26 @@ class PrimaryFlightDisplay:
             massflow = getattr(self, 'smooth_massflow', float(smc.get('massflow_kg_s', 0.0)))
             heatflux = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
             
-            self.canvas.create_text(450, 200, anchor="nw", text=f"FLUID DYNAMICS:\nCp: {gas.get('Cp',0):.4f}\nGAMMA: {gas.get('gamma',0):.4f}\nTHRUST: {smc.get('thrust_n',0):.4f}N\nMASSFLOW: {massflow:.4f}kg/s\nHEATFLUX: {heatflux:.4f} J/s", fill="cyan", font=("Monaco", 10))
+            fluid = smc.get('fluid_dynamics', {})
+            flow_l = float(fluid.get('flow_scale_l', 0.01))
+            u0 = float(fluid.get('char_velocity_u0', 0.0))
+            re0 = float(fluid.get('reynolds_number_re0', 0.0))
+            re = float(fluid.get('reynolds_number', 0.0))
+            we = float(fluid.get('weber_number', 0.0))
+            st = float(fluid.get('strouhal_number', 0.0))
+            cy = float(fluid.get('cauchy_number', 0.0))
+            
+            fluid_text = (
+                f"FLUID DYNAMICS:\n"
+                f"Cp:       {gas.get('Cp',0):.1f} | GAMMA: {gas.get('gamma',0):.4f}\n"
+                f"THRUST:   {smc.get('thrust_n',0):.4f} N\n"
+                f"MASSFLOW: {massflow:.4f} kg/s | HEATFLUX: {heatflux:.2f} J/s\n"
+                f"FLOW L:   {flow_l:.3f} m | CHAR VEL u0: {u0:.3f} m/s\n"
+                f"REYNOLDS: Re = {re:.1f} | Re0 = {re0:.1f}\n"
+                f"WEBER:    We = {we:.3f} | STROUHAL: St = {st:.4f}\n"
+                f"CAUCHY:   Cy = {cy:.8f}"
+            )
+            self.canvas.create_text(450, 195, anchor="nw", text=fluid_text, fill="cyan", font=("Monaco", 8))
             
             # Thermodynamics & Efficiency
             p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))

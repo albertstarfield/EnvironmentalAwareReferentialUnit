@@ -212,6 +212,10 @@ This program reads raw hardware registers and MEMS sensors directly via Apple's 
 ### Q: Wait hold on. What language is this written on? I never heard of this before.
 **A:** Hmm... If you know, then you know. I'm pretty sure you do enjoy the ride and the butter 😉 (psst. I hate JavaScript)
 
+### Q: What is the core system design philosophy?
+**A:** Our entire design operates under **Murphy's Law**: *"Anything that can go wrong will go wrong."* 
+Rather than hoping faults won't occur, EARU assumes they **will** happen. The system features a self-patching parity integrity engine, automated error recoveries, priority scheduling overrides, and strict constraints designed to keep the runtime reliable and operational under all circumstances.
+
 ### Q: Who are you that able to build this?
 **A:** No one, or someone that having too much daydreaming and hallucinate of what if sci-fi is not sci-fi but actually after all there's already language model can translate my imagination and disciplinized for imagination.
 
