@@ -1833,7 +1833,8 @@ class PrimaryFlightDisplay:
             self.canvas.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="white", outline="")
             
             # Digital telemetry (showing actual/target RPM)
-            self.canvas.create_text(cx, cy + 45, text=f"FAN {idx} / F{idx}Ac\n{int(rpm)} / {int(target_rpm)} RPM", fill="white", font=("Monaco", 9, "bold"), justify="center", anchor="n")
+            target_str = f"{int(target_rpm)} RPM" if target_rpm <= 15000 else "I'm Not Enough RPM"
+            self.canvas.create_text(cx, cy + 45, text=f"FAN {idx} / F{idx}Ac\n{int(rpm)} / {target_str}", fill="white", font=("Monaco", 9, "bold"), justify="center", anchor="n")
 
         # Check if TURBO mode is on and any Fan Propeller RPM goes beyond 10000rpm
         if getattr(self, 'turbo', 0) == 1 and any(sf(rpm_val) > 10000.0 for rpm_val in fans):
