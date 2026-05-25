@@ -79,6 +79,7 @@ package Earu.Types is
       Odometer_30m  : aliased Real := 0.0;
       V_Mag         : aliased Real := 0.0;
       Transportation_Category : aliased String (1 .. 48) := (others => ' ');
+      Anchor_Refresh_Speed : aliased Real := 0.0;
       
       -- Reckoning factors
       Corr_Alt      : aliased Real := 0.0;
@@ -89,6 +90,7 @@ package Earu.Types is
       Alt_Inop_Until: aliased Real := 0.0;
 
       Vel           : aliased Vector3 := (others => <>);
+      Raw_Vel       : aliased Vector3 := (others => <>);
       CL_History    : aliased CL_History_Array := (others => (others => 0.0));
       CL_Count      : aliased Integer := 0;
    end record;

@@ -297,8 +297,6 @@ package body Earu.Math is
       
       -- Position integration
       Dx, Dy, Dz : Real;
-      Responsiveness : Real;
-      Gain_H, Gain_V : Real;
       Dist_Inc : Real;
       M_Per_Deg_Lat : constant Real := 111132.954;
       M_Per_Deg_Lon : Real;
@@ -367,13 +365,15 @@ package body Earu.Math is
          -- Accelerometer reaction physics: raw projection is negative during forward coordinate acceleration.
          -- Negating it correctly yields positive forward coordinate acceleration.
          A_Forward : constant Real := -(W.X * Cos (Yaw_Rad) + W.Y * Sin (Yaw_Rad));
-         W_Aligned_X : constant Real := A_Forward * Sin (Heading_Rad);
+         -- Inverting X component because we discovered that the IMU are inverted here
+         W_Aligned_X : constant Real := -(A_Forward * Sin (Heading_Rad));
          W_Aligned_Y : constant Real := A_Forward * Cos (Heading_Rad);
       begin
-         -- Integrate velocity
-         Loc.Vel.X := Loc.Vel.X + W_Aligned_X * DT;
-         Loc.Vel.Y := Loc.Vel.Y + W_Aligned_Y * DT;
-         Loc.Vel.Z := Loc.Vel.Z + W.Z * DT;
+         -- Integrate raw velocity (stable integration accumulator)
+         Loc.Raw_Vel.X := Loc.Raw_Vel.X + W_Aligned_X * DT;
+         Loc.Raw_Vel.Y := Loc.Raw_Vel.Y + W_Aligned_Y * DT;
+         -- Inverting Z component because we discovered that the IMU are inverted here as well
+         Loc.Raw_Vel.Z := Loc.Raw_Vel.Z + (-W.Z) * DT;
       end;
       
       -- 5. Dynamic Velocity Damping (Advanced ZUPT)
@@ -399,49 +399,51 @@ package body Earu.Math is
             Damping_V := Exp (Log (0.05) / FS); -- Extreme vertical damping under jitter (95% decay per second)
          end if;
          
-         Loc.Vel.X := Loc.Vel.X * Damping;
-         Loc.Vel.Y := Loc.Vel.Y * Damping;
-         Loc.Vel.Z := Loc.Vel.Z * Damping_V;
+         Loc.Raw_Vel.X := Loc.Raw_Vel.X * Damping;
+         Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Damping;
+         Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Damping_V;
       end;
       
-      Loc.V_Mag := Sqrt (Loc.Vel.X*Loc.Vel.X + Loc.Vel.Y*Loc.Vel.Y + Loc.Vel.Z*Loc.Vel.Z);
-      
-      -- 6. Integrate position using separate knobs with exponential scaling
+      -- 6. Apply gains and integrate position
       declare
-         V_Mag_Raw : constant Real := Loc.V_Mag;
-         V_Mag_Scaled : Real := V_Mag_Raw;
-         Vel_Scaled : Vector3 := Loc.Vel;
+         V_Mag_Raw : constant Real := Sqrt (Loc.Raw_Vel.X**2 + Loc.Raw_Vel.Y**2 + Loc.Raw_Vel.Z**2);
+         Scale : Real := 1.0;
+         Responsiveness : Real := 1.0;
       begin
+         -- A. Calculate Knots Scaling (Exponential perceived speed mapping)
          if V_Mag_Raw > 0.001 then
             declare
                V_Knots : constant Real := V_Mag_Raw * 1.94384;
                V_Knots_Clamped : constant Real := Real'Max (0.0, Real'Min (4.0, V_Knots));
                V_Actual_Knots : constant Real := 17.6 * (Exp (0.4 * V_Knots_Clamped) - 1.0) + (if V_Knots > 4.0 then V_Knots - 4.0 else 0.0);
-               Scale : constant Real := (V_Actual_Knots / 1.94384) / V_Mag_Raw;
             begin
-               V_Mag_Scaled := V_Actual_Knots / 1.94384;
-               Vel_Scaled.X := Loc.Vel.X * Scale;
-               Vel_Scaled.Y := Loc.Vel.Y * Scale;
-               -- Vel_Scaled.Z is NOT scaled by the horizontal speed factor to prevent vertical drift amplification
+               Scale := (V_Actual_Knots / 1.94384) / V_Mag_Raw;
             end;
          end if;
 
-         Loc.V_Mag := V_Mag_Scaled;
+         -- B. Calculate Responsiveness and final gains
+         -- We use the scaled horizontal magnitude for responsiveness to match UI feedback
+         Responsiveness := 1.0 + Real'Min (0.1, (V_Mag_Raw * Scale) / G_Const);
+         
+         -- C. Update the public/telemetry velocity vector with all active gains
+         Loc.Vel.X := Loc.Raw_Vel.X * Scale * Loc.Corr_Velocity * Responsiveness;
+         Loc.Vel.Y := Loc.Raw_Vel.Y * Scale * Loc.Corr_Velocity * Responsiveness;
+         Loc.Vel.Z := Loc.Raw_Vel.Z * Loc.Corr_VRate * Responsiveness;
+         
+         -- D. Update magnitude to be consistent with the vector
+         Loc.V_Mag := Sqrt (Loc.Vel.X**2 + Loc.Vel.Y**2 + Loc.Vel.Z**2);
 
-         Responsiveness := 1.0 + Real'Min (0.1, Loc.V_Mag / G_Const);
-         Gain_H := Loc.Corr_Velocity * Responsiveness;
-         Gain_V := Loc.Corr_VRate * Responsiveness;
+         -- E. Integrate position using the fully corrected velocity
+         Dx := Loc.Vel.X * DT;
+         Dy := Loc.Vel.Y * DT;
+         Dz := Loc.Vel.Z * DT;
          
-         Dx := Vel_Scaled.X * DT;
-         Dy := Vel_Scaled.Y * DT;
-         Dz := Vel_Scaled.Z * DT;
-         
-         Loc.Pos.X := Loc.Pos.X + Dx * Gain_H;
-         Loc.Pos.Y := Loc.Pos.Y + Dy * Gain_H;
-         Loc.Pos.Z := Loc.Pos.Z + Dz * Gain_V;
+         Loc.Pos.X := Loc.Pos.X + Dx;
+         Loc.Pos.Y := Loc.Pos.Y + Dy;
+         Loc.Pos.Z := Loc.Pos.Z + Dz;
          
          -- Odometer update
-         Dist_Inc := Sqrt ((Dx * Gain_H)**2 + (Dy * Gain_H)**2 + (Dz * Gain_V)**2);
+         Dist_Inc := Sqrt (Dx**2 + Dy**2 + Dz**2);
          Loc.Total_Dist := Loc.Total_Dist + Dist_Inc;
       end;
       
@@ -453,7 +455,25 @@ package body Earu.Math is
             Loc.Lon := Loc.Start_Lon + (Loc.Pos.X / M_Per_Deg_Lon);
          end if;
       end if;
-      -- Dead Reckoning Altitude INOP safety check
+
+      -- 8. Update locationd anchor refresh speed (simulation of bridge logic)
+      declare
+         V : constant Real := Loc.V_Mag;
+      begin
+         if V <= 0.0 then
+            Loc.Anchor_Refresh_Speed := 30.0;
+         elsif V >= 2.0 then
+            Loc.Anchor_Refresh_Speed := 4.0;
+         elsif V < 1.0 then
+            -- Interp [0, 1] -> [30, 15]
+            Loc.Anchor_Refresh_Speed := 30.0 - (V * 15.0);
+         else
+            -- Interp [1, 2] -> [15, 4]
+            Loc.Anchor_Refresh_Speed := 15.0 - ((V - 1.0) * 11.0);
+         end if;
+      end;
+
+      -- 9. Dead Reckoning Altitude INOP safety check
       -- If altitude is at or below Dead Sea level (-430m) with high sinking rate (> 500 fpm),
       -- or if we are below Earth's maximum depth (-10994m), trigger INOP red flag state.
       declare
@@ -602,14 +622,13 @@ package body Earu.Math is
                Error_Ratio := CL_V_Mag / Loc.V_Mag;
 
                if Error_Ratio > 1.5 or Error_Ratio < 0.5 then
-                  Loc.Vel.X := Loc.Vel.X * Error_Ratio;
-                  Loc.Vel.Y := Loc.Vel.Y * Error_Ratio;
-                  Loc.Vel.Z := Loc.Vel.Z * Error_Ratio;
-                  Loc.V_Mag := CL_V_Mag;
+                  Loc.Raw_Vel.X := Loc.Raw_Vel.X * Error_Ratio;
+                  Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Error_Ratio;
+                  Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Error_Ratio;
                end if;
 
                Loc.Corr_Velocity := Loc.Corr_Velocity * (1.0 - Adj_Alpha) + (Loc.Corr_Velocity * Error_Ratio) * Adj_Alpha;
-               Loc.Corr_Velocity := Real'Max (0.5, Real'Min (2.0, Loc.Corr_Velocity));
+               Loc.Corr_Velocity := Real'Max (0.1, Real'Min (10.0, Loc.Corr_Velocity));
             end if;
 
             -- Vertical Rate Gain Anchor
@@ -618,7 +637,7 @@ package body Earu.Math is
                   Error_Ratio_V : constant Real := CL_V_Vert / Loc.Alt_Rate;
                begin
                   Loc.Corr_VRate := Loc.Corr_VRate * (1.0 - Adj_Alpha) + (Loc.Corr_VRate * Error_Ratio_V) * Adj_Alpha;
-                  Loc.Corr_VRate := Real'Max (0.5, Real'Min (2.0, Loc.Corr_VRate));
+                  Loc.Corr_VRate := Real'Max (0.1, Real'Min (10.0, Loc.Corr_VRate));
                end;
             end if;
 

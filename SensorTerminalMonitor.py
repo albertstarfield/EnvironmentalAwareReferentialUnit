@@ -419,6 +419,7 @@ class PrimaryFlightDisplay:
         self.cf_heading: float = 0.0
         self.cf_altitude: float = 0.0
         self.cf_vertical_rate: float = 1.0
+        self.anchor_refresh_speed: float = 0.0
 
         self.env_mode: str = "STANDARD ROAD"
         self.last_env_mode: str = ""
@@ -426,7 +427,7 @@ class PrimaryFlightDisplay:
         self.targets: dict[str, float] = {
             'pitch': 0.0, 'roll': 0.0, 'heading': 0.0, 'alt': 0.0, 'speed': 0.0, 'lat': 0.0, 'lon': 0.0,
             'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0,
-            'vel_x': 0.0, 'vel_y': 0.0, 'vel_z': 0.0
+            'vel_x': 0.0, 'vel_y': 0.0, 'vel_z': 0.0, 'anchor_refresh_speed': 0.0
         }
         self.lerp_factor: float = 0.1
         self.pitch_sign: float = 1.0
@@ -968,6 +969,7 @@ class PrimaryFlightDisplay:
                     self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
                     self.targets['cf_altitude'] = float(loc.get('CorrectionFactor_Reckoning_Altitude', 0.0))
                     self.targets['cf_vertical_rate'] = float(loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0))
+                    self.targets['anchor_refresh_speed'] = float(loc.get('locationd_anchor_refresh_speed', 0.0))
                     
                     sys_d = data.get('system', {})
                     self.cpu = float(sys_d.get('cpu_usage', 0.0))
@@ -1397,7 +1399,8 @@ class PrimaryFlightDisplay:
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 80, f"ALT: {int(self.alt*3.28084)} FT / {int(self.alt)}M MSL", "#00ff00", ("Monaco", 16, "bold"), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 105, f"TRIANG_ALT_OFF: {self.cf_altitude:+.1f}m", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 120, f"TRIANG_VSI_GAIN: {self.cf_vertical_rate:.2f}x", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
-            self.draw_text_with_halo(self.map_widget.canvas, 20, h - 135, f"VEL X/Y/Z: {self.vel_x:+.2f} / {self.vel_y:+.2f} / {self.vel_z:+.2f} m/s", "#ffcc00", ("Monaco", 9), "sw", "overlay_info")
+            self.draw_text_with_halo(self.map_widget.canvas, 20, h - 135, f"LOC_ANCHOR_REFRESH: {self.anchor_refresh_speed:.1f}s", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
+            self.draw_text_with_halo(self.map_widget.canvas, 20, h - 150, f"VEL X/Y/Z: {self.vel_x:+.2f} / {self.vel_y:+.2f} / {self.vel_z:+.2f} m/s", "#ffcc00", ("Monaco", 9), "sw", "overlay_info")
             
             # Right Overlays: Horizontal Domain
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 80, f"SPD: {self.speed:.1f} KTS / {self.speed*1.852:.1f} KPH", "#00ff00", ("Monaco", 16, "bold"), "se", "overlay_info")
@@ -2217,6 +2220,7 @@ class PrimaryFlightDisplay:
         self.cf_heading += (self.targets['cf_heading'] - self.cf_heading) * self.lerp_factor
         self.cf_altitude += (self.targets['cf_altitude'] - self.cf_altitude) * self.lerp_factor
         self.cf_vertical_rate += (self.targets['cf_vertical_rate'] - self.cf_vertical_rate) * self.lerp_factor
+        self.anchor_refresh_speed += (self.targets['anchor_refresh_speed'] - self.anchor_refresh_speed) * self.lerp_factor
 
         # Smoothed high-resolution metrics
         self.alt_rate += (self.targets.get('alt_rate', 0.0) - self.alt_rate) * self.lerp_factor
