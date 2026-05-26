@@ -19,6 +19,7 @@ with Ada.Strings.Fixed;
 procedure Earu_Daemon is
    use Earu.Types;
    use Earu.Shm;
+   use Earu.Network_Status;
    use Interfaces;
    use type Interfaces.C.int;
    use type Interfaces.Unsigned_32;
@@ -274,6 +275,79 @@ procedure Earu_Daemon is
                 Earu.State_Store.State_Buffer.Update_SMC (SMC);
                 Last_W := Weather_SHM.Header.Update_Count;
              end;
+          else
+             -- Increment Lockin_Miss if no coordinate/weather update from bridge sidecar
+             declare
+                Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+                L : Location_Type := Full.Location;
+                Net : constant Earu.Network_Status.Status_Array := Earu.Network_Status.Shared_Status.Get_All;
+                Net_Fail_Count : Natural := 0;
+                Net_Partial : Boolean := False;
+                Net_Full_Inop : Boolean := False;
+             begin
+                L.Lockin_Miss := L.Lockin_Miss + 0.1;
+                
+                -- Analyze Network Status
+                for I in Net'Range loop
+                   if Net(I) = Earu.Network_Status.Unavailable then
+                      Net_Fail_Count := Net_Fail_Count + 1;
+                   end if;
+                end loop;
+                Net_Full_Inop := (Net_Fail_Count = 13);
+                Net_Partial := (Net_Fail_Count > 0 and Net_Fail_Count < 13);
+
+                -- Clear reasons first
+                L.Warning_Reason := (others => ' ');
+                L.Caution_Reason := (others => ' ');
+
+                -- 1. Master Warning Triggers
+                declare
+                   W_Ptr : Positive := 1;
+                   procedure Add_W(Msg : String) is
+                      Len : constant Positive := Msg'Length;
+                   begin
+                      if W_Ptr + Len <= 128 then
+                         L.Warning_Reason(W_Ptr .. W_Ptr + Len - 1) := Msg;
+                         W_Ptr := W_Ptr + Len;
+                         if W_Ptr <= 128 then
+                            L.Warning_Reason(W_Ptr) := ' ';
+                            W_Ptr := W_Ptr + 1;
+                         end if;
+                      end if;
+                   end Add_W;
+                begin
+                   if Full.Electron_Travel.Interference then Add_W("INTERFERENCE"); end if;
+                   if Full.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0 then Add_W("ANOMALY"); end if;
+                   if Full.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.48 then Add_W("HIGH_RISK"); end if;
+                   if Full.SMC.Temps.TCMz > 100.0 then Add_W("TCMZ_OVERHEAT"); end if;
+                   if Full.Seismic_Activity.Peak_G > 2.5 then Add_W("SHOCK_DETECTED"); end if;
+                   if Full.System.Battery_Percent < 10 then Add_W("BATT_LOW_10"); end if;
+                   if Net_Full_Inop then Add_W("NET_COMMS_INOP"); end if;
+                end;
+
+                -- 2. Master Caution Triggers
+                declare
+                   C_Ptr : Positive := 1;
+                   procedure Add_C(Msg : String) is
+                      Len : constant Positive := Msg'Length;
+                   begin
+                      if C_Ptr + Len <= 128 then
+                         L.Caution_Reason(C_Ptr .. C_Ptr + Len - 1) := Msg;
+                         C_Ptr := C_Ptr + Len;
+                         if C_Ptr <= 128 then
+                            L.Caution_Reason(C_Ptr) := ' ';
+                            C_Ptr := C_Ptr + 1;
+                         end if;
+                      end if;
+                   end Add_C;
+                begin
+                   if L.Lockin_Miss > 30.0 then Add_C("ANCHOR_FAIL_30S"); end if;
+                   if Full.System.Battery_Percent < 20 then Add_C("BATT_LOW_20"); end if;
+                   if Net_Partial then Add_C("NET_COMMS_PARTIAL"); end if;
+                end;
+
+                Earu.State_Store.State_Buffer.Update_Location (L);
+             end;
           end if;
 
          if Stats_SHM.Header.Update_Count /= Last_S then
@@ -525,6 +599,7 @@ procedure Earu_Daemon is
    end Symlink_Watcher_Task;
 
    task body Network_Probe_Task is
+      use GNAT.Sockets;
    begin
       delay 5.0;
       
@@ -533,20 +608,22 @@ procedure Earu_Daemon is
             declare
                Dom : constant String := Ada.Strings.Fixed.Trim (Earu.Network_Status.Domains(I), Ada.Strings.Both);
             begin
-               declare
-                  Host : constant GNAT.Sockets.Host_Entry_Type := GNAT.Sockets.Get_Host_By_Name (Dom);
-                  pragma Unreferenced (Host);
                begin
-                  Earu.Network_Status.Shared_Status.Set (I, Earu.Network_Status.Available);
+                  declare
+                     Host : constant Host_Entry_Type := Get_Host_By_Name (Dom);
+                     pragma Unreferenced (Host);
+                  begin
+                     Earu.Network_Status.Shared_Status.Set (I, Earu.Network_Status.Available);
+                  end;
+               exception
+                  when others =>
+                     Earu.Network_Status.Shared_Status.Set (I, Earu.Network_Status.Unavailable);
                end;
-            exception
-               when others =>
-                  Earu.Network_Status.Shared_Status.Set (I, Earu.Network_Status.Unavailable);
             end;
-            delay 0.05;
+            delay 0.1;
          end loop;
          
-         delay 15.0;
+         delay 30.0;
       end loop;
    exception
       when others =>

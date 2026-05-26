@@ -57,6 +57,7 @@ package Earu.Types is
       Lat : aliased Real := 0.0;
       Lon : aliased Real := 0.0;
       Alt : aliased Real := 0.0;
+      Pos : aliased Vector3 := (others => <>);
    end record;
 
    type CL_History_Array is array (1 .. 3) of CL_Point;
@@ -86,12 +87,15 @@ package Earu.Types is
       Corr_Heading  : aliased Real := 0.0;
       Corr_Velocity : aliased Real := 1.0;
       Corr_VRate    : aliased Real := 1.0;
+      Lockin_Miss   : aliased Real := 0.0;
+      Warning_Reason : aliased String (1 .. 128) := (others => ' ');
+      Caution_Reason : aliased String (1 .. 128) := (others => ' ');
       Alt_Inop      : aliased Boolean := False;
       Alt_Inop_Until: aliased Real := 0.0;
 
       Vel           : aliased Vector3 := (others => <>);
       Raw_Vel       : aliased Vector3 := (others => <>);
-      CL_History    : aliased CL_History_Array := (others => (others => 0.0));
+      CL_History    : aliased CL_History_Array := (others => (T => 0.0, Lat => 0.0, Lon => 0.0, Alt => 0.0, Pos => (others => 0.0)));
       CL_Count      : aliased Integer := 0;
    end record;
 

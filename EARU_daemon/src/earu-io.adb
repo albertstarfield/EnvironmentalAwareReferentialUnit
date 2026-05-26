@@ -920,15 +920,18 @@ package body Earu.IO is
       Append_Pair (JSON_Line, "heading", F(State.Location.Heading));
       Append_Pair (JSON_Line, "lat", F(State.Location.Lat));
       Append_Pair (JSON_Line, "lon", F(State.Location.Lon));
+      Append_Pair (JSON_Line, "lockin_miss", F(State.Location.Lockin_Miss));
       Append_Pair (JSON_Line, "mach", F(State.Location.Mach));
       Append_Pair (JSON_Line, "odometer_30m", F(State.Location.Odometer_30m));
+      Append_Pair (JSON_Line, "master_warning", (if State.Electron_Travel.Interference or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0 or State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.48 or State.SMC.Temps.TCMz > 100.0 or State.Seismic_Activity.Peak_G > 2.5 or State.System.Battery_Percent < 10 then "true" else "false"));
+      Append_Pair (JSON_Line, "master_caution", (if State.Location.Lockin_Miss > 30.0 or State.System.Battery_Percent < 20 or (State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0) then "true" else "false"));      Append_Pair (JSON_Line, "warning_reason", S(Trim_Null(State.Location.Warning_Reason)));
+      Append_Pair (JSON_Line, "caution_reason", S(Trim_Null(State.Location.Caution_Reason)));
       Append (JSON_Line, """pos"": [" & F(State.Location.Pos.X) & ", " & F(State.Location.Pos.Y) & ", " & F(State.Location.Pos.Z) & "], ");
       Append (JSON_Line, """vel"": [" & F(State.Location.Vel.X) & ", " & F(State.Location.Vel.Y) & ", " & F(State.Location.Vel.Z) & "], ");
-      Append_Pair (JSON_Line, "pressure_hpa", F(State.Location.Pressure_HPa));
-      Append_Pair (JSON_Line, "total_distance_m", F(State.Location.Total_Dist));
+      Append_Pair (JSON_Line, "pressure_hpa", F(State.Location.Pressure_HPa));      Append_Pair (JSON_Line, "total_distance_m", F(State.Location.Total_Dist));
       Append_Pair (JSON_Line, "v_mag", F(State.Location.V_Mag));
-      Append_Pair (JSON_Line, "locationd_anchor_refresh_speed", F(State.Location.Anchor_Refresh_Speed));
-      Append_Pair (JSON_Line, "transportation_category", S(Trim_Null(State.Location.Transportation_Category)), False);
+      Append_Pair (JSON_Line, "time", F(State.Time));
+      Append_Pair (JSON_Line, "locationd_anchor_refresh_speed", F(State.Location.Anchor_Refresh_Speed));      Append_Pair (JSON_Line, "transportation_category", S(Trim_Null(State.Location.Transportation_Category)), False);
       Append (JSON_Line, "}, ");
       
       Append (JSON_Line, """loop_consistency"": {");

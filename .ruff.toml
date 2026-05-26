@@ -1,0 +1,14 @@
+# Ruff configuration for SensorTerminalMonitor
+# Ignoring stylistic rules to maintain the project's compact coding style
+
+line-length = 200
+
+[lint]
+# E701: Multiple statements on one line (colon)
+# E702: Multiple statements on one line (semicolon)
+# E722: Bare except
+# F403: from module import *
+# F405: name may be undefined, or defined from star imports
+# E501: Line too long
+ignore = ["E701", "E702", "E722", "F403", "F405", "E501"]
+select = ["E", "F", "W"]

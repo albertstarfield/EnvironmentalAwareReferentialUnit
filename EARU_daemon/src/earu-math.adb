@@ -365,9 +365,10 @@ package body Earu.Math is
          -- Accelerometer reaction physics: raw projection is negative during forward coordinate acceleration.
          -- Negating it correctly yields positive forward coordinate acceleration.
          A_Forward : constant Real := -(W.X * Cos (Yaw_Rad) + W.Y * Sin (Yaw_Rad));
-         -- Inverting X component because we discovered that the IMU are inverted here
-         W_Aligned_X : constant Real := -(A_Forward * Sin (Heading_Rad));
-         W_Aligned_Y : constant Real := A_Forward * Cos (Heading_Rad);
+         -- Swapped X and Y and kept *-1 inversion per request
+         -- Empirical experiment have shown that it going to the right when we are moving forward as the chip are probably positionined portrait like phone while we are using an landscape laptop device
+         W_Aligned_X : constant Real := -(A_Forward * Cos (Heading_Rad));
+         W_Aligned_Y : constant Real := A_Forward * Sin (Heading_Rad);
       begin
          -- Integrate raw velocity (stable integration accumulator)
          Loc.Raw_Vel.X := Loc.Raw_Vel.X + W_Aligned_X * DT;
@@ -575,10 +576,13 @@ package body Earu.Math is
       Dist_Confidence, Max_Alpha, Adj_Alpha : Real;
       Error_Ratio : Real;
    begin
+      Loc.Lockin_Miss := 0.0;
+      Loc.Warning_Reason := (others => ' ');
+      Loc.Caution_Reason := (others => ' ');
       -- 1. Discard history older than 90s
       declare
          Valid_Count : Integer := 0;
-         Temp_Hist   : CL_History_Array := (others => (others => 0.0));
+         Temp_Hist   : CL_History_Array := (others => (T => 0.0, Lat => 0.0, Lon => 0.0, Alt => 0.0, Pos => (others => 0.0)));
       begin
          for I in 1 .. Loc.CL_Count loop
             if Now_T - Loc.CL_History(I).T <= 90.0 then
@@ -593,11 +597,11 @@ package body Earu.Math is
       -- 2. Append new sample
       if Loc.CL_Count < 3 then
          Loc.CL_Count := Loc.CL_Count + 1;
-         Loc.CL_History(Loc.CL_Count) := (T => Now_T, Lat => New_Lat, Lon => New_Lon, Alt => New_Alt);
+         Loc.CL_History(Loc.CL_Count) := (T => Now_T, Lat => New_Lat, Lon => New_Lon, Alt => New_Alt, Pos => Loc.Pos);
       else
          Loc.CL_History(1) := Loc.CL_History(2);
          Loc.CL_History(2) := Loc.CL_History(3);
-         Loc.CL_History(3) := (T => Now_T, Lat => New_Lat, Lon => New_Lon, Alt => New_Alt);
+         Loc.CL_History(3) := (T => Now_T, Lat => New_Lat, Lon => New_Lon, Alt => New_Alt, Pos => Loc.Pos);
       end if;
 
       -- 3. Calculate anchoring and calibrations
@@ -657,14 +661,29 @@ package body Earu.Math is
                   Y_Val : constant Real := Sin (DLon) * Cos (Lat2_Rad);
                   X_Val : constant Real := Cos (Lat1_Rad) * Sin (Lat2_Rad) - Sin (Lat1_Rad) * Cos (Lat2_Rad) * Cos (DLon);
                   CL_Bearing : Real := (Arctan (Y_Val, X_Val) * (180.0 / PI));
+                  
+                  -- Calculate Dead-Reckoning Bearing from integrated Pos gradient
+                  -- as gps maybe shifted a little may also the gradient of between corelocation triangulation gradient, 
+                  -- but the idea is if you walk you will have offset that show where are you heading to, 
+                  -- we can use that gradient to see the actual heading or calibrated
+                  DR_DX : constant Real := H_End.Pos.X - H_Start.Pos.X;
+                  DR_DY : constant Real := H_End.Pos.Y - H_Start.Pos.Y;
+                  DR_Bearing : Real := (if Abs(DR_DX) > 1.0E-12 or Abs(DR_DY) > 1.0E-12 
+                                        then Arctan (DR_DY, -DR_DX) * (180.0 / PI) 
+                                        else Loc.Heading);
+                  
                   Bearing_Diff : Real;
                   Max_Nudge, Nudge_Alpha : Real;
                begin
                   if CL_Bearing < 0.0 then
                      CL_Bearing := CL_Bearing + 360.0;
                   end if;
+                  
+                  if DR_Bearing < 0.0 then
+                     DR_Bearing := DR_Bearing + 360.0;
+                  end if;
 
-                  Bearing_Diff := CL_Bearing - Loc.Heading;
+                  Bearing_Diff := CL_Bearing - DR_Bearing;
                   if Bearing_Diff > 180.0 then
                      Bearing_Diff := Bearing_Diff - 360.0;
                   elsif Bearing_Diff < -180.0 then
