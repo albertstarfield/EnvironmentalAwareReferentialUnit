@@ -2616,7 +2616,13 @@ class PrimaryFlightDisplay:
             ("MECH FAILURE", mech, "mech"),
             ("AGGREGATED RISK", agg_risk, "agg")
         ]:
-            self.canvas.create_text(360, y_bar, anchor="nw", text=f"{name}: {val*100:.2f}%", fill="white", font=("Monaco", 9, "bold"))
+            val_pct = val * 100.0
+            if 0 < val_pct < 0.01:
+                val_str = f"{val_pct:.2e}%"
+            else:
+                val_str = f"{val_pct:.2f}%"
+
+            self.canvas.create_text(360, y_bar, anchor="nw", text=f"{name}: {val_str}", fill="white", font=("Monaco", 9, "bold"))
             # Track background
             self.canvas.create_rectangle(360, y_bar + 20, 640, y_bar + 32, fill="#111", outline="#555")
             # Fill
