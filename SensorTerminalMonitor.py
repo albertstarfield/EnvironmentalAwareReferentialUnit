@@ -3235,7 +3235,7 @@ class PrimaryFlightDisplay:
 
     def draw_prognosis_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="HEALTH & LONGEVITY PROGNOSIS (PROGNO)", fill="#00ff00", font=("Monaco", 20, "bold"))
-        
+
         # Grid layout for prognosis cards
         margin = 50.0
         card_w = (w - 3*margin) / 2
@@ -3260,7 +3260,7 @@ class PrimaryFlightDisplay:
             self.canvas.create_rectangle(x, y, x+card_w, y+card_h, fill="#0a0a0a", outline="#333", width=2)
             self.canvas.create_line(x, y+45, x+card_w, y+45, fill="#333")
             self.canvas.create_text(x+20, y+25, anchor="nw", text=title, fill=color, font=("Monaco", 14, "bold"))
-            
+
             off_x = 20
             if life_pct is not None:
                 draw_vbar(x+20, y+65, 30, card_h-85, life_pct, color)
