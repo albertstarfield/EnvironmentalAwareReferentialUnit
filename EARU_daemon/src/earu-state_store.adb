@@ -65,8 +65,9 @@ package body Earu.State_Store is
 
       procedure Update_Damage (Cumulative, Risk, Peak : Real) is
       begin
-         State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue := Cumulative;
-         State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := Risk;
+         -- Do not overwrite Cumulative_Fatigue or Aggregated_Risk here, as they are 
+         -- now accurately tracked natively in earu-bridge.adb at a higher rate.
+         State.Seismic_Activity.Damage_Fatigue.SEU_Risk_Multiplier := Risk;
          if Peak > State.Seismic_Activity.Peak_G then
             State.Seismic_Activity.Peak_G := Peak;
          end if;
