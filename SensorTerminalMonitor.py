@@ -433,6 +433,7 @@ class PrimaryFlightDisplay:
         self.battery_health: float = 100.0
         self.battery_full_wh: float = 0.0
         self.battery_design_wh: float = 0.0
+        self.uptime_earu: float = 0.0
         self.survive_today: str = "Yes"
         self.must_hibernate: str = "No"
         self.pulse_wake: float = 0.0
@@ -1080,6 +1081,7 @@ class PrimaryFlightDisplay:
                     self.batt = int(sys_d.get('battery_percent', 0))
                     self.charging = bool(sys_d.get('battery_charging', False))
                     self.hid_idle = float(sys_d.get('nonHumanInputHIDIdle', 0.0))
+                    self.uptime_earu = float(sys_d.get('uptime_earu', 0.0))
 
                     self.battery_bank_wh = float(sys_d.get('BatteryEnergyBankWh', 0.0))
                     self.battery_health = float(sys_d.get('BatteryHealthPct', 100.0))
