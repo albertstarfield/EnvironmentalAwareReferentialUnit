@@ -440,6 +440,10 @@ class PrimaryFlightDisplay:
         self.pulse_wake: float = 0.0
         self.pulse_length: float = 0.0
 
+        # Prognosis Countdown Anchors
+        self.life_anchor_ts: float = 0.0
+        self.life_anchor_seconds: float = 0.0
+
         # Start Background Connectivity Verifier
         def verify_net():
             while True:
@@ -1117,6 +1121,13 @@ class PrimaryFlightDisplay:
                     self.struct_life_d = float(df.get('structural_life_left_d', 0.0))
                     self.cum_fatigue = float(df.get('cumulative_fatigue', 0.0))
                     self.agg_risk = float(df.get('aggregated_risk', 0.0))
+
+                    # 60s Reanchoring Logic for Real-Time Countdown
+                    now_ts = time.time()
+                    if now_ts - self.life_anchor_ts >= 60.0:
+                        self.life_anchor_ts = now_ts
+                        # Convert structural life years to seconds (1 yr = 8760 hrs)
+                        self.life_anchor_seconds = self.struct_life_y * 8760.0 * 3600.0
 
                     smc = data.get('smc', {})
                     self.power_rate = float(smc.get('PowerRateUsage', 0.0))
@@ -2596,6 +2607,26 @@ class PrimaryFlightDisplay:
 
         self.canvas.create_text(360, 290, anchor="nw", text="CUMULATIVE FATIGUE INDEX:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(360, 310, anchor="nw", text=f"{cum_fatigue:.4e}", fill="magenta", font=("Monaco", 12, "bold"))
+
+        # Real-time System Failure Countdown
+        if self.life_anchor_ts > 0:
+            elapsed = time.time() - self.life_anchor_ts
+            realtime_left = max(0.0, self.life_anchor_seconds - elapsed)
+        else:
+            realtime_left = self.struct_life_y * 8760.0 * 3600.0
+
+        r_y = int(realtime_left // 31536000)
+        rem = realtime_left % 31536000
+        r_d = int(rem // 86400)
+        rem = rem % 86400
+        r_h = int(rem // 3600)
+        rem = rem % 3600
+        r_m = int(rem // 60)
+        r_s = rem % 60
+        countdown_str = f"{r_y:02d}Y {r_d:03d}D {r_h:02d}:{r_m:02d}:{r_s:05.2f}"
+
+        self.canvas.create_text(360, 350, anchor="nw", text="TIME TO SYS FAILURE (LIVE):", fill="gray", font=("Monaco", 10, "bold"))
+        self.canvas.create_text(360, 370, anchor="nw", text=countdown_str, fill="#00ff00", font=("Monaco", 17, "bold"))
 
         # Column 3 Box
         self.canvas.create_rectangle(670, 80, 960, 440, fill="#080808", outline="#333", width=2)
