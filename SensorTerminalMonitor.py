@@ -1126,8 +1126,10 @@ class PrimaryFlightDisplay:
                     now_ts = time.time()
                     if now_ts - self.life_anchor_ts >= 60.0:
                         self.life_anchor_ts = now_ts
-                        # Convert structural life years to seconds (1 yr = 8760 hrs)
-                        self.life_anchor_seconds = self.struct_life_y * 8760.0 * 3600.0
+                        # Minimum life across all critical components
+                        nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
+                        min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y)
+                        self.life_anchor_seconds = min_life_y * 8760.0 * 3600.0
 
                     smc = data.get('smc', {})
                     self.power_rate = float(smc.get('PowerRateUsage', 0.0))
@@ -2613,7 +2615,9 @@ class PrimaryFlightDisplay:
             elapsed = time.time() - self.life_anchor_ts
             realtime_left = max(0.0, self.life_anchor_seconds - elapsed)
         else:
-            realtime_left = self.struct_life_y * 8760.0 * 3600.0
+            nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
+            min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y)
+            realtime_left = min_life_y * 8760.0 * 3600.0
 
         r_y = int(realtime_left // 31536000)
         rem = realtime_left % 31536000
