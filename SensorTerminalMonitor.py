@@ -3239,46 +3239,67 @@ class PrimaryFlightDisplay:
         card_w = (w - 3*margin) / 2
         card_h = (h - 3*margin) / 2
 
-        def draw_card(x, y, title, metrics, color):
-            self.canvas.create_rectangle(x, y, x+card_w, y+card_h, fill="#0a0a0a", outline=color, width=2)
-            self.canvas.create_text(x+20, y+25, anchor="nw", text=title, fill=color, font=("Monaco", 14, "bold"))
-            for i, (label, val, unit, status_col) in enumerate(metrics):
-                self.canvas.create_text(x+20, y+60+i*30, anchor="nw", text=f"{label}:", fill="gray", font=("Monaco", 10))
-                self.canvas.create_text(x+160, y+60+i*30, anchor="nw", text=f"{val}", fill=status_col, font=("Monaco", 11, "bold"))
-                self.canvas.create_text(x+240, y+60+i*30, anchor="nw", text=f"{unit}", fill="white", font=("Monaco", 10))
+        def draw_vbar(bx, by, bw, bh, pct, color):
+            # Battery-style vertical bar
+            pct = min(100.0, max(0.0, pct))
+            # Outline & Cap
+            self.canvas.create_rectangle(bx, by, bx+bw, by+bh, outline="white", width=1)
+            self.canvas.create_rectangle(bx+bw*0.3, by-5, bx+bw*0.7, by, fill="white", outline="white")
+            # Fill level
+            fill_h = (bh - 4) * (pct / 100.0)
+            if fill_h > 0:
+                self.canvas.create_rectangle(bx+2, by+bh-fill_h-2, bx+bw-2, by+bh-2, fill=color, outline="")
+            # Grid segments
+            for i in range(1, 10):
+                sy = by + bh * (i/10.0)
+                self.canvas.create_line(bx, sy, bx+bw, sy, fill="#080808", width=1)
 
-        # 1. Structural Health
-        struct_col = "green" if self.struct_life_y > 5 else ("yellow" if self.struct_life_y > 1 else "red")
+        def draw_card(x, y, title, metrics, color, life_pct=None):
+            self.canvas.create_rectangle(x, y, x+card_w, y+card_h, fill="#0a0a0a", outline="#333", width=2)
+            self.canvas.create_line(x, y+45, x+card_w, y+45, fill="#333")
+            self.canvas.create_text(x+20, y+25, anchor="nw", text=title, fill=color, font=("Monaco", 14, "bold"))
+            
+            off_x = 20
+            if life_pct is not None:
+                draw_vbar(x+20, y+65, 30, card_h-85, life_pct, color)
+                off_x = 70
+
+            for i, (label, val, unit, status_col) in enumerate(metrics):
+                self.canvas.create_text(x+off_x, y+65+i*28, anchor="nw", text=f"{label}:", fill="gray", font=("Monaco", 9))
+                self.canvas.create_text(x+off_x+130, y+65+i*28, anchor="nw", text=f"{val}", fill=status_col, font=("Monaco", 10, "bold"))
+                self.canvas.create_text(x+off_x+200, y+65+i*28, anchor="nw", text=f"{unit}", fill="white", font=("Monaco", 9))
+
+        # 1. Structural Health (Assume 200 years is "Full")
+        struct_life_pct = (self.struct_life_y / 200.0) * 100.0
+        struct_col = "green" if self.struct_life_y > 50 else ("yellow" if self.struct_life_y > 10 else "red")
         struct_metrics = [
-            ("EST. LIFE", f"{self.struct_life_y:.2f}", "Years", struct_col),
-            ("MONTHS",    f"{self.struct_life_m:.1f}", "Months", struct_col),
-            ("DAYS",      f"{self.struct_life_d:.0f}", "Days", struct_col),
-            ("CUM. FATIGUE", f"{self.cum_fatigue:.4e}", "Units", "white"),
+            ("LIFE LEFT", f"{self.struct_life_y:.1f}", "Yrs", struct_col),
+            ("MONTHS",    f"{self.struct_life_m:.0f}", "Mon", struct_col),
+            ("DAYS",      f"{self.struct_life_d:.0f}", "Day", struct_col),
+            ("CUM. FATIGUE", f"{self.cum_fatigue:.2e}", "Unit", "white"),
             ("AGG. RISK", f"{self.agg_risk*100:.2f}", "%", "orange" if self.agg_risk > 0.3 else "green")
         ]
-        draw_card(margin, margin+40, "STRUCTURAL INTEGRITY", struct_metrics, "#00ffff")
+        draw_card(margin, margin+40, "STRUCTURAL INTEGRITY", struct_metrics, "#00ffff", life_pct=struct_life_pct)
 
-        # 2. SSD Health
+        # 2. SSD Health (Assume 10 years is "Full")
+        ssd_life_pct = (self.ssd_life_y / 10.0) * 100.0
         ssd_col = "green" if self.ssd_life_y > 5 else ("yellow" if self.ssd_life_y > 1 else "red")
         ssd_metrics = [
-            ("EST. LIFE", f"{self.ssd_life_y:.2f}", "Years", ssd_col),
-            ("MONTHS",    f"{self.ssd_life_m:.1f}", "Months", ssd_col),
-            ("DAYS",      f"{self.ssd_life_d:.0f}", "Days", ssd_col),
+            ("LIFE LEFT", f"{self.ssd_life_y:.1f}", "Yrs", ssd_col),
+            ("MONTHS",    f"{self.ssd_life_m:.0f}", "Mon", ssd_col),
+            ("DAYS",      f"{self.ssd_life_d:.0f}", "Day", ssd_col),
             ("WEAR LEVEL", f"{self.ssd_used:.1f}", "% Used", "white"),
             ("SPARE CAP.", f"{self.ssd_spare:.1f}", "%", "green" if self.ssd_spare > 10 else "red")
         ]
-        draw_card(margin*2 + card_w, margin+40, "SSD STORAGE HEALTH", ssd_metrics, "#ffaa00")
+        draw_card(margin*2 + card_w, margin+40, "SSD STORAGE HEALTH", ssd_metrics, "#ffaa00", life_pct=ssd_life_pct)
 
         # 3. Power System Health
-        batt_col = "green" if self.battery_health > 80 else ("yellow" if self.battery_health > 50 else "red")
         batt_metrics = [
-            ("BATT HEALTH", f"{self.battery_health:.1f}", "%", batt_col),
-            ("CYCLE COUNT", f"{getattr(self, 'cycle_count', 0)}", "Cycles", "white"),
-            ("DESIGN CAP",  f"{getattr(self, 'batt_design_wh', 0.0):.1f}", "Wh", "white"),
-            ("FULL CAP",    f"{getattr(self, 'batt_full_wh', 0.0):.1f}", "Wh", "white"),
+            ("BATT HEALTH", f"{self.battery_health:.1f}", "%", "green" if self.battery_health > 80 else "red"),
+            ("CYCLE COUNT", f"{getattr(self, 'cycle_count', 0)}", "Cyc", "white"),
             ("UPTIME",      f"{self.uptime_earu/3600.0:.2f}", "Hrs", "cyan")
         ]
-        draw_card(margin, margin*2 + card_h + 10, "POWER & UPTIME", batt_metrics, "#ff00ff")
+        draw_card(margin, margin*2 + card_h + 10, "POWER & UPTIME", batt_metrics, "#ff00ff", life_pct=self.battery_health)
 
         # 4. Prognosis Summary
         summary_metrics = [
