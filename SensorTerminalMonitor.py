@@ -703,8 +703,7 @@ class PrimaryFlightDisplay:
             {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
             {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
             {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
-            {"label": "PROGNO", "page": 9, "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
-            {"label": "CENTER", "cmd": "center", "rect": (float(55+10*btn_w), 5.0, float(55+11*btn_w), 55.0)},
+            {"label": "CENTER", "cmd": "center", "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
             {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 5.0, float(w - btn_w - 10), 55.0)},
             {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 5.0, float(w - 5), 55.0)}
         ]
@@ -724,9 +723,9 @@ class PrimaryFlightDisplay:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
                     self.page = page_val
                 elif key.get("cmd") == "next":
-                    self.page = (self.page + 1) % 10
+                    self.page = (self.page + 1) % 9
                 elif key.get("cmd") == "prev":
-                    self.page = (self.page - 1) % 10
+                    self.page = (self.page - 1) % 9
                 elif key.get("cmd") == "center":
                     self.set_auto_center(True)
                 self.switch_page_view()
@@ -1200,7 +1199,6 @@ class PrimaryFlightDisplay:
         elif self.page == 6: self.draw_wind_page(w, h)
         elif self.page == 7: self.draw_weather_page(w, h)
         elif self.page == 8: self.draw_search_page(w, h)
-        elif self.page == 9: self.draw_prognosis_page(w, h)
         self.draw_nav_keys()
         self.draw_warning_caution_buttons(w, h)
 
@@ -2621,21 +2619,77 @@ class PrimaryFlightDisplay:
             self.canvas.create_text(685, 350, anchor="nw", text=f"TRIGGERED AT: {di_trigger:.1f} s", fill="cyan", font=("Monaco", 9))
 
         # Bottom Left Clock Timing Panel (Box A)
-        self.canvas.create_rectangle(40, 460, 650, 730, fill="#080808", outline="#333", width=2)
-        self.canvas.create_text(345, 475, text="HIGH-RESOLUTION HARDWARE CLOCKS & DRIFT MONITOR", fill="yellow", font=("Monaco", 10, "bold"), anchor="center")
-        self.canvas.create_line(50, 490, 640, 490, fill="#333")
+        self.canvas.create_rectangle(40, 460, 340, 730, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(190, 475, text="HARDWARE CLOCKS & DRIFT", fill="yellow", font=("Monaco", 10, "bold"), anchor="center")
+        self.canvas.create_line(50, 490, 330, 490, fill="#333")
 
-        # Column 1 inside Box A (Drifts & Latencies)
-        self.canvas.create_text(55, 510, anchor="nw", text=f"CLOCK LATENCIES:\nSPU LAT: {spu_lat:.2f} ms\nGPU LAT: {gpu_lat:.2f} ms\nRTC JIT: {rtc_jit:.6f} ms", fill="#aaffdd", font=("Monaco", 9))
+        # Row 1 inside Box A (Drifts & Latencies)
+        self.canvas.create_text(50, 500, anchor="nw", text=f"CLOCK LATENCIES:\nSPU LAT: {spu_lat:.2f} ms\nGPU LAT: {gpu_lat:.2f} ms\nRTC JIT: {rtc_jit:.6f} ms", fill="#aaffdd", font=("Monaco", 9))
 
-        # Column 2 inside Box A (Hardware Nanoseconds Clocks)
-        self.canvas.create_text(220, 510, anchor="nw", text=f"CPU TIME: {t_cpu} ns\nRTC TIME: {t_rtc} ns\nGPU TIME: {t_gpu} ns", fill="#aaffff", font=("Monaco", 8))
-        self.canvas.create_text(395, 510, anchor="nw", text=f"ANE TIME: {t_ane} ns\nDAT TIME: {t_dat} ns\nSPU TIME: {t_spu} ns", fill="#aaffff", font=("Monaco", 8))
+        # Row 2 inside Box A (Hardware Nanoseconds Clocks)
+        self.canvas.create_text(50, 560, anchor="nw", text=f"CPU TIME: {t_cpu} ns\nRTC TIME: {t_rtc} ns\nGPU TIME: {t_gpu} ns", fill="#aaffff", font=("Monaco", 8))
+        self.canvas.create_text(200, 560, anchor="nw", text=f"ANE TIME: {t_ane} ns\nDAT TIME: {t_dat} ns\nSPU TIME: {t_spu} ns", fill="#aaffff", font=("Monaco", 8))
 
-        # Column 3 inside Box A (Interference Flag)
+        # Row 3 inside Box A (Interference Flag)
         int_color = "red" if interfere.lower() == 'yes' else "green"
-        self.canvas.create_text(575, 510, anchor="n", text="INTERFERENCE", fill="gray", font=("Monaco", 9, "bold"))
-        self.canvas.create_text(575, 530, anchor="n", text=interfere.upper(), fill=int_color, font=("Monaco", 16, "bold"))
+        self.canvas.create_text(50, 620, anchor="nw", text="INTERFERENCE:", fill="gray", font=("Monaco", 9, "bold"))
+        self.canvas.create_text(50, 640, anchor="nw", text=interfere.upper(), fill=int_color, font=("Monaco", 16, "bold"))
+
+        # Bottom Mid System Longevity Panel (Box C)
+        self.canvas.create_rectangle(350, 460, 660, 730, fill="#080808", outline="#333", width=2)
+        self.canvas.create_text(505, 475, text="SYSTEM LONGEVITY PROGNOSIS", fill="#00ff00", font=("Monaco", 10, "bold"), anchor="center")
+        self.canvas.create_line(360, 490, 650, 490, fill="#333")
+
+        struct_pct = min(100.0, max(0.0, (self.struct_life_y / 200.0) * 100.0))
+        ssd_pct = min(100.0, max(0.0, (self.ssd_life_y / 10.0) * 100.0))
+        batt_pct = min(100.0, max(0.0, self.battery_health))
+        nvram_health = min(100.0, max(0.0, 100.0 - (self.machine_life / 50000.0 * 100.0)))
+        overall_life_pct = min(struct_pct, ssd_pct, batt_pct, nvram_health)
+
+        def draw_vbar(bx, by, bw, bh, pct, color):
+            pct = min(100.0, max(0.0, pct))
+            self.canvas.create_rectangle(bx, by, bx+bw, by+bh, outline="white", width=1)
+            self.canvas.create_rectangle(bx+bw*0.3, by-5, bx+bw*0.7, by, fill="white", outline="white")
+            fill_h = (bh - 4) * (pct / 100.0)
+            if fill_h > 0:
+                self.canvas.create_rectangle(bx+2, by+bh-fill_h-2, bx+bw-2, by+bh-2, fill=color, outline="")
+            for i in range(1, 10):
+                sy = by + bh * (i/10.0)
+                self.canvas.create_line(bx, sy, bx+bw, sy, fill="#080808", width=1)
+
+        bar_y = 510
+        bar_h = 160
+        bar_w = 25
+
+        # 1. OVERALL
+        ov_col = "green" if overall_life_pct > 50 else ("yellow" if overall_life_pct > 20 else "red")
+        draw_vbar(370, bar_y, bar_w, bar_h, overall_life_pct, ov_col)
+        self.canvas.create_text(382, bar_y + bar_h + 15, text=f"{overall_life_pct:.0f}%", fill=ov_col, font=("Monaco", 9, "bold"), anchor="n")
+        self.canvas.create_text(382, bar_y + bar_h + 30, text="OVERALL", fill="white", font=("Monaco", 8), anchor="n")
+
+        # 2. STRUCT
+        st_col = "green" if self.struct_life_y > 50 else ("yellow" if self.struct_life_y > 10 else "red")
+        draw_vbar(430, bar_y, bar_w, bar_h, struct_pct, st_col)
+        self.canvas.create_text(442, bar_y + bar_h + 15, text=f"{self.struct_life_y:.1f}Y", fill=st_col, font=("Monaco", 9, "bold"), anchor="n")
+        self.canvas.create_text(442, bar_y + bar_h + 30, text="STRUCT", fill="white", font=("Monaco", 8), anchor="n")
+
+        # 3. SSD
+        sd_col = "green" if self.ssd_life_y > 5 else ("yellow" if self.ssd_life_y > 1 else "red")
+        draw_vbar(490, bar_y, bar_w, bar_h, ssd_pct, sd_col)
+        self.canvas.create_text(502, bar_y + bar_h + 15, text=f"{self.ssd_life_y:.1f}Y", fill=sd_col, font=("Monaco", 9, "bold"), anchor="n")
+        self.canvas.create_text(502, bar_y + bar_h + 30, text="SSD", fill="white", font=("Monaco", 8), anchor="n")
+
+        # 4. BATT
+        bt_col = "green" if self.battery_health > 80 else ("yellow" if self.battery_health > 50 else "red")
+        draw_vbar(550, bar_y, bar_w, bar_h, batt_pct, bt_col)
+        self.canvas.create_text(562, bar_y + bar_h + 15, text=f"{batt_pct:.0f}%", fill=bt_col, font=("Monaco", 9, "bold"), anchor="n")
+        self.canvas.create_text(562, bar_y + bar_h + 30, text="BATT", fill="white", font=("Monaco", 8), anchor="n")
+
+        # 5. NVRAM
+        nv_col = "green" if nvram_health > 50 else "yellow"
+        draw_vbar(610, bar_y, bar_w, bar_h, nvram_health, nv_col)
+        self.canvas.create_text(622, bar_y + bar_h + 15, text=f"{nvram_health:.0f}%", fill=nv_col, font=("Monaco", 9, "bold"), anchor="n")
+        self.canvas.create_text(622, bar_y + bar_h + 30, text="NVRAM", fill="white", font=("Monaco", 8), anchor="n")
 
         # Bottom Right Network & Comms Panel (Box B)
         # Net & Comms Status (Mapped from user_entity_detection)
@@ -3214,98 +3268,6 @@ class PrimaryFlightDisplay:
         ft = meteo.get('fetch_time', 0)
         ago = int(time.time() - ft)
         self.canvas.create_text(w-50, h-40, anchor="se", text=f"LAST FETCH: {ago}s AGO", fill="#555", font=("Monaco", 8))
-
-    def draw_prognosis_page(self, w: float, h: float) -> None:
-        self.canvas.create_text(w/2, 40, text="HEALTH & LONGEVITY PROGNOSIS (PROGNO)", fill="#00ff00", font=("Monaco", 20, "bold"))
-
-        # Grid layout for prognosis cards
-        margin = 50.0
-        card_w = (w - 3*margin) / 2
-        card_h = (h - 3*margin) / 2
-
-        def draw_vbar(bx, by, bw, bh, pct, color):
-            # Battery-style vertical bar
-            pct = min(100.0, max(0.0, pct))
-            # Outline & Cap
-            self.canvas.create_rectangle(bx, by, bx+bw, by+bh, outline="white", width=1)
-            self.canvas.create_rectangle(bx+bw*0.3, by-5, bx+bw*0.7, by, fill="white", outline="white")
-            # Fill level
-            fill_h = (bh - 4) * (pct / 100.0)
-            if fill_h > 0:
-                self.canvas.create_rectangle(bx+2, by+bh-fill_h-2, bx+bw-2, by+bh-2, fill=color, outline="")
-            # Grid segments
-            for i in range(1, 10):
-                sy = by + bh * (i/10.0)
-                self.canvas.create_line(bx, sy, bx+bw, sy, fill="#080808", width=1)
-
-        def draw_card(x, y, title, metrics, color, life_pct=None):
-            self.canvas.create_rectangle(x, y, x+card_w, y+card_h, fill="#0a0a0a", outline="#333", width=2)
-            self.canvas.create_line(x, y+45, x+card_w, y+45, fill="#333")
-            self.canvas.create_text(x+20, y+25, anchor="nw", text=title, fill=color, font=("Monaco", 14, "bold"))
-
-            off_x = 20
-            if life_pct is not None:
-                draw_vbar(x+20, y+65, 30, card_h-85, life_pct, color)
-                off_x = 70
-
-            for i, (label, val, unit, status_col) in enumerate(metrics):
-                self.canvas.create_text(x+off_x, y+65+i*28, anchor="nw", text=f"{label}:", fill="gray", font=("Monaco", 9))
-                self.canvas.create_text(x+off_x+130, y+65+i*28, anchor="nw", text=f"{val}", fill=status_col, font=("Monaco", 10, "bold"))
-                self.canvas.create_text(x+off_x+200, y+65+i*28, anchor="nw", text=f"{unit}", fill="white", font=("Monaco", 9))
-
-        # 1. Structural Health (Assume 200 years is "Full")
-        struct_life_pct = (self.struct_life_y / 200.0) * 100.0
-        struct_col = "green" if self.struct_life_y > 50 else ("yellow" if self.struct_life_y > 10 else "red")
-        struct_metrics = [
-            ("LIFE LEFT", f"{self.struct_life_y:.1f}", "Yrs", struct_col),
-            ("MONTHS",    f"{self.struct_life_m:.0f}", "Mon", struct_col),
-            ("DAYS",      f"{self.struct_life_d:.0f}", "Day", struct_col),
-            ("CUM. FATIGUE", f"{self.cum_fatigue:.2e}", "Unit", "white"),
-            ("AGG. RISK", f"{self.agg_risk*100:.2f}", "%", "orange" if self.agg_risk > 0.3 else "green")
-        ]
-        draw_card(margin, margin+40, "STRUCTURAL INTEGRITY", struct_metrics, "#00ffff", life_pct=struct_life_pct)
-
-        # 2. SSD Health (Assume 10 years is "Full")
-        ssd_life_pct = (self.ssd_life_y / 10.0) * 100.0
-        ssd_col = "green" if self.ssd_life_y > 5 else ("yellow" if self.ssd_life_y > 1 else "red")
-        ssd_metrics = [
-            ("LIFE LEFT", f"{self.ssd_life_y:.1f}", "Yrs", ssd_col),
-            ("MONTHS",    f"{self.ssd_life_m:.0f}", "Mon", ssd_col),
-            ("DAYS",      f"{self.ssd_life_d:.0f}", "Day", ssd_col),
-            ("WEAR LEVEL", f"{self.ssd_used:.1f}", "% Used", "white"),
-            ("SPARE CAP.", f"{self.ssd_spare:.1f}", "%", "green" if self.ssd_spare > 10 else "red")
-        ]
-        draw_card(margin*2 + card_w, margin+40, "SSD STORAGE HEALTH", ssd_metrics, "#ffaa00", life_pct=ssd_life_pct)
-
-        # 3. Power System Health
-        batt_metrics = [
-            ("BATT HEALTH", f"{self.battery_health:.1f}", "%", "green" if self.battery_health > 80 else "red"),
-            ("CYCLE COUNT", f"{getattr(self, 'cycle_count', 0)}", "Cyc", "white"),
-            ("UPTIME",      f"{self.uptime_earu/3600.0:.2f}", "Hrs", "cyan")
-        ]
-        draw_card(margin, margin*2 + card_h + 10, "POWER & UPTIME", batt_metrics, "#ff00ff", life_pct=self.battery_health)
-
-        # 4. Prognosis Summary (Combined Overall Health)
-        # Calculate individual subsystem health percentages
-        struct_pct = min(100.0, max(0.0, (self.struct_life_y / 200.0) * 100.0))
-        ssd_pct = min(100.0, max(0.0, (self.ssd_life_y / 10.0) * 100.0))
-        batt_pct = min(100.0, max(0.0, self.battery_health))
-
-        # NVRAM wear estimate based on machine age (Assuming 50k hrs typical MTBF for embedded flash)
-        nvram_health = min(100.0, max(0.0, 100.0 - (self.machine_life / 50000.0 * 100.0)))
-
-        # The weakest link determines the overall system prognosis
-        overall_life_pct = min(struct_pct, ssd_pct, batt_pct, nvram_health)
-        overall_col = "green" if overall_life_pct > 50 else ("yellow" if overall_life_pct > 20 else "red")
-
-        summary_metrics = [
-            ("OVERALL HLTH", f"{overall_life_pct:.1f}", "%", overall_col),
-            ("NVRAM EST.",   f"{nvram_health:.1f}", "%", "green" if nvram_health > 50 else "yellow"),
-            ("MACHINE AGE",  f"{self.machine_life/3600.0:.1f}", "Hrs", "white"),
-            ("NET STATUS",   self.net_comm_verified, "LIVE" if self.net_comm_verified == "TRUE" else "LOST", "green" if self.net_comm_verified == "TRUE" else "red"),
-            ("SYSTEM RISK",  f"{max(self.agg_risk, self.ssd_used/100.0)*100:.1f}", "%", "orange" if max(self.agg_risk, self.ssd_used/100.0) > 0.3 else "yellow")
-        ]
-        draw_card(margin*2 + card_w, margin*2 + card_h + 10, "FLEET PROGNOSIS", summary_metrics, "#ffffff", life_pct=overall_life_pct)
 
 if __name__ == "__main__":
     root = tk.Tk()
