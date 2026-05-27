@@ -3290,10 +3290,10 @@ class PrimaryFlightDisplay:
         struct_pct = min(100.0, max(0.0, (self.struct_life_y / 200.0) * 100.0))
         ssd_pct = min(100.0, max(0.0, (self.ssd_life_y / 10.0) * 100.0))
         batt_pct = min(100.0, max(0.0, self.battery_health))
-        
+
         # NVRAM wear estimate based on machine age (Assuming 50k hrs typical MTBF for embedded flash)
         nvram_health = min(100.0, max(0.0, 100.0 - (self.machine_life / 50000.0 * 100.0)))
-        
+
         # The weakest link determines the overall system prognosis
         overall_life_pct = min(struct_pct, ssd_pct, batt_pct, nvram_health)
         overall_col = "green" if overall_life_pct > 50 else ("yellow" if overall_life_pct > 20 else "red")
