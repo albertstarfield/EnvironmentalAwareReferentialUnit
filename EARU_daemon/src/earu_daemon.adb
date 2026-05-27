@@ -356,7 +356,7 @@ procedure Earu_Daemon is
     task Network_Probe_Task;
    task body Monitor_Task is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
-      Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar.Clock;
+      Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 301.0);
       Last_NVRAM_Sync_Hour     : Integer := -1;
    begin
       while Weather_SHM = null or Stats_SHM = null loop delay 0.1; end loop;
