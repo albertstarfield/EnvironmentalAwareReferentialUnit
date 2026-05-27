@@ -688,7 +688,8 @@ class PrimaryFlightDisplay:
             {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
             {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
             {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
-            {"label": "CENTER", "cmd": "center", "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
+            {"label": "PROGNO", "page": 9, "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
+            {"label": "CENTER", "cmd": "center", "rect": (float(55+10*btn_w), 5.0, float(55+11*btn_w), 55.0)},
             {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 5.0, float(w - btn_w - 10), 55.0)},
             {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 5.0, float(w - 5), 55.0)}
         ]
@@ -708,9 +709,9 @@ class PrimaryFlightDisplay:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
                     self.page = page_val
                 elif key.get("cmd") == "next":
-                    self.page = (self.page + 1) % 9
+                    self.page = (self.page + 1) % 10
                 elif key.get("cmd") == "prev":
-                    self.page = (self.page - 1) % 9
+                    self.page = (self.page - 1) % 10
                 elif key.get("cmd") == "center":
                     self.set_auto_center(True)
                 self.switch_page_view()
@@ -1183,6 +1184,7 @@ class PrimaryFlightDisplay:
         elif self.page == 6: self.draw_wind_page(w, h)
         elif self.page == 7: self.draw_weather_page(w, h)
         elif self.page == 8: self.draw_search_page(w, h)
+        elif self.page == 9: self.draw_prognosis_page(w, h)
         self.draw_nav_keys()
         self.draw_warning_caution_buttons(w, h)
 
@@ -3228,6 +3230,64 @@ class PrimaryFlightDisplay:
         ft = meteo.get('fetch_time', 0)
         ago = int(time.time() - ft)
         self.canvas.create_text(w-50, h-40, anchor="se", text=f"LAST FETCH: {ago}s AGO", fill="#555", font=("Monaco", 8))
+
+    def draw_prognosis_page(self, w: float, h: float) -> None:
+        self.canvas.create_text(w/2, 40, text="HEALTH & LONGEVITY PROGNOSIS (PROGNO)", fill="#00ff00", font=("Monaco", 20, "bold"))
+        
+        # Grid layout for prognosis cards
+        margin = 50.0
+        card_w = (w - 3*margin) / 2
+        card_h = (h - 3*margin) / 2
+
+        def draw_card(x, y, title, metrics, color):
+            self.canvas.create_rectangle(x, y, x+card_w, y+card_h, fill="#0a0a0a", outline=color, width=2)
+            self.canvas.create_text(x+20, y+25, anchor="nw", text=title, fill=color, font=("Monaco", 14, "bold"))
+            for i, (label, val, unit, status_col) in enumerate(metrics):
+                self.canvas.create_text(x+20, y+60+i*30, anchor="nw", text=f"{label}:", fill="gray", font=("Monaco", 10))
+                self.canvas.create_text(x+160, y+60+i*30, anchor="nw", text=f"{val}", fill=status_col, font=("Monaco", 11, "bold"))
+                self.canvas.create_text(x+240, y+60+i*30, anchor="nw", text=f"{unit}", fill="white", font=("Monaco", 10))
+
+        # 1. Structural Health
+        struct_col = "green" if self.struct_life_y > 5 else ("yellow" if self.struct_life_y > 1 else "red")
+        struct_metrics = [
+            ("EST. LIFE", f"{self.struct_life_y:.2f}", "Years", struct_col),
+            ("MONTHS",    f"{self.struct_life_m:.1f}", "Months", struct_col),
+            ("DAYS",      f"{self.struct_life_d:.0f}", "Days", struct_col),
+            ("CUM. FATIGUE", f"{self.cum_fatigue:.4e}", "Units", "white"),
+            ("AGG. RISK", f"{self.agg_risk*100:.2f}", "%", "orange" if self.agg_risk > 0.3 else "green")
+        ]
+        draw_card(margin, margin+40, "STRUCTURAL INTEGRITY", struct_metrics, "#00ffff")
+
+        # 2. SSD Health
+        ssd_col = "green" if self.ssd_life_y > 5 else ("yellow" if self.ssd_life_y > 1 else "red")
+        ssd_metrics = [
+            ("EST. LIFE", f"{self.ssd_life_y:.2f}", "Years", ssd_col),
+            ("MONTHS",    f"{self.ssd_life_m:.1f}", "Months", ssd_col),
+            ("DAYS",      f"{self.ssd_life_d:.0f}", "Days", ssd_col),
+            ("WEAR LEVEL", f"{self.ssd_used:.1f}", "% Used", "white"),
+            ("SPARE CAP.", f"{self.ssd_spare:.1f}", "%", "green" if self.ssd_spare > 10 else "red")
+        ]
+        draw_card(margin*2 + card_w, margin+40, "SSD STORAGE HEALTH", ssd_metrics, "#ffaa00")
+
+        # 3. Power System Health
+        batt_col = "green" if self.battery_health > 80 else ("yellow" if self.battery_health > 50 else "red")
+        batt_metrics = [
+            ("BATT HEALTH", f"{self.battery_health:.1f}", "%", batt_col),
+            ("CYCLE COUNT", f"{getattr(self, 'cycle_count', 0)}", "Cycles", "white"),
+            ("DESIGN CAP",  f"{getattr(self, 'batt_design_wh', 0.0):.1f}", "Wh", "white"),
+            ("FULL CAP",    f"{getattr(self, 'batt_full_wh', 0.0):.1f}", "Wh", "white"),
+            ("UPTIME",      f"{self.uptime_earu/3600.0:.2f}", "Hrs", "cyan")
+        ]
+        draw_card(margin, margin*2 + card_h + 10, "POWER & UPTIME", batt_metrics, "#ff00ff")
+
+        # 4. Prognosis Summary
+        summary_metrics = [
+            ("MACHINE AGE", f"{self.machine_life/3600.0:.1f}", "Hrs", "white"),
+            ("LOOP STAB.",  f"{getattr(self, 'loop_avg', 0.0):.2f}", "ms", "green" if getattr(self, 'loop_avg', 0.0) < 5 else "red"),
+            ("SYSTEM RISK", f"{max(self.agg_risk, self.ssd_used/100.0)*100:.1f}", "%", "yellow"),
+            ("NEXT MAINT.", "350.0", "Hrs", "gray")
+        ]
+        draw_card(margin*2 + card_w, margin*2 + card_h + 10, "FLEET PROGNOSIS", summary_metrics, "#ffffff")
 
 if __name__ == "__main__":
     root = tk.Tk()
