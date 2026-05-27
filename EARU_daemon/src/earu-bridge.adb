@@ -97,11 +97,21 @@ package body Earu.Bridge is
       Unfactored_P := Real'Max (0.0, Real'Min (1.0, Unfactored_P + Env_Fatigue * 0.2));
 
       -- --- Aggregated Structural Risk ---
-      -- Fuses mechanical fatigue, hinge stress, and EMI interference into a single risk factor.
-      State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := Real'Max (
-         State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob,
-         Real'Max (Electromech_P * 0.5, Unfactored_P)
-      );
+      -- Fuses mechanical fatigue, hinge stress, EMI interference, and SSD wear/spare risks into a single risk factor.
+      declare
+         Mechanical_Risk : constant Real := Real'Max (
+            State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob,
+            Real'Max (Electromech_P * 0.5, Unfactored_P)
+         );
+         SSD_Base_Risk : constant Real := (State.System.SSD_Used_Pct / 100.0) * 0.15;
+         SSD_Spare_Risk : constant Real := (if State.System.SSD_Available_Spare < 100.0 then (100.0 - State.System.SSD_Available_Spare) / 5.0 else 0.0);
+         Total_SSD_Risk : constant Real := SSD_Base_Risk + SSD_Spare_Risk;
+      begin
+         State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := Real'Min (
+            1.0,
+            Mechanical_Risk + Total_SSD_Risk
+         );
+      end;
 
       -- Data Integrity Activation
       if State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk >= 0.5 then

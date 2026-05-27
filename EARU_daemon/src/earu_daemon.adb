@@ -368,6 +368,7 @@ procedure Earu_Daemon is
              begin
                 Update_Machine_Life (Full);
                 Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+                Earu.State_Store.State_Buffer.Update_Damage_Fatigue (Full.Seismic_Activity.Damage_Fatigue);
                 Last_Machine_Life_Update := Ada.Calendar.Clock;
              end;
           end if;

@@ -511,6 +511,9 @@ package body Earu.IO is
       AP    ("cumulative_fatigue",      F (State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue));
       AP    ("solder_fatigue_prob",     F (State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob));
       AP    ("electromech_fatigue_prob",F (State.Seismic_Activity.Damage_Fatigue.Electromech_Fatigue_Prob));
+      AP    ("structural_life_left_y",  F (State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_Y));
+      AP    ("structural_life_left_m",  F (State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_M));
+      AP    ("structural_life_left_d",  F (State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_D));
       AP    ("seu_risk_multiplier",     F (State.Seismic_Activity.Damage_Fatigue.Seu_Risk_Multiplier));
       AP    ("alt_stress_multiplier",   F (State.Seismic_Activity.Damage_Fatigue.Alt_Stress_Multiplier));
       AI    ("anomaly_event_upset",     State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count);
