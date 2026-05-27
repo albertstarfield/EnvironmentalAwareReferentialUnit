@@ -3285,14 +3285,27 @@ class PrimaryFlightDisplay:
         ]
         draw_card(margin, margin*2 + card_h + 10, "POWER & UPTIME", batt_metrics, "#ff00ff", life_pct=self.battery_health)
 
-        # 4. Prognosis Summary
+        # 4. Prognosis Summary (Combined Overall Health)
+        # Calculate individual subsystem health percentages
+        struct_pct = min(100.0, max(0.0, (self.struct_life_y / 200.0) * 100.0))
+        ssd_pct = min(100.0, max(0.0, (self.ssd_life_y / 10.0) * 100.0))
+        batt_pct = min(100.0, max(0.0, self.battery_health))
+        
+        # NVRAM wear estimate based on machine age (Assuming 50k hrs typical MTBF for embedded flash)
+        nvram_health = min(100.0, max(0.0, 100.0 - (self.machine_life / 50000.0 * 100.0)))
+        
+        # The weakest link determines the overall system prognosis
+        overall_life_pct = min(struct_pct, ssd_pct, batt_pct, nvram_health)
+        overall_col = "green" if overall_life_pct > 50 else ("yellow" if overall_life_pct > 20 else "red")
+
         summary_metrics = [
-            ("MACHINE AGE", f"{self.machine_life/3600.0:.1f}", "Hrs", "white"),
-            ("LOOP STAB.",  f"{getattr(self, 'loop_avg', 0.0):.2f}", "ms", "green" if getattr(self, 'loop_avg', 0.0) < 5 else "red"),
-            ("NET STATUS",  self.net_comm_verified, "LIVE" if self.net_comm_verified == "TRUE" else "LOST", "green" if self.net_comm_verified == "TRUE" else "red"),
-            ("SYSTEM RISK", f"{max(self.agg_risk, self.ssd_used/100.0)*100:.1f}", "%", "yellow")
+            ("OVERALL HLTH", f"{overall_life_pct:.1f}", "%", overall_col),
+            ("NVRAM EST.",   f"{nvram_health:.1f}", "%", "green" if nvram_health > 50 else "yellow"),
+            ("MACHINE AGE",  f"{self.machine_life/3600.0:.1f}", "Hrs", "white"),
+            ("NET STATUS",   self.net_comm_verified, "LIVE" if self.net_comm_verified == "TRUE" else "LOST", "green" if self.net_comm_verified == "TRUE" else "red"),
+            ("SYSTEM RISK",  f"{max(self.agg_risk, self.ssd_used/100.0)*100:.1f}", "%", "orange" if max(self.agg_risk, self.ssd_used/100.0) > 0.3 else "yellow")
         ]
-        draw_card(margin*2 + card_w, margin*2 + card_h + 10, "FLEET PROGNOSIS", summary_metrics, "#ffffff")
+        draw_card(margin*2 + card_w, margin*2 + card_h + 10, "FLEET PROGNOSIS", summary_metrics, "#ffffff", life_pct=overall_life_pct)
 
 if __name__ == "__main__":
     root = tk.Tk()
