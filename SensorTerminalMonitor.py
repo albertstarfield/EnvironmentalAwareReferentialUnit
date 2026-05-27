@@ -3022,7 +3022,12 @@ class PrimaryFlightDisplay:
 
     def draw_wind_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="FLUID DYNAMICS: WIND MAPPING", fill="#00ffff", font=("Monaco", 20, "bold"))
-        weather = self.full_data.get('ecosystem_weather', {}); grid = weather.get('wind_map', {}).get('grid_7x7_10m', [])
+        weather = self.full_data.get('ecosystem_weather', {})
+        wind_map_data = weather.get('wind_map', {})
+        if isinstance(wind_map_data, dict):
+            grid = wind_map_data.get('grid_7x7_10m', [])
+        else:
+            grid = wind_map_data if isinstance(wind_map_data, list) else []
         if not grid: self.canvas.create_text(w/2, h/2, text="NO WIND GRID", fill="red"); return
         gs, cs = 7, min(w, h) // 12; sx, sy = w/2-(gs*cs)/2, h/2-(gs*cs)/2
         for r in range(gs):
