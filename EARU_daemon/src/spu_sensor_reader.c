@@ -191,10 +191,8 @@ void *spu_thread_func(void *arg) {
         IOObjectRelease(itDevices);
     }
     
-    // Run the CoreFoundation runloop in this thread
-    while (true) {
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, false);
-    }
+    // Run the CoreFoundation runloop in this thread efficiently
+    CFRunLoopRun();
     return NULL;
 }
 
