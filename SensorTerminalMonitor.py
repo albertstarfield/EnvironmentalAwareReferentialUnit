@@ -450,7 +450,7 @@ class PrimaryFlightDisplay:
                 except:
                     self.net_comm_verified = "OFFLINE"
                 time.sleep(10)
-        
+
         threading.Thread(target=verify_net, daemon=True).start()
 
         # Smoothed rates and thermodynamics (1Hz filters)
@@ -2642,11 +2642,11 @@ class PrimaryFlightDisplay:
         ued = self.full_data.get('user_entity_detection', {})
         net_comm = ued.get('net_comm', {})
         net_avail = str(net_comm.get('NET_COMM_AVAILABLE', self.net_comm_verified))
-        
+
         # Override with verified status if telemetry says False/Offline but we have a live check
         if net_avail.upper() in ['FALSE', 'OFFLINE'] and self.net_comm_verified == "TRUE":
             net_avail = "VERIFIED"
-            
+
         services = net_comm.get('services', {})
 
         self.canvas.create_rectangle(670, 460, 960, 730, fill="#080808", outline="#333", width=2)
