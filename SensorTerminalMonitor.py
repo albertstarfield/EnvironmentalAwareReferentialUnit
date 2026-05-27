@@ -17,6 +17,8 @@ import numpy as np
 import shutil
 import base64
 import re
+import wave
+import struct
 from typing import Optional, Any, Union, Literal
 
 # --- Self-Bootstrapping Block ---
@@ -69,38 +71,36 @@ if __name__ == "__main__":
         sys.stderr.write("Error: ruff dependency not found in environment.\n")
         sys.exit(1)
 
-import wave
-import struct
-
 def generate_avionics_chimes() -> None:
-    """Generates professional avionics-style chimes if they don't exist."""
+    """Generates professional avionics-style chimes with exponential release."""
     def write_chime(filename: str, freqs: list[float], pulses: int):
         path = os.path.join(os.path.dirname(__file__), filename)
-        if os.path.exists(path): return
-        
+
         sample_rate = 44100
-        duration_per_pulse = 0.15
+        duration_per_pulse = 0.20 # Slightly longer for release
         gap_duration = 0.05
-        
+
         with wave.open(path, 'w') as f:
             f.setnchannels(1)
             f.setsampwidth(2)
             f.setframerate(sample_rate)
-            
+
+            num_samples = int(duration_per_pulse * sample_rate)
             for _ in range(pulses):
-                # Tone
-                for i in range(int(duration_per_pulse * sample_rate)):
+                # Tone with exponential release
+                for i in range(num_samples):
                     t = i / sample_rate
+                    # Exponential release envelope: start at 1.0, decay to ~0.01
+                    envelope = math.exp(-4.5 * i / num_samples)
                     val = 0.0
                     for f_val in freqs:
                         val += math.sin(2 * math.pi * f_val * t)
-                    val = val / len(freqs) * 0.5 # Normalization
+                    val = (val / len(freqs)) * envelope * 0.5
                     sample = int(val * 32767)
                     f.writeframes(struct.pack('<h', sample))
                 # Gap
                 for _ in range(int(gap_duration * sample_rate)):
                     f.writeframes(struct.pack('<h', 0))
-
     try:
         # Master Warning: High-pitched triple chime (Harmonic 1000Hz + 2000Hz)
         write_chime("warning_chime.wav", [1000.0, 2000.0], 3)
@@ -119,7 +119,7 @@ def play_chime(chime_type: str) -> None:
             elif sys.platform == "win32":
                 import winsound
                 winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
-    
+
     threading.Thread(target=_play, daemon=True).start()
 
 try:
@@ -496,6 +496,8 @@ class PrimaryFlightDisplay:
         self.lockin_miss: float = 0.0
         self.warning_reason: str = ""
         self.caution_reason: str = ""
+        self.last_warning_chime: float = 0.0
+        self.last_caution_chime: float = 0.0
 
         self.env_mode: str = "STANDARD ROAD"
         self.last_env_mode: str = ""
@@ -994,26 +996,37 @@ class PrimaryFlightDisplay:
                         self.work_efficiency_history.append(raw_work_eff)
 
                     # Master Warning / Caution state updates
-                    raw_warning = bool(data.get('master_warning', False))
-                    raw_caution = bool(data.get('master_caution', False))
+                    loc = data.get('location', {})
+                    raw_warning = bool(loc.get('master_warning', False))
+                    raw_caution = bool(loc.get('master_caution', False))
 
                     if raw_warning:
                         if not self.prev_warning:
                             self.warn_acknowledged = False
                             self.prev_warning = True
+
+                        # Repeating Warning Chime (Every 1.5s) if not acknowledged
+                        if not self.warn_acknowledged and time.time() - self.last_warning_chime > 1.5:
                             play_chime("warning")
+                            self.last_warning_chime = time.time()
                     else:
                         self.prev_warning = False
                         self.warn_acknowledged = False
+                        self.last_warning_chime = 0.0
 
                     if raw_caution:
                         if not self.prev_caution:
                             self.caution_acknowledged = False
                             self.prev_caution = True
+
+                        # Repeating Caution Chime (Every 4.0s) if not acknowledged
+                        if not self.caution_acknowledged and time.time() - self.last_caution_chime > 4.0:
                             play_chime("caution")
+                            self.last_caution_chime = time.time()
                     else:
                         self.prev_caution = False
                         self.caution_acknowledged = False
+                        self.last_caution_chime = 0.0
 
                     orient = data.get('orientation', {})
                     self.raw_pitch = float(orient.get('pitch', 0.0))
@@ -1021,7 +1034,6 @@ class PrimaryFlightDisplay:
                     self.targets['pitch'] = self.raw_pitch * self.pitch_sign
                     self.targets['roll'] = self.raw_roll * self.roll_sign
 
-                    loc = data.get('location', {})
                     self.transportation_category = str(loc.get('transportation_category', 'stationary')).strip()
                     self.targets['alt'] = float(loc.get('alt', 0.0))
                     self.targets['speed'] = float(loc.get('v_mag', 0.0) * 1.94384)
@@ -1062,6 +1074,23 @@ class PrimaryFlightDisplay:
                     self.battery_health = float(sys_d.get('BatteryHealthPct', 100.0))
                     self.battery_full_wh = float(sys_d.get('BatteryFullChargeCapacityWh', 0.0))
                     self.battery_design_wh = float(sys_d.get('BatteryDesignCapacityWh', 0.0))
+
+                    self.machine_life = float(sys_d.get('machine_life_runtime', 0.0))
+                    self.ssd_spare = float(sys_d.get('ssd_available_spare', 100.0))
+                    self.ssd_used = float(sys_d.get('ssd_used_pct', 0.0))
+                    self.ssd_read = float(sys_d.get('ssd_data_read_units', 0.0))
+                    self.ssd_write = float(sys_d.get('ssd_data_write_units', 0.0))
+                    self.ssd_life_y = float(sys_d.get('ssd_life_left_years', 0.0))
+                    self.ssd_life_m = float(sys_d.get('ssd_life_left_months', 0.0))
+                    self.ssd_life_d = float(sys_d.get('ssd_life_left_days', 0.0))
+
+                    seismic = data.get('seismic_activity', {})
+                    df = seismic.get('damage_fatigue', {})
+                    self.struct_life_y = float(df.get('structural_life_left_y', 0.0))
+                    self.struct_life_m = float(df.get('structural_life_left_m', 0.0))
+                    self.struct_life_d = float(df.get('structural_life_left_d', 0.0))
+                    self.cum_fatigue = float(df.get('cumulative_fatigue', 0.0))
+                    self.agg_risk = float(df.get('aggregated_risk', 0.0))
 
                     smc = data.get('smc', {})
                     self.power_rate = float(smc.get('PowerRateUsage', 0.0))
@@ -1165,8 +1194,9 @@ class PrimaryFlightDisplay:
         raw_warning = False
         raw_caution = False
         if self.full_data:
-            raw_warning = bool(self.full_data.get('master_warning', False))
-            raw_caution = bool(self.full_data.get('master_caution', False))
+            loc_data = self.full_data.get('location', {})
+            raw_warning = bool(loc_data.get('master_warning', False))
+            raw_caution = bool(loc_data.get('master_caution', False))
 
         warn_ack = getattr(self, 'warn_acknowledged', False)
         caut_ack = getattr(self, 'caution_acknowledged', False)
@@ -1228,7 +1258,7 @@ class PrimaryFlightDisplay:
             target_canvas.create_text((wx1+wx2)/2 + 1, wy2 + 12 + 1, text=reason, fill="#4a0000", font=("Monaco", 8, "bold"), justify="center", tags=target_tags)
             # Foreground
             target_canvas.create_text((wx1+wx2)/2, wy2 + 12, text=reason, fill="white", font=("Monaco", 8, "bold"), justify="center", tags=target_tags)
-        
+
         if raw_caution and self.caution_reason:
             reason = self.caution_reason.replace("\\n", "\n")
             # Shadow
@@ -1861,6 +1891,44 @@ class PrimaryFlightDisplay:
             col = "green" if (n == "SURVIVE" and v == "Yes") or (n == "HIBERNATE" and v == "No") else ("red" if (n == "SURVIVE" and v == "No") or (n == "HIBERNATE" and v == "Yes") else "white")
             if n == "BATT HEALTH": col = "green" if self.battery_health > 80 else "yellow"
             self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
+
+        # SSD Health & Machine Life Column (Below Energy)
+        x_ssd, y_ssd = 750, 480
+        ssd_metrics = [
+            ("MACHINE AGE", f"{self.machine_life:.1f} hrs"),
+            ("SSD USED", f"{self.ssd_used:.1f} %"),
+            ("SSD SPARE", f"{self.ssd_spare:.1f} %"),
+            ("DATA READ", f"{self.ssd_read:,.0f} U"),
+            ("DATA WRITE", f"{self.ssd_write:,.0f} U"),
+            ("LIFE LEFT", f"{self.ssd_life_y:.1f} Yrs"),
+            ("", f"{self.ssd_life_m:.1f} Mon"),
+            ("", f"{self.ssd_life_d:.1f} Day")
+        ]
+        self.canvas.create_text(x_ssd, y_ssd - 30, anchor="nw", text="SSD HEALTH & LIFE", fill="#ff9900", font=("Monaco", 12, "bold"))
+        for i, (n, v) in enumerate(ssd_metrics):
+            col = "white"
+            if n == "SSD USED": col = "green" if self.ssd_used < 50 else ("yellow" if self.ssd_used < 80 else "red")
+            if n == "SSD SPARE": col = "green" if self.ssd_spare > 90 else "red"
+            if n == "LIFE LEFT": col = "green" if self.ssd_life_y > 5 else ("yellow" if self.ssd_life_y > 1 else "red")
+            self.canvas.create_text(x_ssd, y_ssd + i*25, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
+
+        # Structural Life & Risk Column
+        x_str, y_str = 500, 480
+        str_metrics = [
+            ("CUM. FATIGUE", f"{self.cum_fatigue:.4f} %"),
+            ("AGG. RISK", f"{self.agg_risk:.4f}"),
+            ("STRUCT LIFE", f"{self.struct_life_y:.1f} Yrs"),
+            ("", f"{self.struct_life_m:.1f} Mon"),
+            ("", f"{self.struct_life_d:.1f} Day"),
+            ("FAILURE THRES", "100.00 %")
+        ]
+        self.canvas.create_text(x_str, y_str - 30, anchor="nw", text="STRUCTURAL HEALTH", fill="#ff00ff", font=("Monaco", 12, "bold"))
+        for i, (n, v) in enumerate(str_metrics):
+            col = "white"
+            if n == "CUM. FATIGUE": col = "green" if self.cum_fatigue < 10 else ("yellow" if self.cum_fatigue < 50 else "red")
+            if n == "AGG. RISK": col = "green" if self.agg_risk < 0.1 else ("yellow" if self.agg_risk < 0.3 else "red")
+            if n == "STRUCT LIFE": col = "green" if self.struct_life_y > 5 else ("yellow" if self.struct_life_y > 1 else "red")
+            self.canvas.create_text(x_str, y_str + i*25, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
 
         # --- Vertical Battery Fuel Gauge ---
         bx = 945
@@ -2580,7 +2648,9 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(575, 530, anchor="n", text=interfere.upper(), fill=int_color, font=("Monaco", 16, "bold"))
 
         # Bottom Right Network & Comms Panel (Box B)
-        net_comm = self.full_data.get('net_comm', {})
+        # Net & Comms Status (Mapped from user_entity_detection)
+        ued = self.full_data.get('user_entity_detection', {})
+        net_comm = ued.get('net_comm', {})
         net_avail = str(net_comm.get('NET_COMM_AVAILABLE', 'False'))
         services = net_comm.get('services', {})
 

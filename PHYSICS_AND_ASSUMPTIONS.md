@@ -415,6 +415,14 @@ This extreme boundary yielded a notable, highly counter-intuitive performance im
 *   **Elimination of Threshold Lag:** Coarse physical threshold gates introduce a phase delay (lag) before the integration registers motion. Operating at $1.0 \times 10^{-16}$ allows the solver to react instantly to the initial gradient of speed changes, capturing high-fidelity transitional mechanics.
 *   **Synergy with 800Hz Sampling:** The extremely high-density GNAT Ada scheduling loop ensures that continuous kinetic forces are mapped with smooth, infinitesimally small changes per frame. Fused with double-precision floats, these micro-updates are successfully integrated without rounding errors, unlocking highly accurate, responsive tracking during active transit.
 
+### 10.6 Coordinate Parity Auto-Correction (Adaptive Navigation)
+To compensate for varying sensor orientations and chassis physical alignment (e.g., portrait sensor in landscape laptop), the system implements an autonomous coordinate parity selector. 
+
+Every time a valid GPS gradient is established ($D_{CL} > 5.0\text{ m}$), the dead-reckoning engine evaluates 8 possible inversion combinations (Mapping Modes 0-7) for the X, Y, and Z axes. The system calculates the dot-product alignment between the GPS displacement vector and the DR displacement vector for each mode:
+$$\text{Mode}_{best} = \max_{m \in [0,7]} \left( \mathbf{v}_{DR\_m} \cdot \mathbf{v}_{GPS} \right)$$
+
+The selected mode is locked and applied to all subsequent inertial integrations until the next GPS update. This ensures that the system automatically "learns" the correct physical axis alignment in real-time without manual calibration.
+
 ---
 
 ## 11. Wi-Fi and Bluetooth Geolocation Triangulation ("Soil Signals")
@@ -937,6 +945,30 @@ Since sensor drift, electromagnetic interference, shared memory timeouts, geodet
 1. **Self-Patching Parity Engine**: Dynamic telemetry integrity checks and automatic live state recovery protocols ensure that memory corruption is corrected in real-time.
 2. **Deterministic Time-Constraint Policies**: Priority is scheduled under `THREAD_TIME_CONSTRAINT_POLICY` at nice `-20` to guarantee CPU execution cycles even under severe system thrashing.
 3. **Graceful Degradation and Restarts**: Daemon bootloops and sensor timeouts are actively monitored, and external API drift anchors auto-calibrate to ensure continuous, safe operation.
+
+---
+
+## 24. Machine Structural Life Prediction & Crack Propagation Modeling
+
+The system predicts the remaining operational life of the machine by fusing real-time stress monitoring with cumulative material fatigue data. This model treats the machine as a living structure subject to microscopic crack growth.
+
+### 24.1 Paris' Law Analogy for Crack Growth
+Structural damage is modeled as a growing "crack" where the rate of growth accelerates as the structure nears failure. The damage rate ($\dot{a}$) is driven by the current `Aggregated_Risk` ($\Delta K$ or Stress Intensity Range):
+$$\frac{da}{dt} = C \cdot (\text{Aggregated\_Risk})^m$$
+*   **$a$ (Crack Length):** Represented by `Cumulative_Fatigue`. Failure is defined at $a_{crit} = 100.0\%$.
+*   **$C$ (Material Constant):** Calibrated as $0.001$ for baseline aluminum/solder aging.
+*   **$m$ (Growth Exponent):** $2.5$. This reflects the non-linear acceleration of damage under high-stress conditions (vibration, heat, SSD wear).
+
+### 24.2 Structural Life Expectancy ($T_{left}$)
+The remaining life is calculated by integrating the current damage state against the predicted damage rate:
+$$T_{left} = \frac{100.0 - \text{Cumulative\_Fatigue}}{\max(\dot{a}, \dot{a}_{min})}$$
+*   **$\dot{a}_{min}$ (Background Aging):** A minimum rate of $10^{-5}\%/\text{hr}$ is enforced to account for standard oxidation and chemical aging even when the device is idle.
+
+### 24.3 SSD-Structural Risk Fusion
+The `Aggregated_Risk` is not purely mechanical; it incorporates electronic "fatigue" from the SSD.
+$$\text{Risk}_{total} = \text{Risk}_{mechanical} + \text{Risk}_{SSD}$$
+$$\text{Risk}_{SSD} = 0.15 \cdot \left(\frac{\text{SSD\_Used}}{100}\right) + \frac{100 - \text{SSD\_Spare}}{5}$$
+This ensures that as the SSD nears its TBW (Total Bytes Written) limit or exhausts its spare blocks, the overall "Structural Health" of the machine is penalized, reflecting the integrated nature of modern compute hardware.
 
 ---
 

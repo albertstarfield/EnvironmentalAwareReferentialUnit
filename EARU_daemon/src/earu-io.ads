@@ -24,13 +24,18 @@ package Earu.IO is
    function Read_Sensor_Integer (Filename : String) return Integer;
 
    procedure Load_Initial_State (
-      Path               : String;
-      Lat, Lon, Alt      : out Earu.Types.Real;
-      Heading            : out Earu.Types.Real;
-      Total_Dist         : out Earu.Types.Real;
-      Cumulative_Fatigue : out Earu.Types.Real;
-      Q_W, Q_X, Q_Y, Q_Z : out Earu.Types.Real;
-      Success            : out Boolean
+      Path                 : String;
+      Lat, Lon, Alt        : out Earu.Types.Real;
+      Heading              : out Earu.Types.Real;
+      Total_Dist           : out Earu.Types.Real;
+      Cumulative_Fatigue   : out Earu.Types.Real;
+      Machine_Life_Runtime : out Earu.Types.Real;
+      Q_W, Q_X, Q_Y, Q_Z   : out Earu.Types.Real;
+      Success              : out Boolean
    );
+
+   function Read_NVRAM_Real (Name : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real;
+   procedure Write_NVRAM_Real (Name : String; Value : Earu.Types.Real);
+   function Execute_And_Read_Real (Command : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real;
 
 end Earu.IO;

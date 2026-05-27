@@ -8,6 +8,9 @@ project Earu_Daemon is
    for Exec_Dir use "bin";
    for Main use ("earu_daemon.adb", "print_offsets.adb");
 
+   for Archive_Builder use ("/usr/bin/ar", "cr");
+   for Archive_Indexer use ("/usr/bin/ranlib");
+
    package Compiler is
       for Driver ("C") use "/usr/bin/clang";
       for Default_Switches ("Ada") use ("-g", "-O2", "-gnatwa", "-gnatW8");
@@ -15,7 +18,7 @@ project Earu_Daemon is
    end Compiler;
 
    package Linker is
-      for Switches ("Ada") use ("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib");
+      for Switches ("Ada") use ("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib", "-F/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks", "-framework", "IOKit", "-framework", "CoreFoundation");
    end Linker;
 
    package Install is

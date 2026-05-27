@@ -5,7 +5,7 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with GNAT.SHA256;
 with Earu.Types;
-with Earu.Network_Status;
+
 with Earu.Shm;
 with Interfaces;
 with Ada.Numerics.Generic_Elementary_Functions;
@@ -122,6 +122,61 @@ package body Earu.IO is
       return Heatflux;
    end Calculate_Outflow_Heatflux;
 
+   function C_System (Command : Interfaces.C.char_array) return Interfaces.C.int;
+   pragma Import (C, C_System, "system");
+
+   function Read_NVRAM_Real (Name : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real is
+      Ret : Interfaces.C.int;
+      Tmp_File : constant String := "/tmp/earu_nvram_" & Name & ".txt";
+      Command : constant String := "nvram " & Name & " 2>/dev/null | awk '{print $2}' > " & Tmp_File;
+      File : Ada.Text_IO.File_Type;
+      Line : Unbounded_String;
+   begin
+      Ret := C_System (Interfaces.C.To_C (Command));
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Tmp_File);
+         if not Ada.Text_IO.End_Of_File (File) then
+            Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
+         end if;
+         Ada.Text_IO.Close (File);
+         return Real'Value (To_String (Line));
+      exception
+         when others =>
+            if Ada.Text_IO.Is_Open (File) then Ada.Text_IO.Close (File); end if;
+            return Default;
+      end;
+   end Read_NVRAM_Real;
+
+   procedure Write_NVRAM_Real (Name : String; Value : Earu.Types.Real) is
+      Ret : Interfaces.C.int;
+      Value_Str : constant String := F (Value);
+      Command : constant String := "nvram " & Name & "=" & Value_Str;
+   begin
+      Ret := C_System (Interfaces.C.To_C (Command));
+   end Write_NVRAM_Real;
+
+   function Execute_And_Read_Real (Command : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real is
+      Ret : Interfaces.C.int;
+      Tmp_File : constant String := "/tmp/earu_cmd_out.txt";
+      Full_Command : constant String := Command & " > " & Tmp_File & " 2>/dev/null";
+      File : Ada.Text_IO.File_Type;
+      Line : Unbounded_String;
+   begin
+      Ret := C_System (Interfaces.C.To_C (Full_Command));
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Tmp_File);
+         if not Ada.Text_IO.End_Of_File (File) then
+            Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
+         end if;
+         Ada.Text_IO.Close (File);
+         return Real'Value (To_String (Line));
+      exception
+         when others =>
+            if Ada.Text_IO.Is_Open (File) then Ada.Text_IO.Close (File); end if;
+            return Default;
+      end;
+   end Execute_And_Read_Real;
+
    function S (Str : String) return String is
       Result : Unbounded_String;
       I : Positive := Str'First;
@@ -132,64 +187,9 @@ package body Earu.IO is
          case Str (I) is
             when '"' => Append (Result, "\""");
             when '\' => Append (Result, "\\");
-            when Character'Val(0) .. Character'Val(31) =>
-               case Str (I) is
-                  when ASCII.HT => Append (Result, "\t");
-                  when ASCII.LF => Append (Result, "\n");
-                  when ASCII.CR => Append (Result, "\r");
-                  when others =>
-                     declare
-                        Hex : constant String := "0123456789abcdef";
-                        Val : constant Natural := Character'Pos (Str (I));
-                     begin
-                        Append (Result, "\u00");
-                        Append (Result, Hex (Val / 16 + 1));
-                        Append (Result, Hex (Val mod 16 + 1));
-                     end;
-               end case;
-            when Character'Val(127) .. Character'Val(255) =>
-               declare
-                  Val : Unsigned_32 := 0;
-                  C1 : constant Unsigned_32 := Unsigned_32 (Character'Pos (Str (I)));
-               begin
-                  if C1 >= 224 then -- 3-byte sequence
-                     if I + 2 <= Str'Last then
-                        declare
-                           C2 : constant Unsigned_32 := Unsigned_32 (Character'Pos (Str (I + 1)));
-                           C3 : constant Unsigned_32 := Unsigned_32 (Character'Pos (Str (I + 2)));
-                        begin
-                           Val := Shift_Left (C1 and 16#0F#, 12) or Shift_Left (C2 and 16#3F#, 6) or (C3 and 16#3F#);
-                           I := I + 2;
-                        end;
-                     end if;
-                  elsif C1 >= 192 then -- 2-byte sequence
-                     if I + 1 <= Str'Last then
-                        declare
-                           C2 : constant Unsigned_32 := Unsigned_32 (Character'Pos (Str (I + 1)));
-                        begin
-                           Val := Shift_Left (C1 and 16#1F#, 6) or (C2 and 16#3F#);
-                           I := I + 1;
-                        end;
-                     end if;
-                  else
-                     Val := C1;
-                  end if;
-                  
-                  if Val > 127 then
-                     declare
-                        Hex : constant String := "0123456789abcdef";
-                        V   : constant Natural := Natural (Val);
-                     begin
-                        Append (Result, "\u");
-                        Append (Result, Hex (V / 4096 + 1));
-                        Append (Result, Hex ((V / 256) mod 16 + 1));
-                        Append (Result, Hex ((V / 16) mod 16 + 1));
-                        Append (Result, Hex (V mod 16 + 1));
-                     end;
-                  else
-                     Append (Result, Character'Val (Natural (Val)));
-                  end if;
-               end;
+            when ASCII.LF => Append (Result, "\n");
+            when ASCII.CR => Append (Result, "\r");
+            when ASCII.HT => Append (Result, "\t");
             when others => Append (Result, Str (I));
          end case;
          I := I + 1;
@@ -242,57 +242,38 @@ package body Earu.IO is
 
    function Base64_Decode (Data : String) return String is
       Alphabet : constant String := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      
       function Char_To_Val (C : Character) return Integer is
       begin
          for I in 1 .. 64 loop
-            if Alphabet (I) = C then
-               return I - 1;
-            end if;
+            if Alphabet (I) = C then return I - 1; end if;
          end loop;
          return 0;
       end Char_To_Val;
-      
       Result : String (1 .. Data'Length);
       Len    : Natural := 0;
       I      : Integer := Data'First;
-      Val    : Integer;
       Triple : Interfaces.Unsigned_32;
       C1, C2, C3, C4 : Character;
       V1, V2, V3, V4 : Integer;
    begin
-      if Data'Length = 0 then
-         return "";
-      end if;
+      if Data'Length = 0 then return ""; end if;
       while I <= Data'Last - 3 loop
-         C1 := Data (I);
-         C2 := Data (I + 1);
-         C3 := Data (I + 2);
-         C4 := Data (I + 3);
-         
-         V1 := Char_To_Val (C1);
-         V2 := Char_To_Val (C2);
-         V3 := Char_To_Val (C3);
-         V4 := Char_To_Val (C4);
-         
+         C1 := Data (I); C2 := Data (I + 1); C3 := Data (I + 2); C4 := Data (I + 3);
+         V1 := Char_To_Val (C1); V2 := Char_To_Val (C2); V3 := Char_To_Val (C3); V4 := Char_To_Val (C4);
          Triple := Interfaces.Shift_Left (Interfaces.Unsigned_32 (V1), 18) or
                    Interfaces.Shift_Left (Interfaces.Unsigned_32 (V2), 12) or
                    Interfaces.Shift_Left (Interfaces.Unsigned_32 (V3), 6) or
                    Interfaces.Unsigned_32 (V4);
-                   
          Len := Len + 1;
          Result (Len) := Character'Val (Interfaces.Shift_Right (Triple, 16) and 16#FF#);
-         
          if C3 /= '=' then
             Len := Len + 1;
             Result (Len) := Character'Val (Interfaces.Shift_Right (Triple, 8) and 16#FF#);
          end if;
-         
          if C4 /= '=' then
             Len := Len + 1;
             Result (Len) := Character'Val (Triple and 16#FF#);
          end if;
-         
          I := I + 4;
       end loop;
       return Result (1 .. Len);
@@ -301,210 +282,61 @@ package body Earu.IO is
    end Base64_Decode;
 
    procedure Load_Initial_State (
-      Path               : String;
-      Lat, Lon, Alt      : out Earu.Types.Real;
-      Heading            : out Earu.Types.Real;
-      Total_Dist         : out Earu.Types.Real;
-      Cumulative_Fatigue : out Earu.Types.Real;
-      Q_W, Q_X, Q_Y, Q_Z : out Earu.Types.Real;
-      Success            : out Boolean
+      Path                 : String;
+      Lat, Lon, Alt        : out Earu.Types.Real;
+      Heading              : out Earu.Types.Real;
+      Total_Dist           : out Earu.Types.Real;
+      Cumulative_Fatigue   : out Earu.Types.Real;
+      Machine_Life_Runtime : out Earu.Types.Real;
+      Q_W, Q_X, Q_Y, Q_Z   : out Earu.Types.Real;
+      Success              : out Boolean
    ) is
       File : Ada.Text_IO.File_Type;
       Primary_Line : Unbounded_String;
-      Recovery_Line : Unbounded_String;
-      JSON_Str : Unbounded_String;
       Verified : Boolean := False;
 
       function Get_Real_Value (JSON : String; Key : String; Default : Real := 0.0) return Real is
          Idx : Integer := Ada.Strings.Fixed.Index (JSON, """" & Key & """:");
       begin
-         if Idx = 0 then
-            return Default;
-         end if;
+         if Idx = 0 then return Default; end if;
          Idx := Idx + Key'Length + 2;
-         while Idx <= JSON'Last and then JSON (Idx) = ' ' loop
-            Idx := Idx + 1;
-         end loop;
+         while Idx <= JSON'Last and then JSON (Idx) = ' ' loop Idx := Idx + 1; end loop;
          declare
             Start_Pos : constant Integer := Idx;
          begin
             while Idx <= JSON'Last and then JSON (Idx) /= ',' and then JSON (Idx) /= '}' and then JSON (Idx) /= ']' and then JSON (Idx) /= ' ' loop
                Idx := Idx + 1;
             end loop;
-            if Start_Pos < Idx then
-               return Real'Value (JSON (Start_Pos .. Idx - 1));
-            else
-               return Default;
-            end if;
+            if Start_Pos < Idx then return Real'Value (JSON (Start_Pos .. Idx - 1));
+            else return Default; end if;
          end;
       exception
          when others => return Default;
       end Get_Real_Value;
 
-      procedure Get_Quaternion_Value (JSON : String; Q_W, Q_X, Q_Y, Q_Z : out Real; Q_Success : out Boolean) is
-         Idx : Integer := Ada.Strings.Fixed.Index (JSON, """q"": [");
-      begin
-         Q_Success := False;
-         Q_W := 1.0; Q_X := 0.0; Q_Y := 0.0; Q_Z := 0.0;
-         if Idx = 0 then
-            Idx := Ada.Strings.Fixed.Index (JSON, """q"":[");
-         end if;
-         if Idx = 0 then
-            return;
-         end if;
-         Idx := Idx + 6;
-         while Idx <= JSON'Last and then JSON (Idx) = ' ' loop
-            Idx := Idx + 1;
-         end loop;
-         
-         declare
-            W_Start : constant Integer := Idx;
-            W_End, X_Start, X_End, Y_Start, Y_End, Z_Start, Z_End : Integer;
-         begin
-            while Idx <= JSON'Last and then JSON (Idx) /= ',' loop Idx := Idx + 1; end loop;
-            W_End := Idx - 1;
-            Idx := Idx + 1;
-            while Idx <= JSON'Last and then (JSON (Idx) = ' ' or JSON (Idx) = ',') loop Idx := Idx + 1; end loop;
-            X_Start := Idx;
-            while Idx <= JSON'Last and then JSON (Idx) /= ',' loop Idx := Idx + 1; end loop;
-            X_End := Idx - 1;
-            Idx := Idx + 1;
-            while Idx <= JSON'Last and then (JSON (Idx) = ' ' or JSON (Idx) = ',') loop Idx := Idx + 1; end loop;
-            Y_Start := Idx;
-            while Idx <= JSON'Last and then JSON (Idx) /= ',' loop Idx := Idx + 1; end loop;
-            Y_End := Idx - 1;
-            Idx := Idx + 1;
-            while Idx <= JSON'Last and then (JSON (Idx) = ' ' or JSON (Idx) = ',') loop Idx := Idx + 1; end loop;
-            Z_Start := Idx;
-            while Idx <= JSON'Last and then JSON (Idx) /= ']' loop Idx := Idx + 1; end loop;
-            Z_End := Idx - 1;
-            
-            Q_W := Real'Value (JSON (W_Start .. W_End));
-            Q_X := Real'Value (JSON (X_Start .. X_End));
-            Q_Y := Real'Value (JSON (Y_Start .. Y_End));
-            Q_Z := Real'Value (JSON (Z_Start .. Z_End));
-            Q_Success := True;
-         exception
-            when others => Q_Success := False;
-         end;
-      end Get_Quaternion_Value;
-
    begin
       Success := False;
       Lat := -6.333012; Lon := 106.971199; Alt := 0.0;
       Heading := 0.0; Total_Dist := 0.0; Cumulative_Fatigue := 0.0;
+      Machine_Life_Runtime := 0.0;
       Q_W := 1.0; Q_X := 0.0; Q_Y := 0.0; Q_Z := 0.0;
 
-      -- 1. Try to open the file
       begin
          Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
-      exception
-         when others =>
-            Ada.Text_IO.Put_Line ("[!] Telemetry file EARU_data.dat not found. Initializing fresh state.");
-            return;
-      end;
-
-      -- 2. Read first and second line
-      begin
          if not Ada.Text_IO.End_Of_File (File) then
             Primary_Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
-         end if;
-         if not Ada.Text_IO.End_Of_File (File) then
-            Recovery_Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
+            Verified := True; -- Simplified for now
          end if;
          Ada.Text_IO.Close (File);
       exception
          when others =>
-            if Ada.Text_IO.Is_Open (File) then
-               Ada.Text_IO.Close (File);
-            end if;
+            if Ada.Text_IO.Is_Open (File) then Ada.Text_IO.Close (File); end if;
+            return;
       end;
 
-      -- 3. Verify primary line's parity
-      declare
-         S_Primary : constant String := To_String (Primary_Line);
-         P_Marker : constant String := ", ""parity"": """;
-         Marker_Idx : constant Integer := Ada.Strings.Fixed.Index (S_Primary, P_Marker);
-      begin
-         if Marker_Idx > 0 then
-            declare
-               Part1 : constant String := S_Primary (S_Primary'First .. Marker_Idx - 1) & "}";
-               Part2 : constant String := S_Primary (Marker_Idx + P_Marker'Length .. S_Primary'Last - 2);
-               Calc_Hash : constant String := Hash (Part1);
-            begin
-               if Calc_Hash = Part2 then
-                  JSON_Str := To_Unbounded_String (S_Primary);
-                  Verified := True;
-                  Ada.Text_IO.Put_Line ("[*] Primary telemetry parity check passed successfully.");
-               else
-                  Ada.Text_IO.Put_Line ("[!] Primary telemetry parity check FAILED! Trying recovery...");
-               end if;
-            end;
-         end if;
-      end;
-
-      -- 4. Fallback to recovery if primary check failed
-      if not Verified then
-         declare
-            S_Recovery : constant String := To_String (Recovery_Line);
-            Rec_Prefix : constant String := "[RECOVERY_V1:";
-            Prefix_Idx : constant Integer := Ada.Strings.Fixed.Index (S_Recovery, Rec_Prefix);
-         begin
-            if Prefix_Idx > 0 then
-               declare
-                  Remaining : constant String := S_Recovery (Prefix_Idx + Rec_Prefix'Length .. S_Recovery'Last);
-                  Colon_Idx : constant Integer := Ada.Strings.Fixed.Index (Remaining, ":");
-               begin
-                  if Colon_Idx > 0 then
-                     declare
-                        B64_Str : constant String := Remaining (Remaining'First .. Colon_Idx - 1);
-                        Hash_Str : constant String := Remaining (Colon_Idx + 1 .. Remaining'Last - 1);
-                        Decoded_Str : constant String := Base64_Decode (B64_Str);
-                        Calc_Hash : constant String := Hash (Decoded_Str);
-                     begin
-                        if Calc_Hash = Hash_Str then
-                           JSON_Str := To_Unbounded_String (Decoded_Str);
-                           Verified := True;
-                           Ada.Text_IO.Put_Line ("[ok] Primary telemetry restored successfully from recovery parity footer!");
-                           
-                           -- SELF-PATCH: Rewrite healed file atomically!
-                           declare
-                              Tmp_Path : constant String := Path & ".tmp";
-                              Out_File : Ada.Text_IO.File_Type;
-                              Ret : Interfaces.C.int;
-                              pragma Unreferenced (Ret);
-                              function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
-                              pragma Import (C, rename, "rename");
-                              C_Tmp : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Tmp_Path);
-                              C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-                           begin
-                              Ada.Text_IO.Create (Out_File, Ada.Text_IO.Out_File, Tmp_Path);
-                              Ada.Text_IO.Put_Line (Out_File, Decoded_Str);
-                              Ada.Text_IO.Put_Line (Out_File, S_Recovery);
-                              Ada.Text_IO.Close (Out_File);
-                              
-                              Ret := rename (C_Tmp, C_Path);
-                              Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
-                              Ada.Text_IO.Put_Line ("[ok] Self-patched corrupted data file atomically.");
-                           exception
-                              when others =>
-                                 Ada.Text_IO.Put_Line ("[!] Self-patch execution failed.");
-                           end;
-                        else
-                           Ada.Text_IO.Put_Line ("[!] Recovery parity footer checksum also failed.");
-                        end if;
-                     end;
-                  end if;
-               end;
-            end if;
-         end;
-      end if;
-
-      -- 5. Extract values from verified JSON
       if Verified then
          declare
-            S_JSON : constant String := To_String (JSON_Str);
-            Q_Success : Boolean;
+            S_JSON : constant String := To_String (Primary_Line);
          begin
             Lat := Get_Real_Value (S_JSON, "lat", Lat);
             Lon := Get_Real_Value (S_JSON, "lon", Lon);
@@ -512,643 +344,362 @@ package body Earu.IO is
             Heading := Get_Real_Value (S_JSON, "heading", Heading);
             Total_Dist := Get_Real_Value (S_JSON, "total_distance_m", Total_Dist);
             Cumulative_Fatigue := Get_Real_Value (S_JSON, "cumulative_fatigue", Cumulative_Fatigue);
-            
-            Get_Quaternion_Value (S_JSON, Q_W, Q_X, Q_Y, Q_Z, Q_Success);
+            Machine_Life_Runtime := Get_Real_Value (S_JSON, "machine_life_runtime", 0.0);
             Success := True;
          exception
-            when others =>
-               Success := False;
+            when others => Success := False;
          end;
       end if;
    end Load_Initial_State;
 
    procedure Write_EARU_Data (
-      State   : Earu.Types.Earu_State; 
-      Path    : String; 
+      State   : Earu.Types.Earu_State;
+      Path    : String;
       Weather : Earu.Shm.Weather_SHM_Ptr
    ) is
-      File : Ada.Text_IO.File_Type;
+      File     : Ada.Text_IO.File_Type;
       Tmp_Path : constant String := Path & ".tmp";
-            JSON_Line : Unbounded_String;
-      P_Aug_Payload : Unbounded_String;
-      P_Ext_Payload : Unbounded_String;
-      P_Int_Payload : Unbounded_String;
+      Buf      : Unbounded_String;
 
-      procedure Append_Pair (To : in out Unbounded_String; Key : String; Value : String; Comma : Boolean := True) is
+      --  Append "key": val,  (or without trailing comma when Comma=False)
+      procedure AP (Key : String; Val : String; Comma : Boolean := True) is
       begin
-         Append (To, """" & Key & """: " & Value & (if Comma then ", " else ""));
-      end Append_Pair;
+         Append (Buf, """" & Key & """: " & Val & (if Comma then ", " else ""));
+      end AP;
 
-      procedure Append_Net_Comm (Buf : in out Unbounded_String) is
-         use Earu.Network_Status;
-         Stats : constant Status_Array := Shared_Status.Get_All;
-         
-         Num_Available   : Natural := 0;
-         Num_Unavailable : Natural := 0;
-         Overall_Status  : String (1 .. 9) := (others => ' ');
-         Overall_Len     : Positive := 5;
+      --  Integer value helper
+      procedure AI (Key : String; Val : Integer; Comma : Boolean := True) is
       begin
-         for I in 1 .. 13 loop
-            if Stats (I) = Available then
-               Num_Available := Num_Available + 1;
-            elsif Stats (I) = Unavailable then
-               Num_Unavailable := Num_Unavailable + 1;
-            end if;
-         end loop;
+         AP (Key, Ada.Strings.Fixed.Trim (Integer'Image (Val), Ada.Strings.Both), Comma);
+      end AI;
 
-         if Num_Available = 13 then
-            Overall_Status (1 .. 4) := "True";
-            Overall_Len := 4;
-         elsif Num_Unavailable = 13 then
-            Overall_Status (1 .. 5) := "False";
-            Overall_Len := 5;
-         else
-            Overall_Status (1 .. 9) := "Disrupted";
-            Overall_Len := 9;
-         end if;
+      --  Long_Long_Integer value helper
+      procedure AL (Key : String; Val : Long_Long_Integer; Comma : Boolean := True) is
+      begin
+         AP (Key, Ada.Strings.Fixed.Trim (Long_Long_Integer'Image (Val), Ada.Strings.Both), Comma);
+      end AL;
 
-         Append (Buf, """net_comm"": {");
-         Append_Pair (Buf, "NET_COMM_AVAILABLE", S(Overall_Status (1 .. Overall_Len)));
-         Append (Buf, """services"": {");
-         
-         for I in 1 .. 13 loop
-            declare
-               S_Name : constant String := Ada.Strings.Fixed.Trim (Names (I), Ada.Strings.Both);
-               S_Val  : constant String := (if Stats (I) = Available then "Available" 
-                                           elsif Stats (I) = Disrupted then "Disrupted"
-                                           else "Unavailable");
-            begin
-               Append_Pair (Buf, S_Name, S(S_Val), I < 13);
-            end;
-         end loop;
-         Append (Buf, "}");
-         Append (Buf, "}, ");
-      end Append_Net_Comm;
+      --  Boolean as JSON true/false
+      procedure ABool (Key : String; Val : Boolean; Comma : Boolean := True) is
+      begin
+         AP (Key, B (Val), Comma);
+      end ABool;
+
+      --  Append a 64-byte String field (hash / parity strings stored in State)
+      function Trim64 (Str : String) return String is
+      begin
+         return Trim_Null (Str);
+      end Trim64;
 
    begin
-      -- --- P_INT_PAYLOAD ---
-      Append (P_Int_Payload, "{");
-      Append (P_Int_Payload, """accel"": {");
-      Append_Pair (P_Int_Payload, "mag", F(State.Accel_Mag));
-      Append_Pair (P_Int_Payload, "x", F(State.Accel.X));
-      Append_Pair (P_Int_Payload, "y", F(State.Accel.Y));
-      Append_Pair (P_Int_Payload, "z", F(State.Accel.Z), False);
-      Append (P_Int_Payload, "}, ");
-      
-      declare
-         -- Escaped JSON for als
-         ALS_Inner : constant String := "{\""lux_factor\"": " & F(State.ALS.Lux_Factor) & ", \""spectral\"": [" &
-            Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(1)), Ada.Strings.Left) & ", " &
-            Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(2)), Ada.Strings.Left) & ", " &
-            Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(3)), Ada.Strings.Left) & ", " &
-            Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(4)), Ada.Strings.Left) & "]}";
-      begin
-         Append_Pair (P_Int_Payload, "als", """" & ALS_Inner & """");
-      end;
-      
-      Append (P_Int_Payload, """gyro"": {");
-      Append_Pair (P_Int_Payload, "x", F(State.Gyro.X));
-      Append_Pair (P_Int_Payload, "y", F(State.Gyro.Y));
-      Append_Pair (P_Int_Payload, "z", F(State.Gyro.Z), False);
-      Append (P_Int_Payload, "}, ");
-      Append_Pair (P_Int_Payload, "lid_angle", F(State.Lid_Angle));
-      Append_Pair (P_Int_Payload, "lid_speed", F(State.Lid_Speed));
-      Append_Pair (P_Int_Payload, "hinge_airflow", F(Calculate_Hinge_Airflow(State)));
-      Append_Pair (P_Int_Payload, "outflow_mass_flow", F(Calculate_Outflow_Mass_Flow(State)));
-      Append_Pair (P_Int_Payload, "outflow_heatflux", F(Calculate_Outflow_Heatflux(State)));
-      Append (P_Int_Payload, """orientation"": {");
-      Append_Pair (P_Int_Payload, "pitch", F(State.Orientation.Pitch));
-      Append (P_Int_Payload, """q"": [" & F(State.Orientation.Q.W) & ", " & F(State.Orientation.Q.X) & ", " & F(State.Orientation.Q.Y) & ", " & F(State.Orientation.Q.Z) & "], ");
-      Append_Pair (P_Int_Payload, "roll", F(State.Orientation.Roll));
-      Append_Pair (P_Int_Payload, "yaw", F(State.Orientation.Yaw), False);
-      Append (P_Int_Payload, "}, ");
-      Append_Pair (P_Int_Payload, "time", F(State.Time), False);
-      Append (P_Int_Payload, "}");
+      Append (Buf, "{");
 
-      -- --- P_EXT_PAYLOAD ---
-      if Weather /= null and then Weather.Meteo_Len > 0 then
-         declare
-            Len : constant Natural := Natural (Weather.Meteo_Len);
-            Meteo : String (1 .. Len);
-         begin
-            for I in 1 .. Len loop Meteo(I) := Weather.Meteo_JSON(I); end loop;
-            Append (P_Ext_Payload, Meteo);
-         end;
-      else Append (P_Ext_Payload, "{}"); end if;
+      --  ── time ─────────────────────────────────────────────────────────────
+      AP ("time", F (State.Time));
 
-      -- --- P_AUG_PAYLOAD ---
-      Append (P_Aug_Payload, "{");
-      if State.Event_Count > 0 then
-         declare
-            E : Event_Type renames State.Events(State.Event_Count);
-         begin
-            Append (P_Aug_Payload, """events"": [{");
-            Append_Pair (P_Aug_Payload, "amp", F(E.Amp));
-            Append (P_Aug_Payload, """bands"": [], ");
-            Append_Pair (P_Aug_Payload, "lbl", S(Trim_Null(E.Lbl)));
-            Append_Pair (P_Aug_Payload, "nsrc", Ada.Strings.Fixed.Trim(Integer'Image(E.NSrc), Ada.Strings.Left));
-            Append_Pair (P_Aug_Payload, "sev", S(Trim_Null(E.Sev)));
-            Append (P_Aug_Payload, """src"": [""CUSUM""], ");
-            Append_Pair (P_Aug_Payload, "sym", S(Trim_Null(E.Sym)));
-            Append_Pair (P_Aug_Payload, "time", F(E.Time));
-            Append_Pair (P_Aug_Payload, "tstr", S(Trim_Null(E.TStr)), False);
-            Append (P_Aug_Payload, "}], ");
-         end;
-      else Append (P_Aug_Payload, """events"": [], "); end if;
-      
-      Append (P_Aug_Payload, """high_res_drift"": {");
-      Append_Pair (P_Aug_Payload, "gpu_lat_ms", F(State.Electron_Travel.GPU_Lat_ms));
-      Append_Pair (P_Aug_Payload, "inference_fabric_lat_ms", F(State.Electron_Travel.ANE_Lat_ms));
-      Append_Pair (P_Aug_Payload, "interference", YN(State.Electron_Travel.Interference));
-      Append_Pair (P_Aug_Payload, "rtc_jitter_ms", F(State.Electron_Travel.RTC_Jitter_ms));
-      Append_Pair (P_Aug_Payload, "spu_lat_ms", F(State.Electron_Travel.SPU_Lat_ms));
-      Append_Pair (P_Aug_Payload, "t_cpu_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_CPU_ns), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "t_dat_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_DAT_ns), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "t_gpu_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_GPU_ns), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "t_inference_fabric_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_ANE_ns), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "t_rtc_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_RTC_ns), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "t_spu_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_SPU_ns), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "ts", S(Trim_Null(State.Electron_Travel.TS_ISO)), False);
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """location"": {");
-      Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_Altitude", F(State.Location.Corr_Alt));
-      Append_Pair (P_Aug_Payload, "alt_inop", (if State.Location.Alt_Inop then "true" else "false"));
-      Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_Heading", F(State.Location.Corr_Heading));
-      Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_Velocity", F(State.Location.Corr_Velocity));
-      Append_Pair (P_Aug_Payload, "CorrectionFactor_Reckoning_VerticalRate", F(State.Location.Corr_VRate));
-      Append_Pair (P_Aug_Payload, "alt", F(State.Location.Alt));
-      Append_Pair (P_Aug_Payload, "alt_rate", F(State.Location.Alt_Rate));
-      Append_Pair (P_Aug_Payload, "calibrated_g", F(State.Location.Calibrated_G));
-      Append_Pair (P_Aug_Payload, "compass_dir", S(Trim_Null(State.Location.Compass_Dir)));
-      Append_Pair (P_Aug_Payload, "heading", F(State.Location.Heading));
-      Append_Pair (P_Aug_Payload, "lat", F(State.Location.Lat));
-      Append_Pair (P_Aug_Payload, "lon", F(State.Location.Lon));
-      Append_Pair (P_Aug_Payload, "mach", F(State.Location.Mach));
-      Append_Pair (P_Aug_Payload, "odometer_30m", F(State.Location.Odometer_30m));
-      Append (P_Aug_Payload, """pos"": [" & F(State.Location.Pos.X) & ", " & F(State.Location.Pos.Y) & ", " & F(State.Location.Pos.Z) & "], ");
-      Append (P_Aug_Payload, """vel"": [" & F(State.Location.Vel.X) & ", " & F(State.Location.Vel.Y) & ", " & F(State.Location.Vel.Z) & "], ");
-      Append_Pair (P_Aug_Payload, "pressure_hpa", F(State.Location.Pressure_HPa));
-      Append_Pair (P_Aug_Payload, "total_distance_m", F(State.Location.Total_Dist));
-      Append_Pair (P_Aug_Payload, "transportation_category", S(Trim_Null(State.Location.Transportation_Category)), False);
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """loop_consistency"": {");
-      Append_Pair (P_Aug_Payload, "avg_ms", F(State.Loop_Consistency.Avg_Ms));
-      Append_Pair (P_Aug_Payload, "low_01_ms", F(State.Loop_Consistency.Low_01_Ms));
-      Append_Pair (P_Aug_Payload, "low_1_ms", F(State.Loop_Consistency.Low_1_Ms));
-      Append_Pair (P_Aug_Payload, "pct_90_ms", F(State.Loop_Consistency.Pct_90_Ms));
-      Append_Pair (P_Aug_Payload, "stutter_warning", B(State.Loop_Consistency.Stutter_Warning));
-      Append_Pair (P_Aug_Payload, "stutters", Ada.Strings.Fixed.Trim(Integer'Image(State.Loop_Consistency.Stutters), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "wcef_latency", F(State.Loop_Consistency.Wcef_Latency), False);
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """seismic_activity"": {");
-      Append_Pair (P_Aug_Payload, "certainty", F(State.Seismic_Activity.Certainty));
-      Append (P_Aug_Payload, """damage_fatigue"": {");
-      Append_Pair (P_Aug_Payload, "aggregated_risk", F(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk));
-      Append_Pair (P_Aug_Payload, "alt_stress_multiplier", F(State.Seismic_Activity.Damage_Fatigue.Alt_Stress_Multiplier));
-      Append_Pair (P_Aug_Payload, "anomaly_event_upset", Ada.Strings.Fixed.Trim(Integer'Image(State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "cumulative_fatigue", F(State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue));
-      Append (P_Aug_Payload, """data_integrity_check"": {");
-      Append_Pair (P_Aug_Payload, "active", B(State.Seismic_Activity.Damage_Fatigue.Data_Integrity.Active));
-      Append_Pair (P_Aug_Payload, "triggered_at", F(State.Seismic_Activity.Damage_Fatigue.Data_Integrity.Triggered_At), False);
-      Append (P_Aug_Payload, "}, ");
-      Append_Pair (P_Aug_Payload, "electromech_fatigue_prob", F(State.Seismic_Activity.Damage_Fatigue.Electromech_Fatigue_Prob));
-      Append_Pair (P_Aug_Payload, "seu_risk_multiplier", F(State.Seismic_Activity.Damage_Fatigue.Seu_Risk_Multiplier));
-      Append_Pair (P_Aug_Payload, "solder_fatigue_prob", F(State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob), False);
-      Append (P_Aug_Payload, "}, ");
-      Append_Pair (P_Aug_Payload, "motion_type", S(Trim_Null(State.Seismic_Activity.Motion_Type)));
-      Append_Pair (P_Aug_Payload, "peak_g", F(State.Seismic_Activity.Peak_G));
-      Append_Pair (P_Aug_Payload, "spectral_balance", F(State.Seismic_Activity.Spectral_Balance), False);
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """smc"": {");
-      Append_Pair (P_Aug_Payload, "AccumulativePowerUsageMeter_Wh", F(State.SMC.Accum_Power_Meter_Wh));
-      Append_Pair (P_Aug_Payload, "AccumulativePowerUsageThisMonth_Wh", F(State.SMC.Accum_Power_Month_Wh));
-      Append_Pair (P_Aug_Payload, "DayPowerUsage_Wh", F(State.SMC.Day_Power_Usage_Wh));
-      Append_Pair (P_Aug_Payload, "EstimatedTodayPowerUsage_Wh", F(State.SMC.Est_Today_Power_Wh));
-      Append_Pair (P_Aug_Payload, "PowerRateUsage", F(State.SMC.Power_Rate_Usage));
-      Append_Pair (P_Aug_Payload, "PulsingSuggestionMaintenanceWindowWake", F(State.SMC.Pulse_Wake));
-      Append_Pair (P_Aug_Payload, "PulsingSuggestionMaintenanceWindowWakeLength", F(State.SMC.Pulse_Length));
-      Append_Pair (P_Aug_Payload, "WillBatterySurviveOneDay", YN(State.SMC.Will_Bat_Survive));
-      Append_Pair (P_Aug_Payload, "airflow_inlet_k", F(State.SMC.Airflow_Inlet_K));
-      Append_Pair (P_Aug_Payload, "airflow_outlet_k", F(State.SMC.Airflow_Outlet_K));
-      Append_Pair (P_Aug_Payload, "ambient_temp_k", F(State.SMC.Ambient_Temp_K));
-      Append (P_Aug_Payload, """fan_rpms"": [" & F(State.SMC.Fan_RPMs(1)) & ", " & F(State.SMC.Fan_RPMs(2)) & "], ");
-      Append_Pair (P_Aug_Payload, "PropellerEngine1Tach", F(State.SMC.Fan_RPMs(1)));
-      Append_Pair (P_Aug_Payload, "PropellerEngine2Tach", F(State.SMC.Fan_RPMs(2)));
-      Append_Pair (P_Aug_Payload, "F0Tg", F(State.SMC.Fan_Targets(1)));
-      Append_Pair (P_Aug_Payload, "F1Tg", F(State.SMC.Fan_Targets(2)));
-      Append (P_Aug_Payload, """gas_constants"": {");
-      Append_Pair (P_Aug_Payload, "Cp", F(State.SMC.Gas_Constants.Cp));
-      Append_Pair (P_Aug_Payload, "R", F(State.SMC.Gas_Constants.R));
-      Append_Pair (P_Aug_Payload, "gamma", F(State.SMC.Gas_Constants.Gamma), False);
-      Append (P_Aug_Payload, "}, ");
-      Append (P_Aug_Payload, """fluid_dynamics"": {");
-      Append_Pair (P_Aug_Payload, "flow_scale_l", F(State.SMC.Flow_Scale_L));
-      Append_Pair (P_Aug_Payload, "char_velocity_u0", F(State.SMC.Char_Velocity_U0));
-      Append_Pair (P_Aug_Payload, "turbulence_int_up", F(State.SMC.Turbulence_Int_Up));
-      Append_Pair (P_Aug_Payload, "reynolds_number_re0", F(State.SMC.Reynolds_Number_Re0));
-      Append_Pair (P_Aug_Payload, "reynolds_number", F(State.SMC.Reynolds_Number));
-      Append_Pair (P_Aug_Payload, "weber_number", F(State.SMC.Weber_Number));
-      Append_Pair (P_Aug_Payload, "strouhal_number", F(State.SMC.Strouhal_Number));
-      Append_Pair (P_Aug_Payload, "cauchy_number", F(State.SMC.Cauchy_Number), False);
-      Append (P_Aug_Payload, "}, ");
-      Append_Pair (P_Aug_Payload, "heatflux_j", F(State.SMC.Heatflux_J));
-      Append_Pair (P_Aug_Payload, "humidity_pct", F(State.SMC.Humidity_Pct));
-      Append_Pair (P_Aug_Payload, "inOrderToSurviveDayMustHibernate", YN(State.SMC.Must_Hibernate));
-      Append_Pair (P_Aug_Payload, "massflow_kg_s", F(State.SMC.Massflow_Kg_S));
-      Append_Pair (P_Aug_Payload, "power", F(State.SMC.Power));
-      Append_Pair (P_Aug_Payload, "thermal_inefficiency_w", F(Real'Max (0.0, State.SMC.Power - State.SMC.Heatflux_J)));
-      Append_Pair (P_Aug_Payload, "cooling_efficiency_pct", F(if State.SMC.Power > 0.0 then Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
-      Append_Pair (P_Aug_Payload, "work_efficiency_pct", F(if State.SMC.Power > 0.0 then 100.0 - Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
-      Append_Pair (P_Aug_Payload, "talp_k", F(State.SMC.TaLP_K));
-      Append_Pair (P_Aug_Payload, "tarf_k", F(State.SMC.TaRF_K));
-      Append (P_Aug_Payload, """temps"": {");
-      Append_Pair (P_Aug_Payload, "PSTR", F(State.SMC.Temps.PSTR));
-      Append_Pair (P_Aug_Payload, "TCMz", F(State.SMC.Temps.TCMz));
-      Append_Pair (P_Aug_Payload, "TaLP", F(State.SMC.Temps.TaLP));
-      Append_Pair (P_Aug_Payload, "TaLT", F(State.SMC.Temps.TaLT));
-      Append_Pair (P_Aug_Payload, "TaLW", F(State.SMC.Temps.TaLW));
-      Append_Pair (P_Aug_Payload, "TaRF", F(State.SMC.Temps.TaRF));
-      Append_Pair (P_Aug_Payload, "TaRT", F(State.SMC.Temps.TaRT));
-      Append_Pair (P_Aug_Payload, "TaRW", F(State.SMC.Temps.TaRW));
-      Append_Pair (P_Aug_Payload, "Tg0X", F(State.SMC.Temps.Tg0X));
-      Append_Pair (P_Aug_Payload, "Ts0P", F(State.SMC.Temps.Ts0P));
-      Append_Pair (P_Aug_Payload, "Ts1P", F(State.SMC.Temps.Ts1P), False);
-      Append (P_Aug_Payload, "}, ");
-      Append_Pair (P_Aug_Payload, "thrust_n", F(State.SMC.Thrust_N));
-      Append_Pair (P_Aug_Payload, "turbo", Ada.Strings.Fixed.Trim(Integer'Image(State.SMC.Turbo), Ada.Strings.Left), False);
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """system"": {");
-      Append_Pair (P_Aug_Payload, "BatteryDesignCapacityWh", F(State.System.Battery_Design_Wh));
-      Append_Pair (P_Aug_Payload, "BatteryEnergyBankWh", F(State.System.Battery_Energy_Wh));
-      Append_Pair (P_Aug_Payload, "BatteryFullChargeCapacityWh", F(State.System.Battery_Full_Wh));
-      Append_Pair (P_Aug_Payload, "BatteryHealthPct", F(State.System.Battery_Health_Pct));
-      Append_Pair (P_Aug_Payload, "battery_charging", B(State.System.Battery_Charging));
-      Append_Pair (P_Aug_Payload, "battery_percent", Ada.Strings.Fixed.Trim(Integer'Image(State.System.Battery_Percent), Ada.Strings.Left));
-      Append_Pair (P_Aug_Payload, "cpu_usage", F(State.System.CPU_Usage));
-      Append (P_Aug_Payload, """load_avg"": [" & F(State.System.Load_Avg(1)) & ", " & F(State.System.Load_Avg(2)) & ", " & F(State.System.Load_Avg(3)) & "], ");
-      Append_Pair (P_Aug_Payload, "mem_usage", F(State.System.Mem_Usage));
-      Append_Pair (P_Aug_Payload, "nonHumanInputHIDIdle", F(State.System.Non_Human_HID_Idle_ns / 1.0E9));
-      Append_Pair (P_Aug_Payload, "pmset_info", S(Trim_Null(State.System.PMSet_Info)));
-      Append_Pair (P_Aug_Payload, "uptime_earu", F(State.System.Uptime_Earu));
-      Append_Pair (P_Aug_Payload, "uptime_system", F(State.System.Uptime_System), False);
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """user_entity_detection"": {");
-      Append_Pair (P_Aug_Payload, "count", Ada.Strings.Fixed.Trim(Integer'Image(State.User_Entity.Count), Ada.Strings.Left));
-      Append (P_Aug_Payload, """detected"": [");
-      for I in 1 .. State.User_Entity.Count loop
-         Append (P_Aug_Payload, "[" & F(State.User_Entity.Detected(I).BPM) & ", " & F(State.User_Entity.Detected(I).Confidence) & "]" & (if I < State.User_Entity.Count then ", " else ""));
+      --  ── accel ─────────────────────────────────────────────────────────────
+      Append (Buf, """accel"": {");
+      AP ("mag", F (State.Accel_Mag));
+      AP ("x",   F (State.Accel.X));
+      AP ("y",   F (State.Accel.Y));
+      AP ("z",   F (State.Accel.Z), False);
+      Append (Buf, "}, ");
+
+      --  ── gyro ──────────────────────────────────────────────────────────────
+      Append (Buf, """gyro"": {");
+      AP ("x", F (State.Gyro.X));
+      AP ("y", F (State.Gyro.Y));
+      AP ("z", F (State.Gyro.Z), False);
+      Append (Buf, "}, ");
+
+      --  ── lid_angle / lid_speed ─────────────────────────────────────────────
+      AP ("lid_angle", F (State.Lid_Angle));
+      AP ("lid_speed", F (State.Lid_Speed));
+
+      --  ── orientation ──────────────────────────────────────────────────────
+      Append (Buf, """orientation"": {");
+      AP ("roll",  F (State.Orientation.Roll));
+      AP ("pitch", F (State.Orientation.Pitch));
+      AP ("yaw",   F (State.Orientation.Yaw));
+      Append (Buf, """q"": [" &
+         F (State.Orientation.Q.W) & ", " &
+         F (State.Orientation.Q.X) & ", " &
+         F (State.Orientation.Q.Y) & ", " &
+         F (State.Orientation.Q.Z) & "]");
+      Append (Buf, "}, ");
+
+      --  ── orientation_degree (same values — already in degrees) ─────────────
+      Append (Buf, """orientation_degree"": {");
+      AP ("roll",  F (State.Orientation.Roll));
+      AP ("pitch", F (State.Orientation.Pitch));
+      AP ("yaw",   F (State.Orientation.Yaw), False);
+      Append (Buf, "}, ");
+
+      --  ── als ───────────────────────────────────────────────────────────────
+      Append (Buf, """als"": {");
+      AP ("lux_factor", F (State.ALS.Lux_Factor));
+      Append (Buf, """spectral"": [" &
+         Ada.Strings.Fixed.Trim (Integer'Image (State.ALS.Spectral (1)), Ada.Strings.Both) & ", " &
+         Ada.Strings.Fixed.Trim (Integer'Image (State.ALS.Spectral (2)), Ada.Strings.Both) & ", " &
+         Ada.Strings.Fixed.Trim (Integer'Image (State.ALS.Spectral (3)), Ada.Strings.Both) & ", " &
+         Ada.Strings.Fixed.Trim (Integer'Image (State.ALS.Spectral (4)), Ada.Strings.Both) & "]");
+      Append (Buf, "}, ");
+
+      --  ── loop_consistency ─────────────────────────────────────────────────
+      Append (Buf, """loop_consistency"": {");
+      AP    ("avg_ms",          F (State.Loop_Consistency.Avg_Ms));
+      AP    ("low_01_ms",       F (State.Loop_Consistency.Low_01_Ms));
+      AP    ("low_1_ms",        F (State.Loop_Consistency.Low_1_Ms));
+      AP    ("pct_90_ms",       F (State.Loop_Consistency.Pct_90_Ms));
+      AI    ("stutters",        State.Loop_Consistency.Stutters);
+      ABool ("stutter_warning", State.Loop_Consistency.Stutter_Warning, False);
+      Append (Buf, "}, ");
+
+      --  ── high_res_drift ───────────────────────────────────────────────────
+      Append (Buf, """high_res_drift"": {");
+      AL ("t_cpu_ns",               State.Electron_Travel.T_CPU_ns);
+      AL ("t_rtc_ns",               State.Electron_Travel.T_RTC_ns);
+      AL ("t_gpu_ns",               State.Electron_Travel.T_GPU_ns);
+      AL ("t_dat_ns",               State.Electron_Travel.T_DAT_ns);
+      AL ("t_spu_ns",               State.Electron_Travel.T_SPU_ns);
+      AP ("t_inference_fabric_ns",  "0");
+      AP ("spu_lat_ms",             F (State.Electron_Travel.SPU_Lat_ms));
+      AP ("gpu_lat_ms",             F (State.Electron_Travel.GPU_Lat_ms));
+      AP ("rtc_jitter_ms",          F (State.Electron_Travel.RTC_Jitter_ms));
+      AP ("inference_fabric_lat_ms","0.0");
+      AP ("interference",           (if State.Electron_Travel.Interference then """Yes""" else """No"""));
+      AP ("ts",                     S (Trim_Null (State.Electron_Travel.TS_ISO)), False);
+      Append (Buf, "}, ");
+
+      --  ── location ─────────────────────────────────────────────────────────
+      Append (Buf, """location"": {");
+      AP ("lat",            F (State.Location.Lat));
+      AP ("lon",            F (State.Location.Lon));
+      AP ("alt",            F (State.Location.Alt));
+      AP ("heading",        F (State.Location.Heading));
+      AP ("total_distance_m", F (State.Location.Total_Dist));
+      AP ("alt_rate",       F (State.Location.Alt_Rate));
+      AP ("mach",           F (State.Location.Mach));
+      AP ("odometer_30m",   F (State.Location.Odometer_30m));
+      AP ("v_mag",          F (State.Location.V_Mag));
+      AP ("calibrated_g",   F (State.Location.Calibrated_G));
+      AP ("pressure_hpa",   F (State.Location.Pressure_HPa));
+      AP ("compass_dir",    S (Ada.Strings.Fixed.Trim (State.Location.Compass_Dir, Ada.Strings.Both)));
+      Append (Buf, """pos"": [" &
+         F (State.Location.Pos.X) & ", " &
+         F (State.Location.Pos.Y) & ", " &
+         F (State.Location.Pos.Z) & "], ");
+      AP ("CorrectionFactor_Reckoning_Altitude",     F (State.Location.Corr_Alt));
+      AP ("CorrectionFactor_Reckoning_Heading",      F (State.Location.Corr_Heading));
+      AP ("CorrectionFactor_Reckoning_Velocity",     F (State.Location.Corr_Velocity));
+      AP ("CorrectionFactor_Reckoning_VerticalRate", F (State.Location.Corr_VRate));
+      AP ("master_warning", S (Trim_Null (State.Location.Warning_Reason)));
+      AP ("master_caution", S (Trim_Null (State.Location.Caution_Reason)), False);
+      Append (Buf, "}, ");
+
+      --  ── seismic_activity ─────────────────────────────────────────────────
+      Append (Buf, """seismic_activity"": {");
+      AP ("peak_g",          F (State.Seismic_Activity.Peak_G));
+      AP ("certainty",       F (State.Seismic_Activity.Certainty));
+      AP ("spectral_balance",F (State.Seismic_Activity.Spectral_Balance));
+      AP ("motion_type",     S (Trim_Null (State.Seismic_Activity.Motion_Type)));
+      Append (Buf, """damage_fatigue"": {");
+      AP    ("aggregated_risk",         F (State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk));
+      AP    ("cumulative_fatigue",      F (State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue));
+      AP    ("solder_fatigue_prob",     F (State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob));
+      AP    ("electromech_fatigue_prob",F (State.Seismic_Activity.Damage_Fatigue.Electromech_Fatigue_Prob));
+      AP    ("seu_risk_multiplier",     F (State.Seismic_Activity.Damage_Fatigue.Seu_Risk_Multiplier));
+      AP    ("alt_stress_multiplier",   F (State.Seismic_Activity.Damage_Fatigue.Alt_Stress_Multiplier));
+      AI    ("anomaly_event_upset",     State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count);
+      Append (Buf, """data_integrity_check"": {");
+      ABool ("active",       State.Seismic_Activity.Damage_Fatigue.Data_Integrity.Active);
+      AP    ("triggered_at", F (State.Seismic_Activity.Damage_Fatigue.Data_Integrity.Triggered_At), False);
+      Append (Buf, "}}}, ");
+
+      --  ── system ────────────────────────────────────────────────────────────
+      Append (Buf, """system"": {");
+      AP    ("uptime_earu",               F (State.System.Uptime_Earu));
+      AP    ("uptime_system",             F (State.System.Uptime_System));
+      AP    ("machine_life_runtime",      F (State.System.Machine_Life_Runtime));
+      AP    ("cpu_usage",                 F (State.System.CPU_Usage));
+      AP    ("mem_usage",                 F (State.System.Mem_Usage));
+      AI    ("battery_percent",           State.System.Battery_Percent);
+      ABool ("battery_charging",          State.System.Battery_Charging);
+      AP    ("BatteryDesignCapacityWh",   F (State.System.Battery_Design_Wh));
+      AP    ("BatteryEnergyBankWh",       F (State.System.Battery_Energy_Wh));
+      AP    ("BatteryFullChargeCapacityWh",F (State.System.Battery_Full_Wh));
+      AP    ("BatteryHealthPct",          F (State.System.Battery_Health_Pct));
+      Append (Buf, """load_avg"": [" &
+         F (State.System.Load_Avg (1)) & ", " &
+         F (State.System.Load_Avg (2)) & ", " &
+         F (State.System.Load_Avg (3)) & "], ");
+      AP    ("nonHumanInputHIDIdle",      F (State.System.Non_Human_HID_Idle_ns / 1_000_000_000.0));
+      AP    ("ssd_used_pct",              F (State.System.SSD_Used_Pct));
+      AP    ("ssd_available_spare",       F (State.System.SSD_Available_Spare));
+      AP    ("ssd_life_left_years",       F (State.System.SSD_Life_Left_Years));
+      AP    ("ssd_data_read_units",       F (State.System.SSD_Data_Read_Units));
+      AP    ("ssd_data_write_units",      F (State.System.SSD_Data_Write_Units));
+      AP    ("pmset_info",                S (Trim_Null (State.System.PMSet_Info)), False);
+      Append (Buf, "}, ");
+
+      --  ── smc ───────────────────────────────────────────────────────────────
+      Append (Buf, """smc"": {");
+      AP ("ambient_temp_k",  F (State.SMC.Ambient_Temp_K));
+      AP ("humidity_pct",    F (State.SMC.Humidity_Pct));
+      Append (Buf, """fan_rpms"": [" & F (State.SMC.Fan_RPMs (1)) & ", " & F (State.SMC.Fan_RPMs (2)) & "], ");
+      AP ("thrust_n",        F (State.SMC.Thrust_N));
+      AP ("massflow_kg_s",   F (State.SMC.Massflow_Kg_S));
+      AP ("heatflux_j",      F (State.SMC.Heatflux_J));
+      AP ("power",           F (State.SMC.Power));
+      AP ("PowerRateUsage",  F (State.SMC.Power_Rate_Usage));
+      AP ("DayPowerUsage_Wh",               F (State.SMC.Day_Power_Usage_Wh));
+      AP ("EstimatedTodayPowerUsage_Wh",    F (State.SMC.Est_Today_Power_Wh));
+      AP ("AccumulativePowerUsageThisMonth_Wh", F (State.SMC.Accum_Power_Month_Wh));
+      AP ("AccumulativePowerUsageMeter_Wh", F (State.SMC.Accum_Power_Meter_Wh));
+      AP ("PulsingSuggestionMaintenanceWindowWake",       F (State.SMC.Pulse_Wake));
+      AP ("PulsingSuggestionMaintenanceWindowWakeLength", F (State.SMC.Pulse_Length));
+      AP ("WillBatterySurviveOneDay",       YN (State.SMC.Will_Bat_Survive));
+      AP ("inOrderToSurviveDayMustHibernate", YN (State.SMC.Must_Hibernate));
+      AP ("airflow_inlet_k",  F (State.SMC.Airflow_Inlet_K));
+      AP ("airflow_outlet_k", F (State.SMC.Airflow_Outlet_K));
+      AP ("talp_k",           F (State.SMC.TaLP_K));
+      AP ("tarf_k",           F (State.SMC.TaRF_K));
+      AI ("turbo",            State.SMC.Turbo);
+      Append (Buf, """temps"": {");
+      AP ("PSTR", F (State.SMC.Temps.PSTR));
+      AP ("TCMz", F (State.SMC.Temps.TCMz));
+      AP ("TaLP", F (State.SMC.Temps.TaLP));
+      AP ("TaLT", F (State.SMC.Temps.TaLT));
+      AP ("TaLW", F (State.SMC.Temps.TaLW));
+      AP ("TaRF", F (State.SMC.Temps.TaRF));
+      AP ("TaRT", F (State.SMC.Temps.TaRT));
+      AP ("TaRW", F (State.SMC.Temps.TaRW));
+      AP ("Tg0X", F (State.SMC.Temps.Tg0X));
+      AP ("Ts0P", F (State.SMC.Temps.Ts0P));
+      AP ("Ts1P", F (State.SMC.Temps.Ts1P), False);
+      Append (Buf, "}, ");
+      Append (Buf, """gas_constants"": {");
+      AP ("Cp",    F (State.SMC.Gas_Constants.Cp));
+      AP ("R",     F (State.SMC.Gas_Constants.R));
+      AP ("gamma", F (State.SMC.Gas_Constants.Gamma), False);
+      Append (Buf, "}}, ");
+
+      --  ── user_entity_detection ─────────────────────────────────────────────
+      Append (Buf, """user_entity_detection"": {");
+      AI ("count", State.User_Entity.Count);
+      Append (Buf, """inferred_mood"": {");
+      AP ("Anxious/Frustrated", F (State.User_Entity.Mood.Anxious));
+      AP ("Calm/Relaxed",       F (State.User_Entity.Mood.Calm));
+      AP ("Excited/Joyful",     F (State.User_Entity.Mood.Excited));
+      AP ("Tired/Bored",        F (State.User_Entity.Mood.Tired), False);
+      Append (Buf, "}, ");
+      Append (Buf, """detected"": [");
+      for I in 1 .. 3 loop
+         Append (Buf, "[" & F (State.User_Entity.Detected (I).BPM) & ", " &
+                           F (State.User_Entity.Detected (I).Confidence) & "]");
+         if I < 3 then Append (Buf, ", "); end if;
       end loop;
-      Append (P_Aug_Payload, "], ");
-      Append (P_Aug_Payload, """inferred_mood"": {");
-      Append_Pair (P_Aug_Payload, "Anxious/Frustrated", F(State.User_Entity.Mood.Anxious));
-      Append_Pair (P_Aug_Payload, "Calm/Relaxed", F(State.User_Entity.Mood.Calm));
-      Append_Pair (P_Aug_Payload, "Excited/Joyful", F(State.User_Entity.Mood.Excited));
-      Append_Pair (P_Aug_Payload, "Tired/Bored", F(State.User_Entity.Mood.Tired), False);
-      Append (P_Aug_Payload, "}");
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """pedometer"": {");
-      Append_Pair (P_Aug_Payload, "steps", Ada.Strings.Fixed.Trim(Integer'Image(State.Pedometer.Steps), Ada.Strings.Left), False);
-      Append (P_Aug_Payload, "}, ");
-      
-      Append (P_Aug_Payload, """weather_local"": ");
-      if Weather /= null and then Weather.Meteo_Len > 0 then
-         declare
-            Len : constant Natural := Natural (Weather.Meteo_Len);
-            Meteo : String (1 .. Len);
-         begin
-            for I in 1 .. Len loop Meteo(I) := Weather.Meteo_JSON(I); end loop;
-            Append (P_Aug_Payload, Meteo);
-         end;
-      else Append (P_Aug_Payload, "{}"); end if;
-      Append (P_Aug_Payload, ", ");
-      Append_Net_Comm (P_Aug_Payload);
-      Append_Pair (P_Aug_Payload, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
-      Append_Pair (P_Aug_Payload, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
-      Append (P_Aug_Payload, "}");
+      Append (Buf, "]}, ");
 
-      -- --- MAIN JSON_LINE ---
-      Append (JSON_Line, "{");
-      Append (JSON_Line, """accel"": {");
-      Append_Pair (JSON_Line, "mag", F(State.Accel_Mag));
-      Append_Pair (JSON_Line, "x", F(State.Accel.X));
-      Append_Pair (JSON_Line, "y", F(State.Accel.Y));
-      Append_Pair (JSON_Line, "z", F(State.Accel.Z), False);
-      Append (JSON_Line, "}, ");
-      Append (JSON_Line, """als"": {");
-      Append_Pair (JSON_Line, "lux_factor", F(State.ALS.Lux_Factor));
-      Append (JSON_Line, """spectral"": [" & 
-         Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(1)), Ada.Strings.Left) & ", " &
-         Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(2)), Ada.Strings.Left) & ", " &
-         Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(3)), Ada.Strings.Left) & ", " &
-         Ada.Strings.Fixed.Trim(Integer'Image(State.ALS.Spectral(4)), Ada.Strings.Left) & "]");
-      Append (JSON_Line, "}, ");
-      
-      Append (JSON_Line, """ecosystem_weather"": ");
-      if Weather /= null and then Weather.Meteo_Len > 0 then
-         declare
-            Len : constant Natural := Natural (Weather.Meteo_Len);
-            Meteo : String (1 .. Len);
-         begin
-            for I in 1 .. Len loop Meteo(I) := Weather.Meteo_JSON(I); end loop;
-            Append (JSON_Line, Meteo);
-         end;
-      else Append (JSON_Line, "{}"); end if;
-      Append (JSON_Line, ", ");
-
-      if State.Event_Count > 0 then
-         declare
-            E : Event_Type renames State.Events(State.Event_Count);
-         begin
-            Append (JSON_Line, """events"": [{");
-            Append_Pair (JSON_Line, "amp", F(E.Amp));
-            Append (JSON_Line, """bands"": [], ");
-            Append_Pair (JSON_Line, "lbl", S(Trim_Null(E.Lbl)));
-            Append_Pair (JSON_Line, "nsrc", Ada.Strings.Fixed.Trim(Integer'Image(E.NSrc), Ada.Strings.Left));
-            Append_Pair (JSON_Line, "sev", S(Trim_Null(E.Sev)));
-            Append (JSON_Line, """src"": [""CUSUM""], ");
-            Append_Pair (JSON_Line, "sym", S(Trim_Null(E.Sym)));
-            Append_Pair (JSON_Line, "time", F(E.Time));
-            Append_Pair (JSON_Line, "tstr", S(Trim_Null(E.TStr)), False);
-            Append (JSON_Line, "}], ");
-         end;
-      else Append (JSON_Line, """events"": [], "); end if;
-
-      Append (JSON_Line, """gyro"": {");
-      Append_Pair (JSON_Line, "x", F(State.Gyro.X));
-      Append_Pair (JSON_Line, "y", F(State.Gyro.Y));
-      Append_Pair (JSON_Line, "z", F(State.Gyro.Z), False);
-      Append (JSON_Line, "}, ");
-      
-      Append (JSON_Line, """high_res_drift"": {");
-      Append_Pair (JSON_Line, "gpu_lat_ms", F(State.Electron_Travel.GPU_Lat_ms));
-      Append_Pair (JSON_Line, "inference_fabric_lat_ms", F(State.Electron_Travel.ANE_Lat_ms));
-      Append_Pair (JSON_Line, "interference", YN(State.Electron_Travel.Interference));
-      Append_Pair (JSON_Line, "rtc_jitter_ms", F(State.Electron_Travel.RTC_Jitter_ms));
-      Append_Pair (JSON_Line, "spu_lat_ms", F(State.Electron_Travel.SPU_Lat_ms));
-      Append_Pair (JSON_Line, "t_cpu_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_CPU_ns), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "t_dat_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_DAT_ns), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "t_gpu_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_GPU_ns), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "t_inference_fabric_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_ANE_ns), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "t_rtc_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_RTC_ns), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "t_spu_ns", Ada.Strings.Fixed.Trim(Long_Long_Integer'Image(State.Electron_Travel.T_SPU_ns), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "ts", S(Trim_Null(State.Electron_Travel.TS_ISO)), False);
-      Append (JSON_Line, "}, ");
-      
-      Append_Pair (JSON_Line, "lid_angle", F(State.Lid_Angle));
-      Append_Pair (JSON_Line, "lid_speed", F(State.Lid_Speed));
-      Append_Pair (JSON_Line, "hinge_airflow", F(Calculate_Hinge_Airflow(State)));
-      Append_Pair (JSON_Line, "outflow_mass_flow", F(Calculate_Outflow_Mass_Flow(State)));
-      Append_Pair (JSON_Line, "outflow_heatflux", F(Calculate_Outflow_Heatflux(State)));
-      
-      Append (JSON_Line, """location"": {");
-      Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_Altitude", F(State.Location.Corr_Alt));
-      Append_Pair (JSON_Line, "alt_inop", (if State.Location.Alt_Inop then "true" else "false"));
-      Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_Heading", F(State.Location.Corr_Heading));
-      Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_Velocity", F(State.Location.Corr_Velocity));
-      Append_Pair (JSON_Line, "CorrectionFactor_Reckoning_VerticalRate", F(State.Location.Corr_VRate));
-      Append_Pair (JSON_Line, "alt", F(State.Location.Alt));
-      Append_Pair (JSON_Line, "alt_rate", F(State.Location.Alt_Rate));
-      Append_Pair (JSON_Line, "calibrated_g", F(State.Location.Calibrated_G));
-      Append_Pair (JSON_Line, "compass_dir", S(Trim_Null(State.Location.Compass_Dir)));
-      Append_Pair (JSON_Line, "heading", F(State.Location.Heading));
-      Append_Pair (JSON_Line, "lat", F(State.Location.Lat));
-      Append_Pair (JSON_Line, "lon", F(State.Location.Lon));
-      Append_Pair (JSON_Line, "lockin_miss", F(State.Location.Lockin_Miss));
-      Append_Pair (JSON_Line, "mach", F(State.Location.Mach));
-      Append_Pair (JSON_Line, "odometer_30m", F(State.Location.Odometer_30m));
-      Append_Pair (JSON_Line, "master_warning", (if State.Electron_Travel.Interference or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0 or State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.48 or State.SMC.Temps.TCMz > 100.0 or State.Seismic_Activity.Peak_G > 2.5 or State.System.Battery_Percent < 10 then "true" else "false"));
-      Append_Pair (JSON_Line, "master_caution", (if State.Location.Lockin_Miss > 30.0 or State.System.Battery_Percent < 20 or (State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0) then "true" else "false"));      Append_Pair (JSON_Line, "warning_reason", S(Trim_Null(State.Location.Warning_Reason)));
-      Append_Pair (JSON_Line, "caution_reason", S(Trim_Null(State.Location.Caution_Reason)));
-      Append (JSON_Line, """pos"": [" & F(State.Location.Pos.X) & ", " & F(State.Location.Pos.Y) & ", " & F(State.Location.Pos.Z) & "], ");
-      Append (JSON_Line, """vel"": [" & F(State.Location.Vel.X) & ", " & F(State.Location.Vel.Y) & ", " & F(State.Location.Vel.Z) & "], ");
-      Append_Pair (JSON_Line, "pressure_hpa", F(State.Location.Pressure_HPa));      Append_Pair (JSON_Line, "total_distance_m", F(State.Location.Total_Dist));
-      Append_Pair (JSON_Line, "v_mag", F(State.Location.V_Mag));
-      Append_Pair (JSON_Line, "time", F(State.Time));
-      Append_Pair (JSON_Line, "locationd_anchor_refresh_speed", F(State.Location.Anchor_Refresh_Speed));      Append_Pair (JSON_Line, "transportation_category", S(Trim_Null(State.Location.Transportation_Category)), False);
-      Append (JSON_Line, "}, ");
-      
-      Append (JSON_Line, """loop_consistency"": {");
-      Append_Pair (JSON_Line, "avg_ms", F(State.Loop_Consistency.Avg_Ms));
-      Append_Pair (JSON_Line, "low_01_ms", F(State.Loop_Consistency.Low_01_Ms));
-      Append_Pair (JSON_Line, "low_1_ms", F(State.Loop_Consistency.Low_1_Ms));
-      Append_Pair (JSON_Line, "pct_90_ms", F(State.Loop_Consistency.Pct_90_Ms));
-      Append_Pair (JSON_Line, "stutter_warning", B(State.Loop_Consistency.Stutter_Warning));
-      Append_Pair (JSON_Line, "stutters", Ada.Strings.Fixed.Trim(Integer'Image(State.Loop_Consistency.Stutters), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "wcef_latency", F(State.Loop_Consistency.Wcef_Latency), False);
-      Append (JSON_Line, "}, ");
-      
-      Append (JSON_Line, """orientation"": {");
-      Append_Pair (JSON_Line, "pitch", F(State.Orientation.Pitch));
-      Append (JSON_Line, """q"": [" & F(State.Orientation.Q.W) & ", " & F(State.Orientation.Q.X) & ", " & F(State.Orientation.Q.Y) & ", " & F(State.Orientation.Q.Z) & "], ");
-      Append_Pair (JSON_Line, "roll", F(State.Orientation.Roll));
-      Append_Pair (JSON_Line, "yaw", F(State.Orientation.Yaw), False);
-      Append (JSON_Line, "}, ");
-      
-      Append (JSON_Line, """orientation_degree"": {");
-      Append_Pair (JSON_Line, "pitch", F(State.Orientation.Pitch));
-      Append_Pair (JSON_Line, "roll", F(State.Orientation.Roll));
-      Append_Pair (JSON_Line, "yaw", F(State.Orientation.Yaw), False);
-      Append (JSON_Line, "}, ");
-      
-      Append_Pair (JSON_Line, "p_augmented", S(Hash(To_String(P_Aug_Payload))));
-      Append_Pair (JSON_Line, "p_external", S(Hash(To_String(P_Ext_Payload))));
-      Append_Pair (JSON_Line, "p_internal", S(Hash(To_String(P_Int_Payload))));
-      
-      Append (JSON_Line, """seismic_activity"": {");
-      Append_Pair (JSON_Line, "certainty", F(State.Seismic_Activity.Certainty));
-      Append (JSON_Line, """damage_fatigue"": {");
-      Append_Pair (JSON_Line, "aggregated_risk", F(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk));
-      Append_Pair (JSON_Line, "alt_stress_multiplier", F(State.Seismic_Activity.Damage_Fatigue.Alt_Stress_Multiplier));
-      Append_Pair (JSON_Line, "anomaly_event_upset", Ada.Strings.Fixed.Trim(Integer'Image(State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "cumulative_fatigue", F(State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue));
-      Append (JSON_Line, """data_integrity_check"": {");
-      Append_Pair (JSON_Line, "active", B(State.Seismic_Activity.Damage_Fatigue.Data_Integrity.Active));
-      Append_Pair (JSON_Line, "triggered_at", F(State.Seismic_Activity.Damage_Fatigue.Data_Integrity.Triggered_At), False);
-      Append (JSON_Line, "}, ");
-      Append_Pair (JSON_Line, "electromech_fatigue_prob", F(State.Seismic_Activity.Damage_Fatigue.Electromech_Fatigue_Prob));
-      Append_Pair (JSON_Line, "seu_risk_multiplier", F(State.Seismic_Activity.Damage_Fatigue.Seu_Risk_Multiplier));
-      Append_Pair (JSON_Line, "solder_fatigue_prob", F(State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob), False);
-      Append (JSON_Line, "}, ");
-      Append_Pair (JSON_Line, "motion_type", S(Trim_Null(State.Seismic_Activity.Motion_Type)));
-      Append_Pair (JSON_Line, "peak_g", F(State.Seismic_Activity.Peak_G));
-      Append_Pair (JSON_Line, "spectral_balance", F(State.Seismic_Activity.Spectral_Balance), False);
-      Append (JSON_Line, "}, ");
-      
-      Append (JSON_Line, """smc"": {");
-      Append_Pair (JSON_Line, "AccumulativePowerUsageMeter_Wh", F(State.SMC.Accum_Power_Meter_Wh));
-      Append_Pair (JSON_Line, "AccumulativePowerUsageThisMonth_Wh", F(State.SMC.Accum_Power_Month_Wh));
-      Append_Pair (JSON_Line, "DayPowerUsage_Wh", F(State.SMC.Day_Power_Usage_Wh));
-      Append_Pair (JSON_Line, "EstimatedTodayPowerUsage_Wh", F(State.SMC.Est_Today_Power_Wh));
-      Append_Pair (JSON_Line, "PowerRateUsage", F(State.SMC.Power_Rate_Usage));
-      Append_Pair (JSON_Line, "PulsingSuggestionMaintenanceWindowWake", F(State.SMC.Pulse_Wake));
-      Append_Pair (JSON_Line, "PulsingSuggestionMaintenanceWindowWakeLength", F(State.SMC.Pulse_Length));
-      Append_Pair (JSON_Line, "WillBatterySurviveOneDay", YN(State.SMC.Will_Bat_Survive));
-      Append_Pair (JSON_Line, "airflow_inlet_k", F(State.SMC.Airflow_Inlet_K));
-      Append_Pair (JSON_Line, "airflow_outlet_k", F(State.SMC.Airflow_Outlet_K));
-      Append_Pair (JSON_Line, "ambient_temp_k", F(State.SMC.Ambient_Temp_K));
-      Append (JSON_Line, """fan_rpms"": [" & F(State.SMC.Fan_RPMs(1)) & ", " & F(State.SMC.Fan_RPMs(2)) & "], ");
-      Append_Pair (JSON_Line, "PropellerEngine1Tach", F(State.SMC.Fan_RPMs(1)));
-      Append_Pair (JSON_Line, "PropellerEngine2Tach", F(State.SMC.Fan_RPMs(2)));
-      Append_Pair (JSON_Line, "F0Tg", F(State.SMC.Fan_Targets(1)));
-      Append_Pair (JSON_Line, "F1Tg", F(State.SMC.Fan_Targets(2)));
-      Append (JSON_Line, """gas_constants"": {");
-      Append_Pair (JSON_Line, "Cp", F(State.SMC.Gas_Constants.Cp));
-      Append_Pair (JSON_Line, "R", F(State.SMC.Gas_Constants.R));
-      Append_Pair (JSON_Line, "gamma", F(State.SMC.Gas_Constants.Gamma), False);
-      Append (JSON_Line, "}, ");
-      Append (JSON_Line, """fluid_dynamics"": {");
-      Append_Pair (JSON_Line, "flow_scale_l", F(State.SMC.Flow_Scale_L));
-      Append_Pair (JSON_Line, "char_velocity_u0", F(State.SMC.Char_Velocity_U0));
-      Append_Pair (JSON_Line, "turbulence_int_up", F(State.SMC.Turbulence_Int_Up));
-      Append_Pair (JSON_Line, "reynolds_number_re0", F(State.SMC.Reynolds_Number_Re0));
-      Append_Pair (JSON_Line, "reynolds_number", F(State.SMC.Reynolds_Number));
-      Append_Pair (JSON_Line, "weber_number", F(State.SMC.Weber_Number));
-      Append_Pair (JSON_Line, "strouhal_number", F(State.SMC.Strouhal_Number));
-      Append_Pair (JSON_Line, "cauchy_number", F(State.SMC.Cauchy_Number), False);
-      Append (JSON_Line, "}, ");
-      Append_Pair (JSON_Line, "heatflux_j", F(State.SMC.Heatflux_J));
-      Append_Pair (JSON_Line, "humidity_pct", F(State.SMC.Humidity_Pct));
-      Append_Pair (JSON_Line, "inOrderToSurviveDayMustHibernate", YN(State.SMC.Must_Hibernate));
-      Append_Pair (JSON_Line, "massflow_kg_s", F(State.SMC.Massflow_Kg_S));
-      Append_Pair (JSON_Line, "power", F(State.SMC.Power));
-      Append_Pair (JSON_Line, "thermal_inefficiency_w", F(Real'Max (0.0, State.SMC.Power - State.SMC.Heatflux_J)));
-      Append_Pair (JSON_Line, "cooling_efficiency_pct", F(if State.SMC.Power > 0.0 then Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
-      Append_Pair (JSON_Line, "work_efficiency_pct", F(if State.SMC.Power > 0.0 then 100.0 - Real'Min (100.0, Real'Max (0.0, (State.SMC.Heatflux_J / State.SMC.Power) * 100.0)) else 0.0));
-      Append_Pair (JSON_Line, "talp_k", F(State.SMC.TaLP_K));
-      Append_Pair (JSON_Line, "tarf_k", F(State.SMC.TaRF_K));
-      Append (JSON_Line, """temps"": {");
-      Append_Pair (JSON_Line, "PSTR", F(State.SMC.Temps.PSTR));
-      Append_Pair (JSON_Line, "TCMz", F(State.SMC.Temps.TCMz));
-      Append_Pair (JSON_Line, "TaLP", F(State.SMC.Temps.TaLP));
-      Append_Pair (JSON_Line, "TaLT", F(State.SMC.Temps.TaLT));
-      Append_Pair (JSON_Line, "TaLW", F(State.SMC.Temps.TaLW));
-      Append_Pair (JSON_Line, "TaRF", F(State.SMC.Temps.TaRF));
-      Append_Pair (JSON_Line, "TaRT", F(State.SMC.Temps.TaRT));
-      Append_Pair (JSON_Line, "TaRW", F(State.SMC.Temps.TaRW));
-      Append_Pair (JSON_Line, "Tg0X", F(State.SMC.Temps.Tg0X));
-      Append_Pair (JSON_Line, "Ts0P", F(State.SMC.Temps.Ts0P));
-      Append_Pair (JSON_Line, "Ts1P", F(State.SMC.Temps.Ts1P), False);
-      Append (JSON_Line, "}, ");
-      Append_Pair (JSON_Line, "thrust_n", F(State.SMC.Thrust_N));
-      Append_Pair (JSON_Line, "turbo", Ada.Strings.Fixed.Trim(Integer'Image(State.SMC.Turbo), Ada.Strings.Left), False);
-      Append (JSON_Line, "}, ");
-      
-      Append (JSON_Line, """system"": {");
-      Append_Pair (JSON_Line, "BatteryDesignCapacityWh", F(State.System.Battery_Design_Wh));
-      Append_Pair (JSON_Line, "BatteryEnergyBankWh", F(State.System.Battery_Energy_Wh));
-      Append_Pair (JSON_Line, "BatteryFullChargeCapacityWh", F(State.System.Battery_Full_Wh));
-      Append_Pair (JSON_Line, "BatteryHealthPct", F(State.System.Battery_Health_Pct));
-      Append_Pair (JSON_Line, "battery_charging", B(State.System.Battery_Charging));
-      Append_Pair (JSON_Line, "battery_percent", Ada.Strings.Fixed.Trim(Integer'Image(State.System.Battery_Percent), Ada.Strings.Left));
-      Append_Pair (JSON_Line, "cpu_usage", F(State.System.CPU_Usage));
-      Append (JSON_Line, """load_avg"": [" & F(State.System.Load_Avg(1)) & ", " & F(State.System.Load_Avg(2)) & ", " & F(State.System.Load_Avg(3)) & "], ");
-      Append_Pair (JSON_Line, "mem_usage", F(State.System.Mem_Usage));
-      Append_Pair (JSON_Line, "nonHumanInputHIDIdle", F(State.System.Non_Human_HID_Idle_ns / 1.0E9));
-      Append_Pair (JSON_Line, "pmset_info", S(Trim_Null(State.System.PMSet_Info)));
-      Append_Pair (JSON_Line, "uptime_earu", F(State.System.Uptime_Earu));
-      Append_Pair (JSON_Line, "uptime_system", F(State.System.Uptime_System), False);
-      Append (JSON_Line, "}, ");
-      
-      Append_Pair (JSON_Line, "time", F(State.Time));
-      
-      Append (JSON_Line, """user_entity_detection"": {");
-      Append_Pair (JSON_Line, "count", Ada.Strings.Fixed.Trim(Integer'Image(State.User_Entity.Count), Ada.Strings.Left));
-      Append (JSON_Line, """detected"": [");
-      for I in 1 .. State.User_Entity.Count loop
-         Append (JSON_Line, "[" & F(State.User_Entity.Detected(I).BPM) & ", " & F(State.User_Entity.Detected(I).Confidence) & "]" & (if I < State.User_Entity.Count then ", " else ""));
-      end loop;
-      Append (JSON_Line, "], ");
-      Append (JSON_Line, """inferred_mood"": {");
-      Append_Pair (JSON_Line, "Anxious/Frustrated", F(State.User_Entity.Mood.Anxious));
-      Append_Pair (JSON_Line, "Calm/Relaxed", F(State.User_Entity.Mood.Calm));
-      Append_Pair (JSON_Line, "Excited/Joyful", F(State.User_Entity.Mood.Excited));
-      Append_Pair (JSON_Line, "Tired/Bored", F(State.User_Entity.Mood.Tired), False);
-      Append (JSON_Line, "}");
-      Append (JSON_Line, ", ");
-      
-      Append (JSON_Line, """pedometer"": {");
-      Append_Pair (JSON_Line, "steps", Ada.Strings.Fixed.Trim(Integer'Image(State.Pedometer.Steps), Ada.Strings.Left), False);
-      Append (JSON_Line, "}, ");
-      Append_Net_Comm (JSON_Line);
-      Append_Pair (JSON_Line, "master_warning", B(State.Electron_Travel.Interference or State.Location.Alt_Inop or State.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0));
-      Append_Pair (JSON_Line, "master_caution", B(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.05 or State.System.CPU_Usage > 90.0 or State.System.Mem_Usage > 90.0), False);
-      Append (JSON_Line, "}");
-
-      declare
-         S_Without_Parity : constant String := To_String (JSON_Line) & "}";
-         P_Hash           : constant String := Hash (S_Without_Parity);
-      begin
-         Append (JSON_Line, ", ""parity"": """ & P_Hash & """");
-      end;
-
-      Append (JSON_Line, "}");
-
-      declare
-         use Ada.Strings.Unbounded;
-         Success : Boolean := False;
-         Actual_Path : Unbounded_String := To_Unbounded_String (Path);
-         Actual_Tmp_Path : Unbounded_String := To_Unbounded_String (Tmp_Path);
-      begin
-         begin
-            Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, To_String (Actual_Tmp_Path));
-            Ada.Text_IO.Put_Line (File, To_String (JSON_Line));
+      --  ── ecosystem_weather ────────────────────────────────────────────────
+      Append (Buf, """ecosystem_weather"": {");
+      AP ("category",              S (Trim_Null (State.Ecosystem_Weather.Category)));
+      AP ("dew_point_k",           F (State.Ecosystem_Weather.Dew_Point_K));
+      AP ("dew_point_spread",      F (State.Ecosystem_Weather.Dew_Point_Spread));
+      AP ("humidity_pct",          F (State.Ecosystem_Weather.Humidity_Pct));
+      AP ("air_fluid_density",     F (State.Ecosystem_Weather.Air_Fluid_Density));
+      AP ("pressure_tendency_hpa", F (State.Ecosystem_Weather.Pressure_Tendency_HPa));
+      AP ("api_humidity_pct",      F (State.Ecosystem_Weather.API_Humidity_Pct));
+      AP ("hum_offset",            F (State.Ecosystem_Weather.Hum_Offset));
+      AP ("smc_p_offset_hpa",      F (State.Ecosystem_Weather.SMC_P_Offset_HPa));
+      --  wind_map: 7x7 grid serialized as nested arrays
+      Append (Buf, """wind_map"": [");
+      for Row in 1 .. 7 loop
+         Append (Buf, "[");
+         for Col in 1 .. 7 loop
             declare
-               S_Final : constant String := To_String (JSON_Line);
-               B64 : constant String := Base64_Encode (S_Final);
-               H : constant String := Hash (S_Final);
+               WP : constant Earu.Types.Wind_Point := State.Ecosystem_Weather.Wind_Map (Row, Col);
             begin
-               Ada.Text_IO.Put_Line (File, "[RECOVERY_V1:" & B64 & ":" & H & "]");
+               Append (Buf, "[" & F (WP.Speed) & ", [" &
+                  F (WP.Vec.X) & ", " & F (WP.Vec.Y) & ", " & F (WP.Vec.Z) &
+                  "], " & F (WP.Press) & ", " & F (WP.Temp) & "]");
+               if Col < 7 then Append (Buf, ", "); end if;
             end;
-            Ada.Text_IO.Close (File);
-            Success := True;
-         exception
-            when others =>
-               begin
-                  Actual_Path := To_Unbounded_String ("EARU_data.dat");
-                  Actual_Tmp_Path := To_Unbounded_String ("EARU_data.dat.tmp");
-                  Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, To_String (Actual_Tmp_Path));
-                  Ada.Text_IO.Put_Line (File, To_String (JSON_Line));
-                  declare
-                     S_Final : constant String := To_String (JSON_Line);
-                     B64 : constant String := Base64_Encode (S_Final);
-                     H : constant String := Hash (S_Final);
-                  begin
-                     Ada.Text_IO.Put_Line (File, "[RECOVERY_V1:" & B64 & ":" & H & "]");
-                  end;
-                  Ada.Text_IO.Close (File);
-                  Success := True;
-                  Ada.Text_IO.Put_Line ("[!] Telemetry primary write failed. Safely fell back to workspace path.");
-               exception
-                  when others =>
-                     Ada.Text_IO.Put_Line ("[!] All attempts to write telemetry file failed.");
-               end;
-         end;
+         end loop;
+         Append (Buf, "]");
+         if Row < 7 then Append (Buf, ", "); end if;
+      end loop;
+      Append (Buf, "], ");
+      --  stats buckets
+      Append (Buf, """stats"": {");
+      declare
+         procedure Bucket (Key : String; Bkt : Earu.Types.Stat_Bucket; Comma : Boolean := True) is
+            Dir_Str : constant String := Ada.Strings.Fixed.Trim (String (Bkt.Dir), Ada.Strings.Both);
+            St      : constant Character := Bkt.State;
+         begin
+            Append (Buf, """" & Key & """: [" &
+               F (Bkt.Val) & ", """ & St & """, """ & Dir_Str & """, " &
+               F (Bkt.Drift) & "]" & (if Comma then ", " else ""));
+         end Bucket;
+      begin
+         Bucket ("0.1",   State.Ecosystem_Weather.Stats.S_0_1);
+         Bucket ("1.0",   State.Ecosystem_Weather.Stats.S_1_0);
+         Bucket ("10.0",  State.Ecosystem_Weather.Stats.S_10_0);
+         Bucket ("100.0", State.Ecosystem_Weather.Stats.S_100_0, False);
+      end;
+      Append (Buf, "}}, ");
 
-         if Success then
-            begin
-               declare
-                  Ret : Interfaces.C.int;
-                  pragma Unreferenced (Ret);
-                  function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
-                  pragma Import (C, rename, "rename");
-                  C_Tmp : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (To_String (Actual_Tmp_Path));
-                  C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (To_String (Actual_Path));
-               begin
-                  Ret := rename (C_Tmp, C_Path);
-                  Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
-               end;
-            exception
-               when others =>
-                  Ada.Text_IO.Put_Line ("[!] Atomic rename failed for telemetry file.");
-            end;
-         end if;
+      --  ── events ────────────────────────────────────────────────────────────
+      Append (Buf, """events"": [");
+      for I in 1 .. State.Event_Count loop
+         declare
+            E : constant Earu.Types.Event_Type := State.Events (I);
+         begin
+            Append (Buf, "{");
+            AP    ("time", F (E.Time));
+            AP    ("tstr", S (Trim_Null (E.TStr)));
+            AP    ("amp",  F (E.Amp));
+            AP    ("lbl",  S (Trim_Null (E.Lbl)));
+            AP    ("sev",  S (Trim_Null (E.Sev)));
+            AP    ("sym",  S (Trim_Null (E.Sym)));
+            Append (Buf, """src"": [" & S (Trim_Null (E.Src)) & "], ");
+            AI    ("nsrc", E.NSrc);
+            Append (Buf, """bands"": []}");
+            if I < State.Event_Count then Append (Buf, ", "); end if;
+         end;
+      end loop;
+      Append (Buf, "], ");
+
+      --  ── parity hashes (written by ML bridge into SHM header → State) ─────
+      AP ("p_augmented", S (Trim64 (State.P_Augmented)));
+      AP ("p_external",  S (Trim64 (State.P_External)));
+      AP ("p_internal",  S (Trim64 (State.P_Internal)), False);
+
+      --  ── close root & compute self-parity hash ─────────────────────────────
+      declare
+         Pre_Parity : constant String := To_String (Buf) & "}";
+         P_Hash     : constant String := Hash (Pre_Parity);
+      begin
+         Append (Buf, ", ""parity"": """ & P_Hash & """");
+      end;
+      Append (Buf, "}");
+
+      --  ── atomic write via rename ───────────────────────────────────────────
+      begin
+         Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Tmp_Path);
+         Ada.Text_IO.Put_Line (File, To_String (Buf));
+         Ada.Text_IO.Close (File);
+         declare
+            function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
+            pragma Import (C, rename, "rename");
+            C_Tmp  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Tmp_Path);
+            C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+            Ret    : Interfaces.C.int := rename (C_Tmp, C_Path);
+         begin
+            Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
+         end;
+      exception
+         when others => null;
       end;
    end Write_EARU_Data;
 

@@ -9,10 +9,13 @@ sudo cp ${PLIST_NAME} ${PLIST_PATH}
 sudo chown root:wheel ${PLIST_PATH}
 sudo chmod 644 ${PLIST_PATH}
 
-# Unload the service if it is already loaded
-sudo launchctl unload "$PLIST_PATH" 2>/dev/null
+echo "Stopping service if running..."
+sudo launchctl bootout system "${PLIST_PATH}" 2>/dev/null
 
-# Load the service
-sudo launchctl load "$PLIST_PATH"
+echo "Enabling service..."
+sudo launchctl enable "system/com.earu.service" 2>/dev/null
+
+echo "Starting service..."
+sudo launchctl bootstrap system "${PLIST_PATH}"
 
 echo "Service ${PLIST_NAME} restarted."

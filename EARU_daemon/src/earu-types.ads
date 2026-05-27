@@ -88,8 +88,9 @@ package Earu.Types is
       Corr_Velocity : aliased Real := 1.0;
       Corr_VRate    : aliased Real := 1.0;
       Lockin_Miss   : aliased Real := 0.0;
-      Warning_Reason : aliased String (1 .. 128) := (others => ' ');
-      Caution_Reason : aliased String (1 .. 128) := (others => ' ');
+      Mapping_Mode  : aliased Integer := 0;
+      Warning_Reason : aliased String (1 .. 256) := (others => ' ');
+      Caution_Reason : aliased String (1 .. 256) := (others => ' ');
       Alt_Inop      : aliased Boolean := False;
       Alt_Inop_Until: aliased Real := 0.0;
 
@@ -142,6 +143,9 @@ package Earu.Types is
       Seu_Risk_Multiplier      : aliased Real := 1.0;
       Alt_Stress_Multiplier    : aliased Real := 1.0;
       Anomaly_Upset_Count      : aliased Integer := 0;
+      Structural_Life_Left_Y   : aliased Real := 0.0;
+      Structural_Life_Left_M   : aliased Real := 0.0;
+      Structural_Life_Left_D   : aliased Real := 0.0;
       Data_Integrity           : aliased Data_Integrity_Check_Type := (others => <>);
    end record;
 
@@ -221,6 +225,14 @@ package Earu.Types is
       Non_Human_HID_Idle_ns   : aliased Real := 0.0;
       Uptime_Earu             : aliased Real := 0.0;
       Uptime_System           : aliased Real := 0.0;
+      Machine_Life_Runtime    : aliased Real := 0.0;
+      SSD_Available_Spare     : aliased Real := 100.0;
+      SSD_Used_Pct            : aliased Real := 0.0;
+      SSD_Data_Read_Units     : aliased Real := 0.0;
+      SSD_Data_Write_Units    : aliased Real := 0.0;
+      SSD_Life_Left_Years     : aliased Real := 0.0;
+      SSD_Life_Left_Months    : aliased Real := 0.0;
+      SSD_Life_Left_Days      : aliased Real := 0.0;
       PMSet_Info              : aliased String (1 .. 1024) := (others => ' ');
    end record;
 

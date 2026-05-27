@@ -54,29 +54,115 @@ global_last_confirmed_ground = False
 
 
 
-# Add parent dir to path to import EARU (Root is two levels up from EARU_daemon/python/)
+
 root_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.append(root_dir)
-sys.path.append(os.path.join(root_dir, "EARU_LegacyPython"))
-try:
-    from EARU import VibrationDetector  # pyrefly: ignore
-except Exception as e:
-    print(f"[!] Warning: Could not import VibrationDetector from EARU.py. Exception: {e}")
-    class VibrationDetector:
-        def __init__(self, fs=100):
-            self.events = []
-            self.cumulative_fatigue = 1e-10
-            self.cusum_val = 0.0
-            self.latest_mag = 0.0
-            self.rms = 0.0
-            self.peak = 0.0
-        def process(self, x, y, z, ts):
-            self.latest_mag = math.sqrt(x**2 + y**2 + z**2)
-            self.peak = max(self.peak * 0.999, self.latest_mag)
-            self.rms = self.rms * 0.99 + self.latest_mag * 0.01
-            if self.latest_mag > 0.05:
-                self.cumulative_fatigue += 1e-8
-            self.cusum_val = self.cusum_val * 0.99 + max(0.0, self.latest_mag - 0.02) * 0.01
+
+class VibrationDetector:
+    """Self-contained vibration detector: CUSUM + STA/LTA + IIR high-pass.
+    Tracks cumulative_fatigue, cusum_val, rms, peak, and events consumed
+    by stats_worker.  No external dependencies beyond math/collections."""
+    def __init__(self, fs=100):
+        self.fs = fs
+        self.events = []
+        self.cumulative_fatigue = 1e-10
+        self.cusum_val = 0.0
+        self.latest_mag = 0.0
+        self.rms = 0.0
+        self.peak = 0.0
+        # IIR high-pass (gravity removal, alpha=0.95)
+        self._hp_alpha = 0.95
+        self._hp_prev_raw = [0.0, 0.0, 0.0]
+        self._hp_prev_out = [0.0, 0.0, 0.0]
+        self._hp_ready = False
+        # CUSUM bilateral
+        self.cusum_pos = 0.0
+        self.cusum_neg = 0.0
+        self.cusum_mu = 0.0
+        self._cusum_k = 0.0005
+        self._cusum_h = 0.01
+        # STA/LTA (3 timescales)
+        self.sta = [0.0, 0.0, 0.0]
+        self.lta = [1e-10, 1e-10, 1e-10]
+        self._sta_n = [3, 15, 50]
+        self._lta_n = [100, 500, 2000]
+        self.sta_lta_active = [False, False, False]
+        self._sta_thresh_on  = [3.0, 2.5, 2.0]
+        self._sta_thresh_off = [1.5, 1.3, 1.2]
+        # EMA for rms/peak
+        self._rms_alpha = 0.01
+        self._peak_decay = 0.999
+        # Fatigue constants (SAC305 proxy)
+        self._solder_k = 0.0012
+        self._last_evt_t = 0.0
+        # Motion classification (populated by classify_seismic equivalent inline)
+        self.motion_type = "Stationary"
+        self.motion_certainty = 0.0
+        self.spectral_balance = 0.0
+
+    def process(self, ax, ay, az, ts):
+        self.latest_mag = math.sqrt(ax*ax + ay*ay + az*az)
+        a = self._hp_alpha
+        if not self._hp_ready:
+            self._hp_prev_raw = [ax, ay, az]
+            self._hp_prev_out = [0.0, 0.0, 0.0]
+            self._hp_ready = True
+            mag = 0.0
+        else:
+            hx = a*(self._hp_prev_out[0] + ax - self._hp_prev_raw[0])
+            hy = a*(self._hp_prev_out[1] + ay - self._hp_prev_raw[1])
+            hz = a*(self._hp_prev_out[2] + az - self._hp_prev_raw[2])
+            self._hp_prev_raw = [ax, ay, az]
+            self._hp_prev_out = [hx, hy, hz]
+            mag = math.sqrt(hx*hx + hy*hy + hz*hz)
+        # EMA rms/peak
+        self.rms   = self.rms   * (1-self._rms_alpha) + mag * self._rms_alpha
+        self.peak  = max(self.peak * self._peak_decay, mag)
+        # STA/LTA
+        e = mag * mag
+        triggered = False
+        for i in range(3):
+            self.sta[i] += (e - self.sta[i]) / self._sta_n[i]
+            self.lta[i] += (e - self.lta[i]) / self._lta_n[i]
+            ratio = self.sta[i] / (self.lta[i] + 1e-30)
+            was = self.sta_lta_active[i]
+            if ratio > self._sta_thresh_on[i] and not was:
+                self.sta_lta_active[i] = True
+                triggered = True
+            elif ratio < self._sta_thresh_off[i]:
+                self.sta_lta_active[i] = False
+        # CUSUM bilateral
+        self.cusum_mu += 0.0001 * (mag - self.cusum_mu)
+        self.cusum_pos = max(0.0, self.cusum_pos + mag - self.cusum_mu - self._cusum_k)
+        self.cusum_neg = max(0.0, self.cusum_neg - mag + self.cusum_mu - self._cusum_k)
+        self.cusum_val = max(self.cusum_pos, self.cusum_neg)
+        cusum_triggered = False
+        if self.cusum_pos > self._cusum_h:
+            self.cusum_pos = 0.0
+            cusum_triggered = True
+        if self.cusum_neg > self._cusum_h:
+            self.cusum_neg = 0.0
+            cusum_triggered = True
+        # Cumulative fatigue (Palmgren-Miner proxy: rms^2 per step)
+        if mag > 0.001:
+            d_dmg = min(0.01, self._solder_k * (self.rms ** 2))
+            self.cumulative_fatigue += d_dmg
+        # Emit event
+        if (triggered or cusum_triggered) and (ts - self._last_evt_t) > 0.1:
+            self._last_evt_t = ts
+            tstr = time.strftime("%H:%M:%S", time.localtime(ts)) + f".{int((ts % 1)*100):02d}"
+            sources = []
+            if triggered:     sources.append("STA/LTA")
+            if cusum_triggered: sources.append("CUSUM")
+            evt = {
+                "time": ts, "tstr": tstr, "amp": float(mag),
+                "lbl": "vibration", "sev": "VIBRATION",
+                "sym": "\u25cf", "src": sources, "nsrc": len(sources), "bands": []
+            }
+            self.events.append(evt)
+            if len(self.events) > 5:
+                self.events.pop(0)
+        return mag
 
 # SHM Configuration - ALIGNED with _spu.py and earu_daemon.adb
 SHM_PREFIX = "earu_v2_"
@@ -1126,34 +1212,10 @@ def main():
     except Exception as e:
         print(f"[!] Warning pre-creating sensor SHM: {e}")
         
-    use_real = os.environ.get("REAL_SENSOR") == "1"
-    
-    if use_real:
-        try:
-            from earu._spu import sensor_worker  # pyrefly: ignore
-            print("[*] PHYSICAL HARDWARE SENSORS ACTIVATED (Real MacBook Accelerometer/Gyro)")
-            sensor_proc = mp.Process(
-                target=sensor_worker,
-                args=("vib_detect_shm", 0),
-                kwargs={
-                    "gyro_shm_name": "vib_detect_shm_gyro",
-                    "als_shm_name": "vib_detect_shm_als",
-                    "lid_shm_name": "vib_detect_shm_lid"
-                },
-                daemon=True
-            )
-        except Exception as e:
-            print(f"[!] Error loading real hardware sensors: {e}. Falling back to Mock.")
-            sensor_proc = mp.Process(target=mock_sensor_worker, daemon=True)
-    else:
-        print("[*] MOCK SENSORS ACTIVE (To test real laptop motion, run with REAL_SENSOR=1)")
-        sensor_proc = mp.Process(target=mock_sensor_worker, daemon=True)
-
     processes = [
         mp.Process(target=stats_worker, daemon=True),
         mp.Process(target=weather_worker, daemon=True),
-        mp.Process(target=ml_worker, daemon=True),
-        sensor_proc
+        mp.Process(target=ml_worker, daemon=True)
     ]
     for p in processes: p.start()
     try:

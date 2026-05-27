@@ -275,4 +275,8 @@ package Earu.Shm is
    function Open_Lid_SHM (Name : String) return Float_32_Ptr;
    function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
 
+   function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr;
+   function Create_Lid_SHM (Name : String) return Float_32_Ptr;
+   function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
+
 end Earu.Shm;

@@ -84,4 +84,49 @@ package body Earu.Shm is
       return ALS_SHM_Record_Ptr (ALS_Data_Conv.To_Pointer (Addr + Storage_Offset (28)));
    end Open_ALS_SHM;
 
+   function Create_And_Map_Generic (Name : String; Size : size_t) return System.Address is
+      C_Name : chars_ptr := New_String (Name);
+      FD : int := shm_open (C_Name, 514, 8#666#);
+      Addr : System.Address;
+      Ret : int;
+      pragma Unreferenced (Ret);
+      function ftruncate (fd : int; length : size_t) return int;
+      pragma Import (C, ftruncate, "ftruncate");
+   begin
+      Free (C_Name);
+      if FD < 0 then
+         return System.Null_Address;
+      end if;
+
+      Ret := ftruncate (FD, Size);
+
+      Addr := mmap (System.Null_Address, Size, 3, MAP_SHARED, FD, 0);
+      if Addr = To_Address (Integer_Address (16#FFFFFFFFFFFFFFFF#)) then
+         return System.Null_Address;
+      end if;
+
+      return Addr;
+   end Create_And_Map_Generic;
+
+   function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr is
+      Addr : System.Address := Create_And_Map_Generic (Name, size_t (IMU_SHM'Max_Size_In_Storage_Elements));
+   begin
+      if Addr = System.Null_Address then return null; end if;
+      return IMU_SHM_Ptr (IMU_Conv.To_Pointer (Addr));
+   end Create_IMU_SHM;
+
+   function Create_Lid_SHM (Name : String) return Float_32_Ptr is
+      Addr : System.Address := Create_And_Map_Generic (Name, 12);
+   begin
+      if Addr = System.Null_Address then return null; end if;
+      return Float_32_Ptr (Lid_Data_Conv.To_Pointer (Addr + Storage_Offset (8)));
+   end Create_Lid_SHM;
+
+   function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr is
+      Addr : System.Address := Create_And_Map_Generic (Name, 130);
+   begin
+      if Addr = System.Null_Address then return null; end if;
+      return ALS_SHM_Record_Ptr (ALS_Data_Conv.To_Pointer (Addr + Storage_Offset (28)));
+   end Create_ALS_SHM;
+
 end Earu.Shm;

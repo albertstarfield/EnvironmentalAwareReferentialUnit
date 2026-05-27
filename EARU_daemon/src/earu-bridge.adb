@@ -8,6 +8,9 @@ package body Earu.Bridge is
 
    procedure Update_Structural_Fatigue (State : in out Earu_State) is
       use Earu.Math;
+      -- --- Structural Health Monitoring (SHM) Pipeline ---
+      -- This procedure integrates real-time sensor data into a cumulative damage model.
+      
       Increment : Real := 0.0;
       
       RMS : constant Real := (if State.Vib_State.STA(1) > 1.0 then Real_Funcs.Sqrt (State.Vib_State.STA(1) - 1.0) else Real (0.0));
@@ -93,7 +96,8 @@ package body Earu.Bridge is
       Unfactored_P := (if State.Electron_Travel.Interference then 0.25 else 0.0);
       Unfactored_P := Real'Max (0.0, Real'Min (1.0, Unfactored_P + Env_Fatigue * 0.2));
 
-      -- Aggregated Risk
+      -- --- Aggregated Structural Risk ---
+      -- Fuses mechanical fatigue, hinge stress, and EMI interference into a single risk factor.
       State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := Real'Max (
          State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob,
          Real'Max (Electromech_P * 0.5, Unfactored_P)

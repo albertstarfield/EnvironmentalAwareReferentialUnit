@@ -57,6 +57,126 @@ procedure Earu_Daemon is
       Ret := C_System (Interfaces.C.To_C ("REAL_SENSOR=1 /opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &"));
    end Start_ML_Bridge;
 
+   procedure Save_All_To_NVRAM (State : Earu_State) is
+      use Earu.IO;
+   begin
+      Ada.Text_IO.Put_Line ("[*] Syncing critical state to NVRAM...");
+      Write_NVRAM_Real ("earu_lat", State.Location.Lat);
+      Write_NVRAM_Real ("earu_lon", State.Location.Lon);
+      Write_NVRAM_Real ("earu_alt", State.Location.Alt);
+      Write_NVRAM_Real ("earu_heading", State.Location.Heading);
+      Write_NVRAM_Real ("earu_total_dist", State.Location.Total_Dist);
+      Write_NVRAM_Real ("earu_fatigue", State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue);
+      Write_NVRAM_Real ("earu_machine_life", State.System.Machine_Life_Runtime);
+   end Save_All_To_NVRAM;
+
+   procedure Load_All_From_NVRAM (State : in out Earu_State) is
+      use Earu.IO;
+   begin
+      Ada.Text_IO.Put_Line ("[*] Loading critical state from NVRAM fallback...");
+      State.Location.Lat := Read_NVRAM_Real ("earu_lat", State.Location.Lat);
+      State.Location.Lon := Read_NVRAM_Real ("earu_lon", State.Location.Lon);
+      State.Location.Alt := Read_NVRAM_Real ("earu_alt", State.Location.Alt);
+      State.Location.Heading := Read_NVRAM_Real ("earu_heading", State.Location.Heading);
+      State.Location.Total_Dist := Read_NVRAM_Real ("earu_total_dist", State.Location.Total_Dist);
+      State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue := Read_NVRAM_Real ("earu_fatigue", State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue);
+      State.System.Machine_Life_Runtime := Read_NVRAM_Real ("earu_machine_life", State.System.Machine_Life_Runtime);
+   end Load_All_From_NVRAM;
+
+   procedure Update_Machine_Life (State : in out Earu_State) is
+      use Earu.IO;
+      BAT_TIME : constant Real := Execute_And_Read_Real ("ioreg -r -c AppleSmartBattery -a | plutil -p - | grep '""TotalOperatingTime""' | grep -oE '[0-9]+' | head -n 1");
+      SSD_TIME : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Power On Hours"" | awk '{print $NF}' | tr -d ','");
+      SSD_SPARE : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Available Spare:"" | grep -oE '[0-9]+' | head -n 1");
+      SSD_USED : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Percentage Used:"" | grep -oE '[0-9]+' | head -n 1");
+      SSD_READ : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Data Units Read:"" | awk '{print $(NF-2)}' | tr -d ','");
+      SSD_WRITE : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Data Units Written:"" | awk '{print $(NF-2)}' | tr -d ','");
+      
+      OFF      : Real := Read_NVRAM_Real ("machine_runtime_offset", 0.0);
+      LAST_BAT : constant Real := Read_NVRAM_Real ("machine_last_battery", 0.0);
+      SMART_THRESHOLD : constant Real := 500.0;
+      
+      Total_Age : Real;
+      Total_Expected_Hours : Real;
+      Hours_Left : Real;
+   begin
+      if BAT_TIME < LAST_BAT - 5.0 and BAT_TIME > 0.0 then
+         Ada.Text_IO.Put_Line ("[!] ALERT: Battery swap detected. Incrementing hardware offset.");
+         OFF := OFF + LAST_BAT;
+         Write_NVRAM_Real ("machine_runtime_offset", OFF);
+      end if;
+      
+      Total_Age := BAT_TIME + OFF;
+      State.System.Machine_Life_Runtime := Total_Age;
+      State.System.SSD_Available_Spare := SSD_SPARE;
+      State.System.SSD_Used_Pct := SSD_USED;
+      State.System.SSD_Data_Read_Units := SSD_READ;
+      State.System.SSD_Data_Write_Units := SSD_WRITE;
+
+      -- Calculate SSD Life Expectancy
+      if SSD_USED > 0.0 then
+         Total_Expected_Hours := (Total_Age / SSD_USED) * 100.0;
+         Hours_Left := Total_Expected_Hours - Total_Age;
+         
+         if Hours_Left < 0.0 then Hours_Left := 0.0; end if;
+         
+         State.System.SSD_Life_Left_Years := Hours_Left / 8760.0;
+         State.System.SSD_Life_Left_Months := Hours_Left / 730.0;
+         State.System.SSD_Life_Left_Days := Hours_Left / 24.0;
+      else
+         State.System.SSD_Life_Left_Years := 99.0;
+         State.System.SSD_Life_Left_Months := 1188.0;
+         State.System.SSD_Life_Left_Days := 36135.0;
+      end if;
+
+      -- Integrate into Aggregated Risk (SSD wear factor)
+      -- Base risk is from Damage_Fatigue (seismic/mechanical)
+      -- Add SSD wear factor: (SSD_USED / 100.0) * 0.15 + Spare exhaustion factor
+      declare
+         SSD_Base_Risk : constant Real := (SSD_USED / 100.0) * 0.15;
+         SSD_Spare_Risk : constant Real := (if SSD_SPARE < 100.0 then (100.0 - SSD_SPARE) / 5.0 else 0.0);
+         Total_SSD_Risk : constant Real := SSD_Base_Risk + SSD_Spare_Risk;
+         
+         -- Structural Life Prediction Modeling (Paris' Law Analogy)
+         -- a = Cumulative_Fatigue (Crack Length / Damage State)
+         -- da/dt = C * (Aggregated_Risk)^m
+         -- Here we assume failure at a = 100.0
+         -- Rate = Risk-dependent decay. Base rate assumes 5 years life at nominal 0.1 risk.
+         Damage_Rate : Real;
+         Time_Left_Hrs : Real;
+      begin
+         -- We add the SSD risk to the current mechanical risk
+         State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := 
+            Real'Min(1.0, State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk + Total_SSD_Risk);
+            
+         -- Prediction Logic:
+         -- We use a power law where damage acceleration increases with risk.
+         -- If Aggregated_Risk is high, crack propagation accelerates.
+         Damage_Rate := 0.001 * (State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk ** 2.5);
+         
+         -- Ensure a minimum decay even at low risk (background aging)
+         if Damage_Rate < 0.00001 then Damage_Rate := 0.00001; end if;
+         
+         if State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue < 100.0 then
+            Time_Left_Hrs := (100.0 - State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue) / Damage_Rate;
+            
+            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_Y := Time_Left_Hrs / 8760.0;
+            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_M := Time_Left_Hrs / 730.0;
+            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_D := Time_Left_Hrs / 24.0;
+         else
+            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_Y := 0.0;
+            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_M := 0.0;
+            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_D := 0.0;
+         end if;
+      end;
+      
+      if SSD_TIME > 0.0 and then (SSD_TIME - Total_Age) > SMART_THRESHOLD then
+          Ada.Text_IO.Put_Line ("[!] WARNING: Machine age trails SSD lifetime (" & SSD_TIME'Img & " hrs).");
+      end if;
+      
+      Write_NVRAM_Real ("machine_last_battery", BAT_TIME);
+   end Update_Machine_Life;
+
    Accel_SHM : IMU_SHM_Ptr := null;
    Gyro_SHM  : IMU_SHM_Ptr := null;
    Weather_SHM : Weather_SHM_Ptr := null;
@@ -236,9 +356,33 @@ procedure Earu_Daemon is
     task Network_Probe_Task;
    task body Monitor_Task is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
+      Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar.Clock;
+      Last_NVRAM_Sync_Hour     : Integer := -1;
    begin
       while Weather_SHM = null or Stats_SHM = null loop delay 0.1; end loop;
       loop
+          -- 1. Periodic Machine Life Update (every 5 minutes)
+          if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Machine_Life_Update) > 300.0 then
+             declare
+                Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+             begin
+                Update_Machine_Life (Full);
+                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+                Last_Machine_Life_Update := Ada.Calendar.Clock;
+             end;
+          end if;
+
+          -- 2. Periodic NVRAM Persistence (Every 12 hours of EARU uptime)
+          declare
+             Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+             Uptime_Hours : constant Integer := Integer (Full.System.Uptime_Earu / 3600.0);
+          begin
+             if Uptime_Hours /= Last_NVRAM_Sync_Hour and then (Uptime_Hours mod 12 = 0 or Uptime_Hours = 0) then
+                Save_All_To_NVRAM (Full);
+                Last_NVRAM_Sync_Hour := Uptime_Hours;
+             end if;
+          end;
+
           if Weather_SHM.Header.Update_Count /= Last_W then
              declare
                 Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
@@ -306,23 +450,23 @@ procedure Earu_Daemon is
                    procedure Add_W(Msg : String) is
                       Len : constant Positive := Msg'Length;
                    begin
-                      if W_Ptr + Len <= 128 then
+                      if W_Ptr + Len <= 256 then
                          L.Warning_Reason(W_Ptr .. W_Ptr + Len - 1) := Msg;
                          W_Ptr := W_Ptr + Len;
-                         if W_Ptr <= 128 then
+                         if W_Ptr <= 256 then
                             L.Warning_Reason(W_Ptr) := ' ';
                             W_Ptr := W_Ptr + 1;
                          end if;
                       end if;
                    end Add_W;
                 begin
-                   if Full.Electron_Travel.Interference then Add_W("INTERFERENCE"); end if;
-                   if Full.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0 then Add_W("ANOMALY"); end if;
-                   if Full.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.48 then Add_W("HIGH_RISK"); end if;
-                   if Full.SMC.Temps.TCMz > 100.0 then Add_W("TCMZ_OVERHEAT"); end if;
-                   if Full.Seismic_Activity.Peak_G > 2.5 then Add_W("SHOCK_DETECTED"); end if;
-                   if Full.System.Battery_Percent < 10 then Add_W("BATT_LOW_10"); end if;
-                   if Net_Full_Inop then Add_W("NET_COMMS_INOP"); end if;
+                   if Full.Electron_Travel.Interference then Add_W("INTERFERENCE [MOVE AWAY FROM EM]"); end if;
+                   if Full.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0 then Add_W("ANOMALY [CHECK HARDWARE]"); end if;
+                   if Full.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.48 then Add_W("HIGH_RISK [SUSPEND OPERATIONS]"); end if;
+                   if Full.SMC.Temps.TCMz > 100.0 then Add_W("TCMZ_OVERHEAT [COOL DEVICE]"); end if;
+                   if Full.Seismic_Activity.Peak_G > 2.5 then Add_W("SHOCK_DETECTED [PROTECT UNIT]"); end if;
+                   if Full.System.Battery_Percent < 10 then Add_W("BATT_LOW_10 [PLUG POWER]"); end if;
+                   if Net_Full_Inop then Add_W("NET_COMMS_INOP [CHECK NETWORK]"); end if;
                 end;
 
                 -- 2. Master Caution Triggers
@@ -331,19 +475,19 @@ procedure Earu_Daemon is
                    procedure Add_C(Msg : String) is
                       Len : constant Positive := Msg'Length;
                    begin
-                      if C_Ptr + Len <= 128 then
+                      if C_Ptr + Len <= 256 then
                          L.Caution_Reason(C_Ptr .. C_Ptr + Len - 1) := Msg;
                          C_Ptr := C_Ptr + Len;
-                         if C_Ptr <= 128 then
+                         if C_Ptr <= 256 then
                             L.Caution_Reason(C_Ptr) := ' ';
                             C_Ptr := C_Ptr + 1;
                          end if;
                       end if;
                    end Add_C;
                 begin
-                   if L.Lockin_Miss > 30.0 then Add_C("ANCHOR_FAIL_30S"); end if;
-                   if Full.System.Battery_Percent < 20 then Add_C("BATT_LOW_20"); end if;
-                   if Net_Partial then Add_C("NET_COMMS_PARTIAL"); end if;
+                   if L.Lockin_Miss > 30.0 then Add_C("ANCHOR_FAIL_30S [RE-ANCHOR GPS]"); end if;
+                   if Full.System.Battery_Percent < 20 then Add_C("BATT_LOW_20 [LOW POWER MODE]"); end if;
+                   if Net_Partial then Add_C("NET_COMMS_PARTIAL [CHECK CONNECTIVITY]"); end if;
                 end;
 
                 Earu.State_Store.State_Buffer.Update_Location (L);
@@ -366,7 +510,12 @@ procedure Earu_Daemon is
                S.Battery_Full_Wh := Real (Stats_SHM.Bat_Full_Wh);
                S.Battery_Health_Pct := Real (Stats_SHM.Bat_Health_Pct);
                S.Load_Avg := (Real (Stats_SHM.Load_Avg_1), Real (Stats_SHM.Load_Avg_5), Real (Stats_SHM.Load_Avg_15));
-               S.Non_Human_HID_Idle_ns := Real (Stats_SHM.HID_Idle_ns);
+                declare
+                   function get_hid_idle_time_ns return Interfaces.Unsigned_64;
+                   pragma Import (C, get_hid_idle_time_ns, "get_hid_idle_time_ns");
+                begin
+                   S.Non_Human_HID_Idle_ns := Real (get_hid_idle_time_ns);
+                end;
                S.PMSet_Info := Stats_SHM.PMSET_Info;
                S.Uptime_System := Real (Stats_SHM.Uptime_System);
                S.Uptime_Earu := Real (Stats_SHM.Uptime_Earu);
@@ -636,44 +785,71 @@ begin
    Earu.State_Store.State_Buffer.Initialize_State;
 
    declare
-      Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Q_W, Q_X, Q_Y, Q_Z : Earu.Types.Real;
+      Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Machine_Life, Q_W, Q_X, Q_Y, Q_Z : Earu.Types.Real;
       Load_Ok : Boolean;
    begin
       Earu.IO.Load_Initial_State (
          "/Volumes/EARU_dataIO/EARU_data.dat",
-         Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue,
+         Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Machine_Life,
          Q_W, Q_X, Q_Y, Q_Z, Load_Ok
       );
-      if Load_Ok then
-         declare
-            State : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
-         begin
+      
+      declare
+         State : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+      begin
+         if Load_Ok then
             State.Location.Lat := Lat;
             State.Location.Lon := Lon;
             State.Location.Alt := Alt;
             State.Location.Heading := Heading;
             State.Location.Total_Dist := Total_Dist;
             State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue := Cumulative_Fatigue;
+            State.System.Machine_Life_Runtime := Machine_Life;
             State.Orientation.Q := (W => Q_W, X => Q_X, Y => Q_Y, Z => Q_Z);
-            Earu.State_Store.State_Buffer.Update_Location (State.Location);
-            Earu.State_Store.State_Buffer.Update_Damage_Fatigue (State.Seismic_Activity.Damage_Fatigue);
-            Earu.State_Store.State_Buffer.Update_Sensors (State.Accel, State.Gyro, State.Orientation.Q);
             Ada.Text_IO.Put_Line ("[ok] Live state successfully restored from persistent data storage!");
-         end;
-      end if;
+         else
+            -- NVRAM Fallback
+            Load_All_From_NVRAM (State);
+            Ada.Text_IO.Put_Line ("[ok] Live state restored from NVRAM fallback!");
+         end if;
+         
+         Earu.State_Store.State_Buffer.Update_Location (State.Location);
+         Earu.State_Store.State_Buffer.Update_Damage_Fatigue (State.Seismic_Activity.Damage_Fatigue);
+         Earu.State_Store.State_Buffer.Update_System (State.System, State.Electron_Travel);
+         Earu.State_Store.State_Buffer.Update_Sensors (State.Accel, State.Gyro, State.Orientation.Q);
+      end;
    end;
 
    Start_ML_Bridge;
+   Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
+   Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
+   Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");
+   Lid_Data  := Earu.Shm.Create_Lid_SHM ("/vib_detect_shm_lid");
+   ALS_Data  := Earu.Shm.Create_ALS_SHM ("/vib_detect_shm_als");
+
+   declare
+      procedure start_iokit_sensors (
+         accel : Earu.Shm.IMU_SHM_Ptr;
+         gyro  : Earu.Shm.IMU_SHM_Ptr;
+         lid   : Earu.Shm.Float_32_Ptr;
+         als   : Earu.Shm.ALS_SHM_Record_Ptr
+      );
+      pragma Import (C, start_iokit_sensors, "start_iokit_sensors");
+   begin
+      if Accel_SHM /= null and Gyro_SHM /= null and Lid_Data /= null and ALS_Data /= null then
+         start_iokit_sensors (Accel_SHM, Gyro_SHM, Lid_Data, ALS_Data);
+         Ada.Text_IO.Put_Line ("[ok] Native Apple SPU drivers initialized and C background thread active!");
+      else
+         Ada.Text_IO.Put_Line ("[!] Error: Failed to create sensor shared memory segments!");
+      end if;
+   end;
+
    Ada.Text_IO.Put_Line ("[*] Initializing Shared Memory (Waiting for Python Sidecar bootstrap)...");
    for I in 1 .. 60 loop
-      Accel_SHM := Open_IMU_SHM ("/vib_detect_shm");
-      Gyro_SHM  := Open_IMU_SHM ("/vib_detect_shm_gyro");
       Weather_SHM := Open_Weather_SHM ("/earu_v2_weather_shm");
       Stats_SHM   := Open_Stats_SHM ("/earu_v2_stats_shm");
       ML_Results  := Open_ML_SHM ("/earu_v2_ml_shm");
-      Lid_Data    := Open_Lid_SHM ("/vib_detect_shm_lid");
-      ALS_Data    := Open_ALS_SHM ("/vib_detect_shm_als");
-      if Accel_SHM /= null and Stats_SHM /= null then
+      if Weather_SHM /= null and Stats_SHM /= null and ML_Results /= null then
          Ada.Text_IO.Put_Line ("[ok] Shared Memory successfully mapped!");
          exit;
       end if;

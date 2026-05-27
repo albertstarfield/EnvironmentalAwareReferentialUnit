@@ -1,5 +1,6 @@
 with Ada.Numerics.Generic_Elementary_Functions;
 with Interfaces.C;
+with Interfaces; use Interfaces;
 with System;
 
 package body Earu.Math is
@@ -78,15 +79,34 @@ package body Earu.Math is
       F_Dom, DT, RMS, Peak, K_Const, Eps_Crit, B_Exp, Current_Damage : Real;
       Increment : out Real
    ) is
+      -- --- Structural Fatigue Modeling (SAC305 Solder Alloy) ---
+      -- This model calculates the incremental damage to logic board solder joints
+      -- based on vibration (Basquin Equation) and impact shocks.
+      
       G_RMS : constant Real := (if RMS < 1.0E-10 then 1.0E-10 else RMS);
+      
+      -- Logic Board Dynamic Displacement (Z_D) derived from RMS acceleration
       Z_D   : constant Real := (9.80665 * G_RMS) / ((2.0 * PI * F_Dom)**2);
+      
+      -- Mechanical Shear Strain (Eps) on solder joints
       Eps   : constant Real := K_Const * Z_D;
+      
+      -- Vibrational Damage (D_Vibe) using Palmgren-Miner Linear Rule & Basquin
       D_Vibe : constant Real := F_Dom * DT * (Eps / Eps_Crit)**B_Exp;
+      
+      -- Habibie Crack Acceleration Factor: Models physical crack propagation.
+      -- Growth rate increases as the current crack length (Current_Damage) grows.
       Habibie_Accel : constant Real := 1.0 + 5.0 * (Sqrt (Current_Damage));
+      
+      -- Peak Impact Damage (D_Impact): Models sudden shocks (drops, typing)
       Eps_Peak : constant Real := K_Const * (9.80665 * Peak) / ((2.0 * PI * 60.0)**2);
       D_Impact : constant Real := (Eps_Peak / (Eps_Crit * 0.4))**3.0;
    begin
+      -- Total incremental damage combines cyclic vibration and transient impacts,
+      -- amplified by the current structural propagation factor.
       Increment := (D_Vibe + D_Impact * 0.2) * Habibie_Accel;
+      
+      -- Ensure minimum aging for significant peaks
       if Increment < 1.0E-12 and Peak > 0.005 then Increment := 1.0E-12; end if;
    end Solder_Fatigue_Increment;
 
@@ -365,16 +385,35 @@ package body Earu.Math is
          -- Accelerometer reaction physics: raw projection is negative during forward coordinate acceleration.
          -- Negating it correctly yields positive forward coordinate acceleration.
          A_Forward : constant Real := -(W.X * Cos (Yaw_Rad) + W.Y * Sin (Yaw_Rad));
-         -- Swapped X and Y and kept *-1 inversion per request
-         -- Empirical experiment have shown that it going to the right when we are moving forward as the chip are probably positionined portrait like phone while we are using an landscape laptop device
-         W_Aligned_X : constant Real := -(A_Forward * Cos (Heading_Rad));
-         W_Aligned_Y : constant Real := A_Forward * Sin (Heading_Rad);
+         
+         -- Coordinate Parity Auto-Correction: Apply active Mapping_Mode (16 modes: Swap + Signs)
+         M_U32 : constant Unsigned_32 := Unsigned_32(Loc.Mapping_Mode);
+         Inv_X : constant Real := (if (M_U32 and 1) /= 0 then -1.0 else 1.0);
+         Inv_Y : constant Real := (if (M_U32 and 2) /= 0 then -1.0 else 1.0);
+         Inv_Z : constant Real := (if (M_U32 and 4) /= 0 then -1.0 else 1.0);
+         Do_Swap : constant Boolean := (M_U32 and 8) /= 0;
+         
+         -- Standard Navigation Projection:
+         -- Speed * Sin(Heading) = East (X)
+         -- Speed * Cos(Heading) = North (Y)
+         B_E : constant Real := A_Forward * Sin (Heading_Rad);
+         B_N : constant Real := A_Forward * Cos (Heading_Rad);
+         
+         W_Aligned_X, W_Aligned_Y : Real;
       begin
+         if Do_Swap then
+            W_Aligned_X := B_N * Inv_X;
+            W_Aligned_Y := B_E * Inv_Y;
+         else
+            W_Aligned_X := B_E * Inv_X;
+            W_Aligned_Y := B_N * Inv_Y;
+         end if;
+         
          -- Integrate raw velocity (stable integration accumulator)
          Loc.Raw_Vel.X := Loc.Raw_Vel.X + W_Aligned_X * DT;
          Loc.Raw_Vel.Y := Loc.Raw_Vel.Y + W_Aligned_Y * DT;
-         -- Inverting Z component because we discovered that the IMU are inverted here as well
-         Loc.Raw_Vel.Z := Loc.Raw_Vel.Z + (-W.Z) * DT;
+         -- Also applying adaptive Z inversion bit
+         Loc.Raw_Vel.Z := Loc.Raw_Vel.Z + (-W.Z * DT) * Inv_Z;
       end;
       
       -- 5. Dynamic Velocity Damping (Advanced ZUPT)
@@ -625,7 +664,9 @@ package body Earu.Math is
             if Loc.V_Mag > 1.0E-16 and CL_V_Mag > 1.0E-16 and Adj_Alpha > 0.0 then
                Error_Ratio := CL_V_Mag / Loc.V_Mag;
 
-               if Error_Ratio > 1.5 or Error_Ratio < 0.5 then
+               -- User request: Hard Pull if Ratio > 0.4 or < 0.1
+               -- This prioritizes GPS truth and forces frequent absolute syncs
+               if Error_Ratio > 0.4 or Error_Ratio < 0.1 then
                   Loc.Raw_Vel.X := Loc.Raw_Vel.X * Error_Ratio;
                   Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Error_Ratio;
                   Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Error_Ratio;
@@ -668,8 +709,10 @@ package body Earu.Math is
                   -- we can use that gradient to see the actual heading or calibrated
                   DR_DX : constant Real := H_End.Pos.X - H_Start.Pos.X;
                   DR_DY : constant Real := H_End.Pos.Y - H_Start.Pos.Y;
+                  
+                  -- Standard Navigation Bearing: atan2(East, North)
                   DR_Bearing : Real := (if Abs(DR_DX) > 1.0E-12 or Abs(DR_DY) > 1.0E-12 
-                                        then Arctan (DR_DY, -DR_DX) * (180.0 / PI) 
+                                        then Arctan (DR_DX, DR_DY) * (180.0 / PI) 
                                         else Loc.Heading);
                   
                   Bearing_Diff : Real;
@@ -681,6 +724,53 @@ package body Earu.Math is
                   
                   if DR_Bearing < 0.0 then
                      DR_Bearing := DR_Bearing + 360.0;
+                  end if;
+
+                  -- Coordinate Parity Auto-Correction (16 Modes: Swap + Signs)
+                  -- Compare GPS displacement vector vs DR displacement vector
+                  if CL_Dist > 5.0 then
+                     declare
+                        -- GPS Vector (East, North)
+                        GPS_VE : constant Real := CL_Dist * Sin(CL_Bearing * (PI / 180.0));
+                        GPS_VN : constant Real := CL_Dist * Cos(CL_Bearing * (PI / 180.0));
+                        Best_Dot : Real := -1.0E30;
+                        Best_Mode : Integer := Loc.Mapping_Mode;
+                     begin
+                        for Mode in 0 .. 15 loop
+                           declare
+                              -- Mode bits: 0=X_Inv, 1=Y_Inv, 2=Z_Inv, 3=Swap_XY
+                              M_U32 : constant Unsigned_32 := Unsigned_32(Mode);
+                              Inv_X : constant Real := (if (M_U32 and 1) /= 0 then -1.0 else 1.0);
+                              Inv_Y : constant Real := (if (M_U32 and 2) /= 0 then -1.0 else 1.0);
+                              Do_Swap : constant Boolean := (M_U32 and 8) /= 0;
+                              
+                              -- Baseline projection (Standard Nav)
+                              B_E : constant Real := DR_DX;
+                              B_N : constant Real := DR_DY;
+                              
+                              -- Apply candidate mode to the accumulated displacement
+                              Test_VE, Test_VN : Real;
+                           begin
+                              if Do_Swap then
+                                 Test_VE := B_N * Inv_X;
+                                 Test_VN := B_E * Inv_Y;
+                              else
+                                 Test_VE := B_E * Inv_X;
+                                 Test_VN := B_N * Inv_Y;
+                              end if;
+
+                              declare
+                                 Dot : constant Real := Test_VE * GPS_VE + Test_VN * GPS_VN;
+                              begin
+                                 if Dot > Best_Dot then
+                                    Best_Dot := Dot;
+                                    Best_Mode := Mode;
+                                 end if;
+                              end;
+                           end;
+                        end loop;
+                        Loc.Mapping_Mode := Best_Mode;
+                     end;
                   end if;
 
                   Bearing_Diff := CL_Bearing - DR_Bearing;
