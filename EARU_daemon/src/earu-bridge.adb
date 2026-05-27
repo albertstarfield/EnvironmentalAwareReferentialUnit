@@ -96,20 +96,30 @@ package body Earu.Bridge is
       Unfactored_P := (if State.Electron_Travel.Interference then 0.25 else 0.0);
       Unfactored_P := Real'Max (0.0, Real'Min (1.0, Unfactored_P + Env_Fatigue * 0.2));
 
-      -- --- Aggregated Structural Risk ---
-      -- Fuses mechanical fatigue, hinge stress, EMI interference, and SSD wear/spare risks into a single risk factor.
+      -- --- Aggregated System Risk ---
+      -- Fuses mechanical fatigue, hinge stress, EMI interference, and System wear (SSD, Battery, NVRAM) into a single risk factor.
       declare
          Mechanical_Risk : constant Real := Real'Max (
             State.Seismic_Activity.Damage_Fatigue.Solder_Fatigue_Prob,
             Real'Max (Electromech_P * 0.5, Unfactored_P)
          );
+         
+         -- Hardware Wear Risks
          SSD_Base_Risk : constant Real := (State.System.SSD_Used_Pct / 100.0) * 0.15;
          SSD_Spare_Risk : constant Real := (if State.System.SSD_Available_Spare < 100.0 then (100.0 - State.System.SSD_Available_Spare) / 5.0 else 0.0);
-         Total_SSD_Risk : constant Real := SSD_Base_Risk + SSD_Spare_Risk;
+         
+         Battery_Degradation : constant Real := Real'Max (0.0, 100.0 - State.System.Battery_Health_Pct) / 100.0;
+         Battery_Risk : constant Real := Battery_Degradation * 0.1;
+         
+         -- NVRAM wear estimate (assuming 50k hrs typical MTBF)
+         NVRAM_Degradation : constant Real := Real'Min (1.0, State.System.Machine_Life_Runtime / 50000.0);
+         NVRAM_Risk : constant Real := NVRAM_Degradation * 0.1;
+         
+         Total_Hardware_Risk : constant Real := SSD_Base_Risk + SSD_Spare_Risk + Battery_Risk + NVRAM_Risk;
       begin
          State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := Real'Min (
             1.0,
-            Mechanical_Risk + Total_SSD_Risk
+            Mechanical_Risk + Total_Hardware_Risk
          );
 
          -- Structural Life Prediction Modeling (Paris' Law Analogy)
