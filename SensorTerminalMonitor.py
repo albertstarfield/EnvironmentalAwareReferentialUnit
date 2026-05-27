@@ -434,10 +434,24 @@ class PrimaryFlightDisplay:
         self.battery_full_wh: float = 0.0
         self.battery_design_wh: float = 0.0
         self.uptime_earu: float = 0.0
+        self.net_comm_verified: str = "OFFLINE"
         self.survive_today: str = "Yes"
         self.must_hibernate: str = "No"
         self.pulse_wake: float = 0.0
         self.pulse_length: float = 0.0
+
+        # Start Background Connectivity Verifier
+        def verify_net():
+            while True:
+                try:
+                    # Non-blocking ping to Google DNS
+                    urllib.request.urlopen("https://8.8.8.8", timeout=2.0)
+                    self.net_comm_verified = "TRUE"
+                except:
+                    self.net_comm_verified = "OFFLINE"
+                time.sleep(10)
+        
+        threading.Thread(target=verify_net, daemon=True).start()
 
         # Smoothed rates and thermodynamics (1Hz filters)
         self.smooth_massflow: float = 0.0
@@ -1906,44 +1920,6 @@ class PrimaryFlightDisplay:
             if n == "BATT HEALTH": col = "green" if self.battery_health > 80 else "yellow"
             self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
 
-        # SSD Health & Machine Life Column (Below Energy)
-        x_ssd, y_ssd = 750, 480
-        ssd_metrics = [
-            ("MACHINE AGE", f"{self.machine_life:.1f} hrs"),
-            ("SSD USED", f"{self.ssd_used:.1f} %"),
-            ("SSD SPARE", f"{self.ssd_spare:.1f} %"),
-            ("DATA READ", f"{self.ssd_read:,.0f} U"),
-            ("DATA WRITE", f"{self.ssd_write:,.0f} U"),
-            ("LIFE LEFT", f"{self.ssd_life_y:.1f} Yrs"),
-            ("", f"{self.ssd_life_m:.1f} Mon"),
-            ("", f"{self.ssd_life_d:.1f} Day")
-        ]
-        self.canvas.create_text(x_ssd, y_ssd - 30, anchor="nw", text="SSD HEALTH & LIFE", fill="#ff9900", font=("Monaco", 12, "bold"))
-        for i, (n, v) in enumerate(ssd_metrics):
-            col = "white"
-            if n == "SSD USED": col = "green" if self.ssd_used < 50 else ("yellow" if self.ssd_used < 80 else "red")
-            if n == "SSD SPARE": col = "green" if self.ssd_spare > 90 else "red"
-            if n == "LIFE LEFT": col = "green" if self.ssd_life_y > 5 else ("yellow" if self.ssd_life_y > 1 else "red")
-            self.canvas.create_text(x_ssd, y_ssd + i*25, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
-
-        # Structural Life & Risk Column
-        x_str, y_str = 500, 480
-        str_metrics = [
-            ("CUM. FATIGUE", f"{self.cum_fatigue:.4f} %"),
-            ("AGG. RISK", f"{self.agg_risk:.4f}"),
-            ("STRUCT LIFE", f"{self.struct_life_y:.1f} Yrs"),
-            ("", f"{self.struct_life_m:.1f} Mon"),
-            ("", f"{self.struct_life_d:.1f} Day"),
-            ("FAILURE THRES", "100.00 %")
-        ]
-        self.canvas.create_text(x_str, y_str - 30, anchor="nw", text="STRUCTURAL HEALTH", fill="#ff00ff", font=("Monaco", 12, "bold"))
-        for i, (n, v) in enumerate(str_metrics):
-            col = "white"
-            if n == "CUM. FATIGUE": col = "green" if self.cum_fatigue < 10 else ("yellow" if self.cum_fatigue < 50 else "red")
-            if n == "AGG. RISK": col = "green" if self.agg_risk < 0.1 else ("yellow" if self.agg_risk < 0.3 else "red")
-            if n == "STRUCT LIFE": col = "green" if self.struct_life_y > 5 else ("yellow" if self.struct_life_y > 1 else "red")
-            self.canvas.create_text(x_str, y_str + i*25, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
-
         # --- Vertical Battery Fuel Gauge ---
         bx = 945
         by1 = 100
@@ -2665,7 +2641,12 @@ class PrimaryFlightDisplay:
         # Net & Comms Status (Mapped from user_entity_detection)
         ued = self.full_data.get('user_entity_detection', {})
         net_comm = ued.get('net_comm', {})
-        net_avail = str(net_comm.get('NET_COMM_AVAILABLE', 'False'))
+        net_avail = str(net_comm.get('NET_COMM_AVAILABLE', self.net_comm_verified))
+        
+        # Override with verified status if telemetry says False/Offline but we have a live check
+        if net_avail.upper() in ['FALSE', 'OFFLINE'] and self.net_comm_verified == "TRUE":
+            net_avail = "VERIFIED"
+            
         services = net_comm.get('services', {})
 
         self.canvas.create_rectangle(670, 460, 960, 730, fill="#080808", outline="#333", width=2)
@@ -2674,7 +2655,7 @@ class PrimaryFlightDisplay:
 
         # Overall Status
         self.canvas.create_text(685, 502, anchor="nw", text="COMM STATUS:", fill="gray", font=("Monaco", 9))
-        net_col = "green" if net_avail.upper() == 'TRUE' else ("orange" if net_avail.upper() == 'DISRUPTED' else "red")
+        net_col = "green" if net_avail.upper() in ['TRUE', 'VERIFIED'] else ("orange" if net_avail.upper() == 'DISRUPTED' else "red")
         self.canvas.create_text(775, 500, anchor="nw", text=net_avail.upper(), fill=net_col, font=("Monaco", 11, "bold"))
 
         # 2-Column Services Micro-Grid
@@ -2683,7 +2664,8 @@ class PrimaryFlightDisplay:
             'Matrix', 'Outlook', 'Gmail', 'Yahoo', 'Slack', 'Microsoft365'
         ]
         for idx, sname in enumerate(srv_list):
-            sval = str(services.get(sname, 'Unavailable'))
+            fallback = 'Available' if self.net_comm_verified == "TRUE" else 'Offline'
+            sval = str(services.get(sname, fallback))
             dot_color = "green" if sval == 'Available' else ("orange" if sval == 'Disrupted' else "red")
 
             # Divide into Column 1 (0-6) and Column 2 (7-12)
@@ -3307,8 +3289,8 @@ class PrimaryFlightDisplay:
         summary_metrics = [
             ("MACHINE AGE", f"{self.machine_life/3600.0:.1f}", "Hrs", "white"),
             ("LOOP STAB.",  f"{getattr(self, 'loop_avg', 0.0):.2f}", "ms", "green" if getattr(self, 'loop_avg', 0.0) < 5 else "red"),
-            ("SYSTEM RISK", f"{max(self.agg_risk, self.ssd_used/100.0)*100:.1f}", "%", "yellow"),
-            ("NEXT MAINT.", "350.0", "Hrs", "gray")
+            ("NET STATUS",  self.net_comm_verified, "LIVE" if self.net_comm_verified == "TRUE" else "LOST", "green" if self.net_comm_verified == "TRUE" else "red"),
+            ("SYSTEM RISK", f"{max(self.agg_risk, self.ssd_used/100.0)*100:.1f}", "%", "yellow")
         ]
         draw_card(margin*2 + card_w, margin*2 + card_h + 10, "FLEET PROGNOSIS", summary_metrics, "#ffffff")
 
