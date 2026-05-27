@@ -1160,10 +1160,12 @@ class PrimaryFlightDisplay:
                     self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
                     self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
                     self.turbo = int(float(smc.get('turbo', 0)))
-                    self.fan_rpms = [
-                        float(smc.get('PropellerEngine1Tach', 0.0)),
-                        float(smc.get('PropellerEngine2Tach', 0.0))
-                    ]
+
+                    # Parse fan RPMs correctly from the list
+                    raw_fans = smc.get('fan_rpms', [0.0, 0.0])
+                    self.fan_rpms = [float(f) for f in raw_fans] if isinstance(raw_fans, list) else [0.0, 0.0]
+
+                    # Fallback for older targets if needed, otherwise default to 0
                     self.fan_targets = [
                         float(smc.get('F0Tg', 0.0)),
                         float(smc.get('F1Tg', 0.0))
