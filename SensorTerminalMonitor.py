@@ -433,6 +433,7 @@ class PrimaryFlightDisplay:
         self.battery_health: float = 100.0
         self.battery_full_wh: float = 0.0
         self.battery_design_wh: float = 0.0
+        self.batt_life_y: float = 10.0
         self.uptime_earu: float = 0.0
         self.net_comm_verified: str = "OFFLINE"
         self.survive_today: str = "Yes"
@@ -1122,13 +1123,30 @@ class PrimaryFlightDisplay:
                     self.cum_fatigue = float(df.get('cumulative_fatigue', 0.0))
                     self.agg_risk = float(df.get('aggregated_risk', 0.0))
 
+                    # Battery Life Prediction Math (Hobbs time vs Degradation)
+                    if self.battery_health < 100.0 and self.machine_life > 0:
+                        base_rate = (100.0 - self.battery_health) / self.machine_life
+                        if base_rate > 0:
+                            if self.battery_health > 20.0:
+                                time_to_20 = (self.battery_health - 20.0) / base_rate
+                                time_below_20 = 20.0 / (base_rate * 2.5) # 2.5x faster decay below 20%
+                                batt_life_hrs = time_to_20 + time_below_20
+                            else:
+                                accel_rate = base_rate * math.exp((20.0 - self.battery_health) / 5.0)
+                                batt_life_hrs = self.battery_health / accel_rate
+                            self.batt_life_y = batt_life_hrs / 8760.0
+                        else:
+                            self.batt_life_y = 10.0
+                    else:
+                        self.batt_life_y = 10.0
+
                     # 60s Reanchoring Logic for Real-Time Countdown
                     now_ts = time.time()
                     if now_ts - self.life_anchor_ts >= 60.0:
                         self.life_anchor_ts = now_ts
                         # Minimum life across all critical components
                         nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
-                        min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y)
+                        min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y, self.batt_life_y)
                         self.life_anchor_seconds = min_life_y * 8760.0 * 3600.0
 
                     smc = data.get('smc', {})
@@ -2616,7 +2634,7 @@ class PrimaryFlightDisplay:
             realtime_left = max(0.0, self.life_anchor_seconds - elapsed)
         else:
             nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
-            min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y)
+            min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y, self.batt_life_y)
             realtime_left = min_life_y * 8760.0 * 3600.0
 
         r_y = int(realtime_left // 31536000)
@@ -2714,12 +2732,11 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(502, bar_y + bar_h + 15, text=f"{self.ssd_life_y:.1f}Y", fill=sd_col, font=("Monaco", 9, "bold"), anchor="n")
         self.canvas.create_text(502, bar_y + bar_h + 30, text="SSD", fill="white", font=("Monaco", 8), anchor="n")
 
-        # 4. BATT
+        # 4. BATT (Mapped to batt_life_y, filled via battery_health percentage)
         bt_col = "green" if self.battery_health > 80 else ("yellow" if self.battery_health > 50 else "red")
         draw_vbar(550, bar_y, bar_w, bar_h, batt_pct, bt_col)
-        self.canvas.create_text(562, bar_y + bar_h + 15, text=f"{batt_pct:.0f}%", fill=bt_col, font=("Monaco", 9, "bold"), anchor="n")
+        self.canvas.create_text(562, bar_y + bar_h + 15, text=f"{self.batt_life_y:.1f}Y", fill=bt_col, font=("Monaco", 9, "bold"), anchor="n")
         self.canvas.create_text(562, bar_y + bar_h + 30, text="BATT", fill="white", font=("Monaco", 8), anchor="n")
-
         # 5. NVRAM
         nv_col = "green" if nvram_health > 50 else "yellow"
         draw_vbar(610, bar_y, bar_w, bar_h, nvram_health, nv_col)
