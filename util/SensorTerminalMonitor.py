@@ -884,6 +884,16 @@ class PrimaryFlightDisplay:
                             print(f"  Line: {lines[0].strip()[:200]}...") # Truncate for log safety
                         return
 
+                    def clean_none(val):
+                        if isinstance(val, dict):
+                            return {k: clean_none(v) for k, v in val.items()}
+                        elif isinstance(val, list):
+                            return [clean_none(v) for v in val]
+                        elif val is None:
+                            return 0.0
+                        return val
+
+                    data = clean_none(data)
                     self.full_data = data
                     
                     # Smooth rates & thermodynamics (EMA filters)

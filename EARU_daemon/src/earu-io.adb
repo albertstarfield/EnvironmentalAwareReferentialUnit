@@ -22,6 +22,9 @@ package body Earu.IO is
       S : String (1 .. 128) := (others => ' ');
       Last : Natural;
    begin
+      if not R'Valid or else R /= R then
+         return "null";
+      end if;
       if R = 0.0 then return "0.0"; end if;
       if Abs (R) >= 1.0E-4 and then Abs (R) < 1.0E16 then
          Real_IO.Put (S, R, Aft => 16, Exp => 0);

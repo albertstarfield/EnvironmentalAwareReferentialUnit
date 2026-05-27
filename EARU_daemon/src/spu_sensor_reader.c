@@ -53,6 +53,15 @@ uint64_t get_hid_idle_time_ns(void) {
 }
 
 void on_accel_report(void *context, IOReturn result, void *sender, IOHIDReportType type, uint32_t reportID, uint8_t *report, CFIndex reportLength, uint64_t timeStamp) {
+    static int count = 0;
+    if (count++ % 800 == 0) {
+        printf("[SPU] Accel report callback: len=%ld, id=%u, bytes=", (long)reportLength, reportID);
+        for (CFIndex i = 0; i < reportLength; i++) {
+            printf("%02x ", report[i]);
+        }
+        printf("\n");
+        fflush(stdout);
+    }
     if (reportLength == 22 && g_accel_shm) {
         int32_t x, y, z;
         memcpy(&x, report + 6, 4);
@@ -92,6 +101,8 @@ void on_als_report(void *context, IOReturn result, void *sender, IOHIDReportType
     if (reportLength == 122 && g_als_data) {
         memcpy(g_als_data->spectral, report + 20, 16);
         memcpy(&g_als_data->lux_factor, report + 40, 4);
+        uint32_t *cnt = (uint32_t *)((uint8_t *)g_als_data - 28);
+        (*cnt)++;
     }
 }
 
@@ -102,6 +113,8 @@ void on_lid_report(void *context, IOReturn result, void *sender, IOHIDReportType
             memcpy(&raw_angle, report + 1, 2);
             float angle = (float)(raw_angle & 0x1FF);
             *g_lid_data = angle;
+            uint32_t *cnt = (uint32_t *)((uint8_t *)g_lid_data - 8);
+            (*cnt)++;
         }
     }
 }

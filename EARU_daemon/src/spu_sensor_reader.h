@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#pragma pack(push, 1)
 typedef struct {
     int32_t x, y, z;
     double timestamp;
@@ -14,6 +15,7 @@ typedef struct {
     uint32_t restarts;
     IMU_Entry ring[8000];
 } IMU_SHM;
+#pragma pack(pop)
 
 typedef struct {
     uint32_t spectral[4];
