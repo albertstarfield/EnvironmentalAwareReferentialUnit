@@ -111,6 +111,28 @@ package body Earu.Bridge is
             1.0,
             Mechanical_Risk + Total_SSD_Risk
          );
+
+         -- Structural Life Prediction Modeling (Paris' Law Analogy)
+         -- a = Cumulative_Fatigue (Crack Length / Damage State)
+         -- da/dt = C * (Aggregated_Risk)^m
+         -- Rate = Risk-dependent decay. Base rate assumes 5 years life at nominal 0.1 risk.
+         declare
+            Damage_Rate : constant Real := 0.001 * Real_Funcs."**"(State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk, 2.5);
+            Effective_Rate : constant Real := Real'Max (0.00001, Damage_Rate);
+            Time_Left_Hrs : Real;
+         begin
+            if State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue < 100.0 then
+               Time_Left_Hrs := (100.0 - State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue) / Effective_Rate;
+               
+               State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_Y := Time_Left_Hrs / 8760.0;
+               State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_M := Time_Left_Hrs / 730.0;
+               State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_D := Time_Left_Hrs / 24.0;
+            else
+               State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_Y := 0.0;
+               State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_M := 0.0;
+               State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_D := 0.0;
+            end if;
+         end;
       end;
 
       -- Data Integrity Activation

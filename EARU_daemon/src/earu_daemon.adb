@@ -128,47 +128,6 @@ procedure Earu_Daemon is
          State.System.SSD_Life_Left_Months := 1188.0;
          State.System.SSD_Life_Left_Days := 36135.0;
       end if;
-
-      -- Integrate into Aggregated Risk (SSD wear factor)
-      -- Base risk is from Damage_Fatigue (seismic/mechanical)
-      -- Add SSD wear factor: (SSD_USED / 100.0) * 0.15 + Spare exhaustion factor
-      declare
-         SSD_Base_Risk : constant Real := (SSD_USED / 100.0) * 0.15;
-         SSD_Spare_Risk : constant Real := (if SSD_SPARE < 100.0 then (100.0 - SSD_SPARE) / 5.0 else 0.0);
-         Total_SSD_Risk : constant Real := SSD_Base_Risk + SSD_Spare_Risk;
-         
-         -- Structural Life Prediction Modeling (Paris' Law Analogy)
-         -- a = Cumulative_Fatigue (Crack Length / Damage State)
-         -- da/dt = C * (Aggregated_Risk)^m
-         -- Here we assume failure at a = 100.0
-         -- Rate = Risk-dependent decay. Base rate assumes 5 years life at nominal 0.1 risk.
-         Damage_Rate : Real;
-         Time_Left_Hrs : Real;
-      begin
-         -- We add the SSD risk to the current mechanical risk
-         State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk := 
-            Real'Min(1.0, State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk + Total_SSD_Risk);
-            
-         -- Prediction Logic:
-         -- We use a power law where damage acceleration increases with risk.
-         -- If Aggregated_Risk is high, crack propagation accelerates.
-         Damage_Rate := 0.001 * (State.Seismic_Activity.Damage_Fatigue.Aggregated_Risk ** 2.5);
-         
-         -- Ensure a minimum decay even at low risk (background aging)
-         if Damage_Rate < 0.00001 then Damage_Rate := 0.00001; end if;
-         
-         if State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue < 100.0 then
-            Time_Left_Hrs := (100.0 - State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue) / Damage_Rate;
-            
-            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_Y := Time_Left_Hrs / 8760.0;
-            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_M := Time_Left_Hrs / 730.0;
-            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_D := Time_Left_Hrs / 24.0;
-         else
-            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_Y := 0.0;
-            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_M := 0.0;
-            State.Seismic_Activity.Damage_Fatigue.Structural_Life_Left_D := 0.0;
-         end if;
-      end;
       
       if SSD_TIME > 0.0 and then (SSD_TIME - Total_Age) > SMART_THRESHOLD then
           Ada.Text_IO.Put_Line ("[!] WARNING: Machine age trails SSD lifetime (" & SSD_TIME'Img & " hrs).");

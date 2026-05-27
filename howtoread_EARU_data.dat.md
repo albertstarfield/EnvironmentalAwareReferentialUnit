@@ -94,6 +94,9 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `electromech_fatigue_prob` | 0.0-1.0 | Heuristic risk of mechanical failure (Hinge/Cables). |
 | `aggregated_risk` | 0.0-1.0 | Combined unreliability index for the hardware. |
 | `cumulative_fatigue` | Units | Total accumulated damage units (Miner's Rule + Habibie). |
+| `structural_life_left_y`| Years | Predicted remaining structural life in years. |
+| `structural_life_left_m`| Months | Predicted remaining structural life in months. |
+| `structural_life_left_d`| Days | Predicted remaining structural life in days. |
 | `seu_risk_multiplier` | Ratio | Risk of Single Event Upsets due to altitude (1.0 = Sea Level). |
 | `alt_stress_multiplier` | Ratio | Cooling/Thermal efficiency penalty due to altitude. |
 | `anomaly_event_upset` | Count | Detected data corruption or clock rollback events. |
@@ -112,6 +115,13 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `BatteryFullChargeCapacityWh` | Wh | Maximum energy the battery can hold at its current health. |
 | `BatteryDesignCapacityWh` | Wh | Original energy capacity of the battery when new. |
 | `BatteryHealthPct` | % | Battery health (Full Charge Capacity / Design Capacity). |
+| `ssd_used_pct` | % | Total percentage of SSD life used (from SMART). |
+| `ssd_available_spare` | % | Remaining spare capacity on the SSD (from SMART). |
+| `ssd_life_left_years` | Years | Predicted remaining SSD life in years. |
+| `ssd_life_left_months`| Months | Predicted remaining SSD life in months. |
+| `ssd_life_left_days`  | Days | Predicted remaining SSD life in days. |
+| `ssd_data_read_units` | Units | Total data units read from the SSD. |
+| `ssd_data_write_units`| Units | Total data units written to the SSD. |
 | `pmset_info` | String | Raw output from macOS `pmset -g live`. |
 
 ### 9. `loop_consistency` (Performance)

@@ -543,6 +543,8 @@ package body Earu.IO is
       AP    ("ssd_used_pct",              F (State.System.SSD_Used_Pct));
       AP    ("ssd_available_spare",       F (State.System.SSD_Available_Spare));
       AP    ("ssd_life_left_years",       F (State.System.SSD_Life_Left_Years));
+      AP    ("ssd_life_left_months",      F (State.System.SSD_Life_Left_Months));
+      AP    ("ssd_life_left_days",        F (State.System.SSD_Life_Left_Days));
       AP    ("ssd_data_read_units",       F (State.System.SSD_Data_Read_Units));
       AP    ("ssd_data_write_units",      F (State.System.SSD_Data_Write_Units));
       AP    ("pmset_info",                S (Trim_Null (State.System.PMSet_Info)), False);
