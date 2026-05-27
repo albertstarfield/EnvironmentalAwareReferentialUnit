@@ -2697,6 +2697,7 @@ class PrimaryFlightDisplay:
         ssd_pct = min(100.0, max(0.0, (self.ssd_life_y / 10.0) * 100.0))
         batt_pct = min(100.0, max(0.0, self.battery_health))
         nvram_health = min(100.0, max(0.0, 100.0 - (self.machine_life / 50000.0 * 100.0)))
+        nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
         overall_life_pct = min(struct_pct, ssd_pct, batt_pct, nvram_health)
 
         def draw_vbar(bx, by, bw, bh, pct, color):
@@ -2740,7 +2741,7 @@ class PrimaryFlightDisplay:
         # 5. NVRAM
         nv_col = "green" if nvram_health > 50 else "yellow"
         draw_vbar(610, bar_y, bar_w, bar_h, nvram_health, nv_col)
-        self.canvas.create_text(622, bar_y + bar_h + 15, text=f"{nvram_health:.0f}%", fill=nv_col, font=("Monaco", 9, "bold"), anchor="n")
+        self.canvas.create_text(622, bar_y + bar_h + 15, text=f"{nvram_life_y:.1f}Y", fill=nv_col, font=("Monaco", 9, "bold"), anchor="n")
         self.canvas.create_text(622, bar_y + bar_h + 30, text="NVRAM", fill="white", font=("Monaco", 8), anchor="n")
 
         # Bottom Right Network & Comms Panel (Box B)
