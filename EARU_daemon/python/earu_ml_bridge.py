@@ -895,9 +895,10 @@ def weather_worker():
                 taf_str += f" BECMG {start_time}00/{start_time}04 1SM FG VV001"
 
             weather_data = {
+                # Category will be dynamically set by Ada daemon based on environmental conditions
+                "category": "",  
                 "air_fluid_density": 2.2264931824081815,
                 "api_humidity_pct": 97.0,
-                "category": "Moist / Fog Risk",
                 "dew_point_k": 303.4142540646027,
                 "dew_point_spread": 0.5457459353973206,
                 "hum_offset": 0.0,

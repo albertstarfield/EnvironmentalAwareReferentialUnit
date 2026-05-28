@@ -202,14 +202,49 @@ package body Earu.Math is
       
       SMC.Cauchy_Number := (if SMC.Gas_Constants.Gamma > 0.01 and SMC.Gas_Constants.R > 0.01 and Ambient_Temp_K > 0.01 then (U ** 2) / (SMC.Gas_Constants.Gamma * SMC.Gas_Constants.R * Ambient_Temp_K) else 0.0);
 
-      -- Update category
-      if RH > 95.0 then
-         Eco.Category := (others => ' ');
-         Eco.Category (1 .. 16) := "Moist / Fog Risk";
-      else
-         Eco.Category := (others => ' ');
-         Eco.Category (1 .. 4) := "Safe";
-      end if;
+       -- Update weather category based on environmental conditions and dew point spread
+       Eco.Category := (others => ' ');
+       
+       -- Calculate visibility-based severity from dew_point_spread (lower = foggy/worse)
+       if Dew_Point_Spread > 4.0 then
+          -- Clear conditions, excellent visibility
+          Eco.Category (1 .. 15) := "Clear / Good Visibility";
+       elsif Dew_Point_Spread > 2.0 and Dew_Point_Spread <= 4.0 then
+          -- Moderate humidity, fair visibility
+          Eco.Category (1 .. 17) := "Moderate Humidity";
+       elsif Dew_Point_Spread > 1.0 and Dew_Point_Spread <= 2.0 then
+          -- Elevated humidity, potential fog risk
+          Eco.Category (1 .. 17) := "Humid / Low Visibility Risk";
+       elsif Dew_Point_Spread > 0.5 and Dew_Point_Spread <= 1.0 then
+          -- High humidity with very low spread = fog conditions
+          if RH > 90.0 then
+             Eco.Category (1 .. 16) := "Moist / Fog Risk";
+          else
+             Eco.Category (1 .. 17) := "Foggy Conditions";
+          end if;
+       elsif Dew_Point_Spread <= 0.5 and RH > 95.0 then
+          -- Saturated with very low spread = active fog/heavy moisture
+          Eco.Category (1 .. 20) := "Dense Fog / High Moisture";
+       else
+          -- Low humidity, clear conditions
+          Eco.Category (1 .. 8) := "Stable / Dry";
+       end if;
+       
+       -- Check for precipitation tendency based on pressure changes
+       if Pressure_Tendency_HPa < -0.5 then
+          -- Falling pressure = approaching storm/rain system
+          if not (Dew_Point_Spread <= 0.5 and RH > 95.0) then
+             Eco.Category (1 .. 22) := "Unstable / Approaching Precipitation";
+          end if;
+       end if;
+       
+       -- Check temperature for seasonal classification
+       TC := Ambient_Temp_K - 273.15;
+       if TC < 0.0 and Dew_Point_Spread <= 1.0 then
+          Eco.Category (1 .. 12) := "Winter / Freezing Fog Risk";
+       elsif TC > 300.0 -- ~26.8°C
+          Eco.Category (1 .. 17) := "Warm / Summer Conditions";
+       end if;
    end Update_Weather_Thermodynamics;
 
    procedure Update_Vibration_State (
@@ -825,8 +860,8 @@ package body Earu.Math is
       V_Mag        : Real;
       V_Mag_Smooth : Real;
       
-      Threshold : constant Real := 1.0E-16;
-      Min_Step_Interval : constant Real := 0.35;
+       Threshold : constant Real := 0.25; -- Minimum velocity magnitude (m/s) to trigger step detection (~walking pace)
+       Min_Step_Interval : constant Real := 0.9; -- Minimum time between steps in seconds
    begin
       -- 0. Calculate precise DT
       if P.Last_Timestamp > 0.0 then
