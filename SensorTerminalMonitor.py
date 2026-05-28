@@ -999,9 +999,9 @@ class PrimaryFlightDisplay:
                     raw_massflow = float(smc.get('massflow_kg_s', 0.0))
                     raw_heatflux = float(smc.get('heatflux_j', 0.0))
                     raw_power = float(smc.get('power', 0.0))
-                    raw_inefficiency = float(smc.get('thermal_inefficiency_w', 0.0))
-                    raw_efficiency = float(smc.get('cooling_efficiency_pct', 0.0))
-                    raw_work_eff = float(smc.get('work_efficiency_pct', 0.0))
+                    raw_inefficiency = float(smc.get('thermal_inefficiency_w', max(0.0, raw_power - raw_heatflux)))
+                    raw_efficiency = float(smc.get('cooling_efficiency_pct', (raw_heatflux / raw_power * 100.0) if raw_power > 0.0 else 0.0))
+                    raw_work_eff = float(smc.get('work_efficiency_pct', 100.0 - raw_efficiency))
 
                     alpha = 0.08  # Silky-smooth coefficient
                     if self.smooth_power == 0.0 and raw_power > 0.0:
@@ -2953,7 +2953,10 @@ class PrimaryFlightDisplay:
             motion = seis.get('motion_type', 'Stationary')
             spec_bal = seis.get('spectral_balance', 0.0)
 
-            self.canvas.create_text(450, 580, anchor="nw", text=f"STRUCTURAL FATIGUE & STRESS:\nMOTION REGIME: {motion} | SPEC BAL: {spec_bal:.4f}\nEM FATIGUE:    {em_fatigue*100:.6f}%\nSOLDER FTG:    {sd_fatigue*100:.6f}%\nSEU RISK MULT: {seu_mul:.4f}x\nALT COOL MULT: {alt_mul:.4f}x\nSEU UPSETS:    {upset_count}", fill="#ff5555", font=("Monaco", 9))
+            sd_val = sd_fatigue * 100.0
+            sd_str = f"{sd_val:.6f}%" if sd_val >= 1.0e-5 else f"{sd_val:.4e}%"
+
+            self.canvas.create_text(450, 580, anchor="nw", text=f"STRUCTURAL FATIGUE & STRESS:\nMOTION REGIME: {motion} | SPEC BAL: {spec_bal:.4f}\nEM FATIGUE:    {em_fatigue*100:.6f}%\nSOLDER FTG:    {sd_str}\nSEU RISK MULT: {seu_mul:.4f}x\nALT COOL MULT: {alt_mul:.4f}x\nSEU UPSETS:    {upset_count}", fill="#ff5555", font=("Monaco", 9))
 
             # 4. System Uptime & Capacities
             sys_info = self.full_data.get('system', {})

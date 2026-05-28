@@ -22,7 +22,7 @@ fi
 
 # Helper to execute command as the original user to keep environment / toolchain clean
 run_as_user() {
-    sudo -i -u "$ORIGINAL_USER" bash -c "cd \"$DAEMON_DIR\" && $*"
+    sudo -u "$ORIGINAL_USER" env PATH="$PATH" SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" bash -c "cd \"$DAEMON_DIR\" && $*"
 }
 
 # 1. Unload background launchd service if it is loaded to prevent build/run conflicts
@@ -41,6 +41,7 @@ cd "$DAEMON_DIR" || { echo "[!] Failed to enter daemon directory"; exit 1; }
 # 3. Cleanup stale background processes
 echo "[*] Cleaning up existing EARU processes..."
 pkill -f "earu_ml_bridge.py" 2>/dev/null
+pkill -f "earu_adb_mock.py" 2>/dev/null
 pkill -f "earu_daemon" 2>/dev/null
 
 # Clean up stale locks or half-built compilation directories to resolve parallel build corruption

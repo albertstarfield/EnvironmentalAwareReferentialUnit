@@ -21,3 +21,7 @@ strategy = "~0.1.0"
 
 [[depends-on]]
 gnatcov = "^26.2.1"
+
+[[depends-on]]
+aws = "^25.2.0"
+

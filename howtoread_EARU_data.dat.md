@@ -218,3 +218,11 @@ Configure your Davis integration to point to `http://[YOUR_IP]:3270/wflexp.json`
 - **JSON Encoding:** Numpy integers and floats are converted to standard JSON types. Binary `als` data is hex-encoded.
 - **Data Integrity:** The `parity` field inside the JSON and the `RECOVERY_V1` footer allow for validation of every write operation.
 - **Sampling Rate:** Updated at 5Hz-10Hz depending on motion and system load. (Main physical IMU sensor loop remains 100Hz-800Hz).
+
+## Data Integrity and Parity (v2026.05.28 Update)
+To ensure reliable telemetry exchange between the EARU background daemon and high-performance consumers (like smc_daemon), a strict data integrity protocol is enforced:
+
+1.  **Raw Byte Consistency:** EARU_data.dat is written using raw byte streams (Stream_IO) rather than text-encoded I/O. This prevents system-level UTF-8 translation layers from altering non-ASCII characters after the hash has been calculated.
+2.  **SHA256 Parity Field:** The parity field at the end of the JSON object is a SHA256 digest of the entire JSON string preceding the parity field, including the closing brace.
+3.  **Robust Reconstruction:** Consumers should trim any trailing whitespace or null-padding from the line before attempting to verify the hash.
+4.  **ASCII-Only Symbols:** As of May 2026, all event symbols have been migrated to the standard ASCII range to maximize compatibility.

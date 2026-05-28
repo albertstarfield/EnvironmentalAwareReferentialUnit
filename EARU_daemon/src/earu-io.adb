@@ -1,4 +1,5 @@
 with Ada.Text_IO;
+with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Interfaces.C;
@@ -9,6 +10,16 @@ with Earu.Types;
 with Earu.Shm;
 with Interfaces;
 with Ada.Numerics.Generic_Elementary_Functions;
+
+
+   -- =========================================================================
+   -- TECHNICAL NOTE: Telemetry Integrity and Hashing Fixes (2026-05-28)
+   -- =========================================================================
+   -- Switched from Ada.Text_IO to Ada.Streams.Stream_IO for writing 
+   -- EARU_data.dat. This ensures that the JSON payload is written as raw bytes, 
+   -- preventing double-encoding of UTF-8 characters (like the vibration symbol) 
+   -- which was the root cause of the parity failure in smc_daemon.
+   -- =========================================================================
 
 package body Earu.IO is
    use Earu.Types;
@@ -360,7 +371,8 @@ package body Earu.IO is
       Path    : String;
       Weather : Earu.Shm.Weather_SHM_Ptr
    ) is
-      File     : Ada.Text_IO.File_Type;
+      use Ada.Streams.Stream_IO;
+      File     : Ada.Streams.Stream_IO.File_Type;
       Tmp_Path : constant String := Path & ".tmp";
       Buf      : Unbounded_String;
 
@@ -555,6 +567,8 @@ package body Earu.IO is
       AP ("ambient_temp_k",  F (State.SMC.Ambient_Temp_K));
       AP ("humidity_pct",    F (State.SMC.Humidity_Pct));
       Append (Buf, """fan_rpms"": [" & F (State.SMC.Fan_RPMs (1)) & ", " & F (State.SMC.Fan_RPMs (2)) & "], ");
+      AP ("F0Tg",            F (State.SMC.Fan_Targets (1)));
+      AP ("F1Tg",            F (State.SMC.Fan_Targets (2)));
       AP ("thrust_n",        F (State.SMC.Thrust_N));
       AP ("massflow_kg_s",   F (State.SMC.Massflow_Kg_S));
       AP ("heatflux_j",      F (State.SMC.Heatflux_J));
@@ -590,6 +604,16 @@ package body Earu.IO is
       AP ("Cp",    F (State.SMC.Gas_Constants.Cp));
       AP ("R",     F (State.SMC.Gas_Constants.R));
       AP ("gamma", F (State.SMC.Gas_Constants.Gamma), False);
+      Append (Buf, "}, ");
+      Append (Buf, """fluid_dynamics"": {");
+      AP ("flow_scale_l",          F (State.SMC.Flow_Scale_L));
+      AP ("char_velocity_u0",      F (State.SMC.Char_Velocity_U0));
+      AP ("turbulence_int_up",     F (State.SMC.Turbulence_Int_Up));
+      AP ("reynolds_number_re0",    F (State.SMC.Reynolds_Number_Re0));
+      AP ("reynolds_number",        F (State.SMC.Reynolds_Number));
+      AP ("weber_number",           F (State.SMC.Weber_Number));
+      AP ("strouhal_number",        F (State.SMC.Strouhal_Number));
+      AP ("cauchy_number",          F (State.SMC.Cauchy_Number), False);
       Append (Buf, "}}, ");
 
       --  ── user_entity_detection ─────────────────────────────────────────────
@@ -692,11 +716,21 @@ package body Earu.IO is
       end;
       Append (Buf, "}");
 
-      --  ── atomic write via rename ───────────────────────────────────────────
+      --  ── atomic write via Stream_IO ───────────────────────────────────────────
+      --  NOTE: We use Stream_IO to write raw bytes directly. This prevents Ada.Text_IO
+      --  from performing UTF-8 encoding on non-ASCII characters, which would change the
+      --  byte sequence and invalidate the SHA256 parity hash calculated on the buffer.
       begin
-         Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Tmp_Path);
-         Ada.Text_IO.Put_Line (File, To_String (Buf));
-         Ada.Text_IO.Close (File);
+         declare
+            S_Buf : constant String := To_String (Buf);
+         begin
+            Create (File, Out_File, Tmp_Path);
+            for I in S_Buf'Range loop
+               Character'Write (Stream (File), S_Buf (I));
+            end loop;
+            Character'Write (Stream (File), ASCII.LF);
+            Close (File);
+         end;
          declare
             function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
             pragma Import (C, rename, "rename");
@@ -707,7 +741,8 @@ package body Earu.IO is
             Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
          end;
       exception
-         when others => null;
+         when others => 
+            if Is_Open (File) then Close (File); end if;
       end;
    end Write_EARU_Data;
 
@@ -722,14 +757,17 @@ package body Earu.IO is
    Cache_Ts0P : Real := 50.0;
    Cache_Ts1P : Real := 35.0;
    Cache_PSTR : Real := 15.0;
-   Cache_F0   : Real := 2000.0;
-   Cache_F1   : Real := 2000.0;
+   Cache_F0    : Real := 2000.0;
+   Cache_F1    : Real := 2000.0;
+   Cache_F0Tg  : Real := 2000.0;
+   Cache_F1Tg  : Real := 2000.0;
    Cache_Turbo : Integer := 0;
 
    function Read_Sensor_Real (Filename : String) return Earu.Types.Real is
       use Ada.Text_IO;
       File : File_Type;
       Val  : Real := 0.0;
+      Read_Success : Boolean := False;
    begin
       begin
          Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/EARU_dataIO/" & Filename);
@@ -746,6 +784,7 @@ package body Earu.IO is
       if Is_Open (File) then
          begin
             Real_IO.Get (File, Val);
+            Read_Success := True;
          exception
             when others =>
                Val := 0.0;
@@ -753,7 +792,7 @@ package body Earu.IO is
          Close (File);
       end if;
       
-      if Val /= 0.0 then
+      if Read_Success then
          if Filename = "sensor_temp_TCMz.dat" then Cache_TCMz := Val;
          elsif Filename = "sensor_temp_Tg0X.dat" then Cache_Tg0X := Val;
          elsif Filename = "sensor_temp_TaLP.dat" then Cache_TaLP := Val;
@@ -767,6 +806,8 @@ package body Earu.IO is
          elsif Filename = "sensor_temp_PSTR.dat" then Cache_PSTR := Val;
          elsif Filename = "sensor_fan_F0Ac.dat" then Cache_F0 := Val;
          elsif Filename = "sensor_fan_F1Ac.dat" then Cache_F1 := Val;
+         elsif Filename = "sensor_fan_F0Tg.dat" then Cache_F0Tg := Val;
+         elsif Filename = "sensor_fan_F1Tg.dat" then Cache_F1Tg := Val;
          end if;
          return Val;
       else
@@ -783,6 +824,8 @@ package body Earu.IO is
          elsif Filename = "sensor_temp_PSTR.dat" then return Cache_PSTR;
          elsif Filename = "sensor_fan_F0Ac.dat" then return Cache_F0;
          elsif Filename = "sensor_fan_F1Ac.dat" then return Cache_F1;
+         elsif Filename = "sensor_fan_F0Tg.dat" then return Cache_F0Tg;
+         elsif Filename = "sensor_fan_F1Tg.dat" then return Cache_F1Tg;
          else return 0.0;
          end if;
       end if;
@@ -804,6 +847,8 @@ package body Earu.IO is
          elsif Filename = "sensor_temp_PSTR.dat" then return Cache_PSTR;
          elsif Filename = "sensor_fan_F0Ac.dat" then return Cache_F0;
          elsif Filename = "sensor_fan_F1Ac.dat" then return Cache_F1;
+         elsif Filename = "sensor_fan_F0Tg.dat" then return Cache_F0Tg;
+         elsif Filename = "sensor_fan_F1Tg.dat" then return Cache_F1Tg;
          else return 0.0;
          end if;
    end Read_Sensor_Real;

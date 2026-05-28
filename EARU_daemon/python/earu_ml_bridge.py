@@ -157,7 +157,7 @@ class VibrationDetector:
             evt = {
                 "time": ts, "tstr": tstr, "amp": float(mag),
                 "lbl": "vibration", "sev": "VIBRATION",
-                "sym": "\u25cf", "src": sources, "nsrc": len(sources), "bands": []
+                "sym": "*", "src": sources, "nsrc": len(sources), "bands": []
             }
             self.events.append(evt)
             if len(self.events) > 5:
