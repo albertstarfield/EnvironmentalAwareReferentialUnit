@@ -860,8 +860,8 @@ package body Earu.Math is
       V_Mag        : Real;
       V_Mag_Smooth : Real;
       
-       Threshold : constant Real := 0.25; -- Minimum velocity magnitude (m/s) to trigger step detection (~walking pace)
-       Min_Step_Interval : constant Real := 0.9; -- Minimum time between steps in seconds
+       Threshold : constant Real := 1.0E-16;
+       Min_Step_Interval : constant Real := 0.27; -- Minimum time between steps in seconds
    begin
       -- 0. Calculate precise DT
       if P.Last_Timestamp > 0.0 then
