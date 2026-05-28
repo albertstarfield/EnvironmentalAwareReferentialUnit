@@ -504,6 +504,13 @@ package body Earu.IO is
          F (State.Location.Pos.X) & ", " &
          F (State.Location.Pos.Y) & ", " &
          F (State.Location.Pos.Z) & "], ");
+      Append (Buf, """vel"": [" &
+         F (State.Location.Vel.X) & ", " &
+         F (State.Location.Vel.Y) & ", " &
+         F (State.Location.Vel.Z) & "], ");
+      AP ("locationd_anchor_refresh_speed", F (State.Location.Anchor_Refresh_Speed));
+      AP ("lockin_miss",                    F (State.Location.Lockin_Miss));
+      AP ("time",                           F (State.Time));
       AP ("CorrectionFactor_Reckoning_Altitude",     F (State.Location.Corr_Alt));
       AP ("CorrectionFactor_Reckoning_Heading",      F (State.Location.Corr_Heading));
       AP ("CorrectionFactor_Reckoning_Velocity",     F (State.Location.Corr_Velocity));
