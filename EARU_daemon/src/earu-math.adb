@@ -200,29 +200,29 @@ package body Earu.Math is
       Blade_Freq := ((SMC.Fan_RPMs(1) + SMC.Fan_RPMs(2)) / 2.0 / 60.0) * 37.0; -- average blade passing frequency
       SMC.Strouhal_Number := (if U > 0.001 then (Blade_Freq * SMC.Flow_Scale_L) / U else 0.0);
       
-      SMC.Cauchy_Number := (if SMC.Gas_Constants.Gamma > 0.01 and SMC.Gas_Constants.R > 0.01 and Ambient_Temp_K > 0.01 then (U ** 2) / (SMC.Gas_Constants.Gamma * SMC.Gas_Constants.R * Ambient_Temp_K) else 0.0);
+       SMC.Cauchy_Number := (if SMC.Gas_Constants.Gamma > 0.01 and SMC.Gas_Constants.R > 0.01 and Ambient_Temp_K > 0.01 then (U ** 2) / (SMC.Gas_Constants.Gamma * SMC.Gas_Constants.R * Ambient_Temp_K) else 0.0);
 
        -- Update weather category based on environmental conditions and dew point spread
        Eco.Category := (others => ' ');
        
-       -- Calculate visibility-based severity from dew_point_spread (lower = foggy/worse)
-       if Dew_Point_Spread > 4.0 then
+       -- Use calculated values from Ecosystem_Weather record
+       if Eco.Dew_Point_Spread > 4.0 then
           -- Clear conditions, excellent visibility
           Eco.Category (1 .. 15) := "Clear / Good Visibility";
-       elsif Dew_Point_Spread > 2.0 and Dew_Point_Spread <= 4.0 then
+       elsif Eco.Dew_Point_Spread > 2.0 and Eco.Dew_Point_Spread <= 4.0 then
           -- Moderate humidity, fair visibility
           Eco.Category (1 .. 17) := "Moderate Humidity";
-       elsif Dew_Point_Spread > 1.0 and Dew_Point_Spread <= 2.0 then
+       elsif Eco.Dew_Point_Spread > 1.0 and Eco.Dew_Point_Spread <= 2.0 then
           -- Elevated humidity, potential fog risk
           Eco.Category (1 .. 17) := "Humid / Low Visibility Risk";
-       elsif Dew_Point_Spread > 0.5 and Dew_Point_Spread <= 1.0 then
+       elsif Eco.Dew_Point_Spread > 0.5 and Eco.Dew_Point_Spread <= 1.0 then
           -- High humidity with very low spread = fog conditions
-          if RH > 90.0 then
+          if Eco.Humidity_Pct > 90.0 then
              Eco.Category (1 .. 16) := "Moist / Fog Risk";
           else
              Eco.Category (1 .. 17) := "Foggy Conditions";
           end if;
-       elsif Dew_Point_Spread <= 0.5 and RH > 95.0 then
+       elsif Eco.Dew_Point_Spread <= 0.5 and Eco.Humidity_Pct > 95.0 then
           -- Saturated with very low spread = active fog/heavy moisture
           Eco.Category (1 .. 20) := "Dense Fog / High Moisture";
        else
@@ -231,18 +231,18 @@ package body Earu.Math is
        end if;
        
        -- Check for precipitation tendency based on pressure changes
-       if Pressure_Tendency_HPa < -0.5 then
+       if Eco.Pressure_Tendency_HPa < -0.5 then
           -- Falling pressure = approaching storm/rain system
-          if not (Dew_Point_Spread <= 0.5 and RH > 95.0) then
+          if not (Eco.Dew_Point_Spread <= 0.5 and Eco.Humidity_Pct > 95.0) then
              Eco.Category (1 .. 22) := "Unstable / Approaching Precipitation";
           end if;
        end if;
        
        -- Check temperature for seasonal classification
        TC := Ambient_Temp_K - 273.15;
-       if TC < 0.0 and Dew_Point_Spread <= 1.0 then
+       if TC < 0.0 and Eco.Dew_Point_Spread <= 1.0 then
           Eco.Category (1 .. 12) := "Winter / Freezing Fog Risk";
-       elsif TC > 300.0 -- ~26.8°C
+       elsif TC > 300.0 then -- ~26.8°C
           Eco.Category (1 .. 17) := "Warm / Summer Conditions";
        end if;
    end Update_Weather_Thermodynamics;
