@@ -479,12 +479,7 @@ procedure Earu_Daemon is
                S.Battery_Full_Wh := Real (Stats_SHM.Bat_Full_Wh);
                S.Battery_Health_Pct := Real (Stats_SHM.Bat_Health_Pct);
                S.Load_Avg := (Real (Stats_SHM.Load_Avg_1), Real (Stats_SHM.Load_Avg_5), Real (Stats_SHM.Load_Avg_15));
-                declare
-                   function get_hid_idle_time_ns return Interfaces.Unsigned_64;
-                   pragma Import (C, get_hid_idle_time_ns, "get_hid_idle_time_ns");
-                begin
-                   S.Non_Human_HID_Idle_ns := Real (get_hid_idle_time_ns);
-                end;
+               S.Non_Human_HID_Idle_ns := Earu.IO.Execute_And_Read_Real ("ioreg -c IOHIDSystem -r | awk '/HIDIdleTime/ {print $NF; exit}'");
                S.PMSet_Info := Stats_SHM.PMSET_Info;
                S.Uptime_System := Real (Stats_SHM.Uptime_System);
                S.Uptime_Earu := Real (Stats_SHM.Uptime_Earu);

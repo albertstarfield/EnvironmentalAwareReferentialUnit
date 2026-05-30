@@ -777,7 +777,7 @@ package body Earu.IO is
       Read_Success : Boolean := False;
    begin
       begin
-         Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/EARU_dataIO/" & Filename);
+         Open (File, In_File, "/Volumes/EARU_dataIO/" & Filename);
       exception
          when Name_Error | Use_Error =>
             begin

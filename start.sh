@@ -22,7 +22,7 @@ fi
 
 # Helper to execute command as the original user to keep environment / toolchain clean
 run_as_user() {
-    sudo -u "$ORIGINAL_USER" env PATH="$PATH" SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" bash -c "cd \"$DAEMON_DIR\" && $*"
+    sudo -u "$ORIGINAL_USER" env PATH="$PATH" SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" CPATH="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include" LIBRARY_PATH="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib" bash -c "cd \"$DAEMON_DIR\" && $*"
 }
 
 # 1. Unload background launchd service if it is loaded to prevent build/run conflicts
