@@ -788,6 +788,11 @@ def weather_worker():
     
     update_count = 0
     last_cl_check = 0.0
+    last_weather_fetch = 0.0
+    cached_t_c = 30.81
+    cached_dp_c = 30.26
+    cached_press = 1013.25
+    cached_hum = 97.0
     while True:
         try:
             now = time.time()
@@ -867,12 +872,28 @@ def weather_worker():
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             time_str = now_utc.strftime("%d%H%MZ")
             
-            t_c = 30.81  # Basic default ambient temp in C
-            dp_k = 303.4142540646027
-            dp_c = dp_k - 273.15
-            press = 1013.25
+            if now - last_weather_fetch > 300.0:
+                last_weather_fetch = now
+                try:
+                    import requests
+                    url = f"https://api.open-meteo.com/v1/forecast?latitude={global_location.lat}&longitude={global_location.lon}&current=temperature_2m,relative_humidity_2m,surface_pressure"
+                    resp = requests.get(url, timeout=5)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        current = data.get("current", {})
+                        cached_t_c = current.get("temperature_2m", cached_t_c)
+                        cached_hum = current.get("relative_humidity_2m", cached_hum)
+                        cached_press = current.get("surface_pressure", cached_press)
+                        cached_dp_c = cached_t_c - ((100.0 - cached_hum) / 5.0)
+                except Exception as e:
+                    print(f"[*] Open-Meteo fetch error: {e}")
+
+            t_c = cached_t_c
+            dp_c = cached_dp_c
+            dp_k = dp_c + 273.15
+            press = cached_press
             altim = press / 33.8639
-            spread = 0.5457459353973206
+            spread = t_c - dp_c
             tendency = 0.0
             
             vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
@@ -898,12 +919,12 @@ def weather_worker():
                 # Category will be dynamically set by Ada daemon based on environmental conditions
                 "category": "",  
                 "air_fluid_density": 2.2264931824081815,
-                "api_humidity_pct": 97.0,
-                "dew_point_k": 303.4142540646027,
-                "dew_point_spread": 0.5457459353973206,
+                "api_humidity_pct": cached_hum,
+                "dew_point_k": dp_k,
+                "dew_point_spread": spread,
                 "hum_offset": 0.0,
-                "humidity_pct": 96.9248,
-                "pressure_tendency_hpa": 0.0,
+                "humidity_pct": cached_hum,
+                "pressure_tendency_hpa": tendency,
                 "smc_p_offset_hpa": 0.0,
                 "wind_map": {
                     "grid_7x7_10m": grid_7x7_10m,
@@ -1064,7 +1085,7 @@ def weather_worker():
                     weather_code = 8
 
             header = struct.pack("<I192sI", update_count, b'\0'*192, 0)
-            basic = struct.pack("<3fId4f", 30.81 + 273.15, 96.9248, 1013.25, weather_code, time.time(), global_location.lat, global_location.lon, global_location.alt, global_location.pressure_hpa)
+            basic = struct.pack("<3fId4f", t_c + 273.15, cached_hum, press, weather_code, time.time(), global_location.lat, global_location.lon, global_location.alt, global_location.pressure_hpa)
             
             grid_data = bytearray()
             for r_idx in range(7):
