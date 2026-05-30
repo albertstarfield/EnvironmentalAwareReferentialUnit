@@ -354,7 +354,7 @@ class PrimaryFlightDisplay:
         self.root.configure(bg='black')
 
         self.page: int = 0
-        self.data_path: str = "EARU_data.dat"
+        self.data_path: str = "/Volumes/EARU_dataIO/EARU_data.dat"
         self.weather_history_path: str = "EARU_WeatherAPIHistory.dat"
         self.auto_center: bool = True
         self.map_heading_up: bool = True
