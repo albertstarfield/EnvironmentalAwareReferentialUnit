@@ -876,7 +876,7 @@ def weather_worker():
                 last_weather_fetch = now
                 try:
                     import requests
-                    url = f"https://api.open-meteo.com/v1/forecast?latitude={global_location.lat}&longitude={global_location.lon}&current=temperature_2m,relative_humidity_2m,surface_pressure"
+                    url = f"https://api.open-meteo.com/v1/forecast?latitude={global_location.lat}&longitude={global_location.lon}&current=temperature_2m,relative_humidity_2m,surface_pressure,dew_point_2m"
                     resp = requests.get(url, timeout=5)
                     if resp.status_code == 200:
                         data = resp.json()
@@ -884,7 +884,7 @@ def weather_worker():
                         cached_t_c = current.get("temperature_2m", cached_t_c)
                         cached_hum = current.get("relative_humidity_2m", cached_hum)
                         cached_press = current.get("surface_pressure", cached_press)
-                        cached_dp_c = cached_t_c - ((100.0 - cached_hum) / 5.0)
+                        cached_dp_c = current.get("dew_point_2m", cached_t_c - ((100.0 - cached_hum) / 5.0))
                 except Exception as e:
                     print(f"[*] Open-Meteo fetch error: {e}")
 
