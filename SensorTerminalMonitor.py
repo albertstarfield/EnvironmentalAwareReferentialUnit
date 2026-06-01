@@ -1,4 +1,6 @@
 # SensorTerminalMonitor.py - Cozy Flight Instrument Panel
+# DO NOT USE THIS AS AN LAZY SHORTCUT FOR PROGRAMMING, USE ADA AND USE THIS ONLY AND ONLY FOR MACHINE LEARNING USING PYTHON AND TORCH AND COREML OTHER THAN THAT, PROGRAM ON ADA (ALL) OR C# IF IT'S SYSCALL
+# ALWAYS CHECK using Pyrefly and Ruff after finish modifying and fix all the issue
 # Version: Amaryllis Twilight Migratory
 import os
 import sys
@@ -354,7 +356,7 @@ class PrimaryFlightDisplay:
         self.root.configure(bg='black')
 
         self.page: int = 0
-        self.data_path: str = "/Volumes/EARU_dataIO/EARU_data.dat"
+        self.data_path: str = "EARU_data.dat"
         self.weather_history_path: str = "EARU_WeatherAPIHistory.dat"
         self.auto_center: bool = True
         self.map_heading_up: bool = True
@@ -434,6 +436,10 @@ class PrimaryFlightDisplay:
         self.battery_full_wh: float = 0.0
         self.battery_design_wh: float = 0.0
         self.batt_life_y: float = 10.0
+        self.drain_time_act: float = 0.0
+        self.drain_time_slp: float = 0.0
+        self.drain_time_hib: float = 0.0
+        self.drain_time_dhib: float = 0.0
         self.uptime_earu: float = 0.0
         self.net_comm_verified: str = "OFFLINE"
         self.survive_today: str = "Yes"
@@ -1123,22 +1129,12 @@ class PrimaryFlightDisplay:
                     self.cum_fatigue = float(df.get('cumulative_fatigue', 0.0))
                     self.agg_risk = float(df.get('aggregated_risk', 0.0))
 
-                    # Battery Life Prediction Math (Hobbs time vs Degradation)
-                    if self.battery_health < 100.0 and self.machine_life > 0:
-                        base_rate = (100.0 - self.battery_health) / self.machine_life
-                        if base_rate > 0:
-                            if self.battery_health > 20.0:
-                                time_to_20 = (self.battery_health - 20.0) / base_rate
-                                time_below_20 = 20.0 / (base_rate * 2.5) # 2.5x faster decay below 20%
-                                batt_life_hrs = time_to_20 + time_below_20
-                            else:
-                                accel_rate = base_rate * math.exp((20.0 - self.battery_health) / 5.0)
-                                batt_life_hrs = self.battery_health / accel_rate
-                            self.batt_life_y = batt_life_hrs / 8760.0
-                        else:
-                            self.batt_life_y = 10.0
-                    else:
-                        self.batt_life_y = 10.0
+                    # Battery Life Prediction Math (Hobbs time vs Degradation) now handled in EARU_daemon
+                    self.batt_life_y = float(sys_d.get('Batt_Life_Y', 10.0))
+                    self.drain_time_act = float(sys_d.get('Drain_Time_Active', 0.0))
+                    self.drain_time_slp = float(sys_d.get('Drain_Time_Sleep', 0.0))
+                    self.drain_time_hib = float(sys_d.get('Drain_Time_Hib', 0.0))
+                    self.drain_time_dhib = float(sys_d.get('Drain_Time_DeepHib', 0.0))
 
                     # 60s Reanchoring Logic for Real-Time Countdown
                     now_ts = time.time()
@@ -1941,6 +1937,10 @@ class PrimaryFlightDisplay:
             ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
             ("BATT HEALTH", f"{self.battery_health:.1f} %"),
             ("FULL CAP", f"{self.battery_full_wh:.2f} Wh"),
+            ("ACT DRAIN", f"{self.drain_time_act:.1f} h"),
+            ("SLP DRAIN", f"{self.drain_time_slp:.1f} h"),
+            ("HIB DRAIN", f"{self.drain_time_hib:.1f} h"),
+            ("DHIB DRAIN", f"{self.drain_time_dhib:.1f} h"),
             ("SURVIVE", self.survive_today),
             ("HIBERNATE", self.must_hibernate),
             ("PULSE SUG", f"{self.pulse_wake:.0f}/{self.pulse_length:.0f}s")

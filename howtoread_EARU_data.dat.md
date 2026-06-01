@@ -157,7 +157,7 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `AccumulativePowerUsageThisMonth_Wh` | Wh | Cumulative energy consumption for the current month. |
 | `AccumulativePowerUsageMeter_Wh` | Wh | Lifetime cumulative energy consumption (total meter). |
 | `WillBatterySurviveOneDay` | String | "Yes" or "No" prediction based on current bank vs projected usage. |
-| `inOrderToSurviveDayMustHibernate` | String | "Yes" if even pulsing cannot save enough energy, necessitating hibernation. |
+| `inOrderToSurviveDayMustHibernate` | String | "Yes" if battery is <10% and even pulsing cannot save enough energy, necessitating hibernation. |
 | `PulsingSuggestionMaintenanceWindowWake` | Seconds | Suggested background wake interval to stretch battery life. |
 | `PulsingSuggestionMaintenanceWindowWakeLength` | Seconds | Suggested duration for each background wake. |
 

@@ -119,7 +119,10 @@ void on_lid_report(void *context, IOReturn result, void *sender, IOHIDReportType
     }
 }
 
+extern void configure_realtime(int period_ms, int computation_ms, int constraint_ms);
+
 void *spu_thread_func(void *arg) {
+    configure_realtime(2, 1, 2);
     init_timebase();
     
     // Wake the SPU drivers (set properties)

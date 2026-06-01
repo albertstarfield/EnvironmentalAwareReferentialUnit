@@ -21,7 +21,7 @@ def get_keys_recursive(d, prefix=""):
 # Load generated
 with open("/Volumes/EARU_dataIO/EARU_data.dat", "r") as f:
     gen_lines = f.readlines()
-    
+
 # Load expectation
 with open("/usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/EARU_data.dat.expectation", "r") as f:
     exp_lines = f.readlines()

@@ -643,7 +643,7 @@ $$P_{target} = \frac{P_{active} \cdot t_{wake} + P_{sleep} \cdot t_{sleep}}{t_{w
 #### 12.6 System Hibernation Trigger
 An aggressive baseline pulsing limit is enforced ($t_{wake} = 1.0\text{ s}$ per hour):
 $$P_{aggressive} = \frac{P_{active} \cdot 1.0 + 0.5 \cdot 3599.0}{3600.0} \quad (\text{Watts})$$
-*   If the target power budget is smaller than even this aggressive threshold ($P_{target} < P_{aggressive}$), then pulsing is insufficient. The system triggers `inOrderToSurviveDayMustHibernate = "Yes"`, indicating that **immediate deep system hibernation** is the only way to avoid critical power depletion before midnight!
+*   If the target power budget is smaller than even this aggressive threshold ($P_{target} < P_{aggressive}$) **AND** the battery level is below 10%, then the system triggers `inOrderToSurviveDayMustHibernate = "Yes"`, indicating that **immediate deep system hibernation** is recommended to avoid critical power depletion before midnight!
 
 ---
 

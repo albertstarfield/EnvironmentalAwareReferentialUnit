@@ -1,6 +1,5 @@
 import time
 import struct
-import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import requests
@@ -65,8 +64,8 @@ def weather_worker(lat, lon):
                     current_data = shm.buf[:32]
                     if any(current_data):
                         update_count = struct.unpack("I", current_data[:4])[0] + 1
-                    
-                    payload = struct.pack("II f f f i d", 
+
+                    payload = struct.pack("II f f f i d",
                                         update_count, 0,
                                         data["temperature_2m"],
                                         data["relative_humidity_2m"],
@@ -90,7 +89,7 @@ def stats_worker():
             cpu = psutil.cpu_percent()
             mem = psutil.virtual_memory().percent
             batt_pct, batt_state = get_battery_info()
-            
+
             # Fan speeds are hard on Mac without special tools, we'll use 0 for now
             # II f f f i f f
             payload = struct.pack("II f f f i f f",
@@ -133,24 +132,23 @@ def sensor_worker_enhanced(pipe):
     pass
 
 if __name__ == "__main__":
-    from earu_ml_bridge import main as original_main
     # We'll just run our new workers in the background and then call original_main
     # which starts the sensor collector.
-    
+
     # Actually, I'll rewrite the main to be cleaner
     print("[*] Starting EARU Enhanced Python Bridge...")
-    
+
     # Lat/Lon for weather (San Francisco default if not provided)
     LAT, LON = 37.7749, -122.4194
-    
+
     processes = [
         mp.Process(target=weather_worker, args=(LAT, LON), daemon=True),
         mp.Process(target=stats_worker, daemon=True),
         mp.Process(target=ml_worker, daemon=True)
     ]
-    
+
     for p in processes: p.start()
-    
+
     # Now run the original collector logic
     # I'll just import and run it
     import earu_ml_bridge

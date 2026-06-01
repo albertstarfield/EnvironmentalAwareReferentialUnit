@@ -226,6 +226,11 @@ package Earu.Types is
       Uptime_Earu             : aliased Real := 0.0;
       Uptime_System           : aliased Real := 0.0;
       Machine_Life_Runtime    : aliased Real := 0.0;
+      Batt_Life_Y             : aliased Real := 10.0;
+      Drain_Time_Active       : aliased Real := 0.0;
+      Drain_Time_Sleep        : aliased Real := 0.0;
+      Drain_Time_Hib          : aliased Real := 0.0;
+      Drain_Time_DeepHib      : aliased Real := 0.0;
       SSD_Available_Spare     : aliased Real := 100.0;
       SSD_Used_Pct            : aliased Real := 0.0;
       SSD_Data_Read_Units     : aliased Real := 0.0;

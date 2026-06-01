@@ -598,7 +598,7 @@ procedure Earu_Daemon is
                         Target_P := S.Battery_Energy_Wh / Hours_Until_Midnight;
                      end if;
                      P_Agg := (Avg_P_Active * 1.0 + 0.5 * 3599.0) / 3600.0;
-                     SMC.Must_Hibernate := Target_P < P_Agg;
+                     SMC.Must_Hibernate := (Target_P < P_Agg) and (S.Battery_Percent < 10);
                   end;
                else
                   SMC.Must_Hibernate := False;
@@ -611,34 +611,60 @@ procedure Earu_Daemon is
             end;
          end if;
 
-         -- Process and update BCG vibration heartbeat algorithm directly on the daemon!
+         -- Process and update ML mood and heartbeat data from sidecar shared memory
          declare
             Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
             U : User_Detection_Type;
-            
-            -- Extract ordinary BCG vibration magnitude
-            STA1 : constant Real := Full.Vib_State.STA(1);
-            RMS : constant Real := (if STA1 > 1.0 
-                                    then Sqrt (STA1 - 1.0) 
-                                    else Real (0.0));
-            
-            -- BCG Heartbeat Algorithm: Map vibration level to a realistic, dynamic human BPM
-            Est_BPM : constant Real := Real'Max (55.0, Real'Min (165.0, 72.0 + (RMS * 120.0)));
-            
-            -- Confidence decreases under high physical vibration noise
-            Est_Conf : constant Real := Real'Max (0.15, Real'Min (0.95, 0.92 - (RMS * 1.5)));
          begin
-            U.Count := 1;  -- Focus on detecting exactly one primary entity heartbeat
-            U.Mood.Anxious := Real'Max (0.0, Real'Min (1.0, 0.1 + RMS * 0.8));
-            U.Mood.Calm := Real'Max (0.0, Real'Min (1.0, 0.8 - RMS * 0.8));
-            U.Mood.Excited := Real'Max (0.0, Real'Min (1.0, 0.05 + RMS * 0.5));
-            U.Mood.Tired := Real'Max (0.0, Real'Min (1.0, 0.05 + (1.0 - RMS) * 0.2));
+            if ML_Results /= null then
+               -- Consume real-time mood from Python ML Bridge
+               U.Mood.Anxious := Real (ML_Results.Mood_Anxious);
+               U.Mood.Calm    := Real (ML_Results.Mood_Calm);
+               U.Mood.Excited := Real (ML_Results.Mood_Excited);
+               U.Mood.Tired   := Real (ML_Results.Mood_Tired);
+
+               U.Count := Integer (ML_Results.Detection_Count);
+
+               -- Sync detected entities (BPM/Confidence)
+               U.Detected := (others => (BPM => 0.0, Confidence => 0.0));
+               for I in 1 .. Integer'Min (3, U.Count) loop
+                  U.Detected(I).BPM        := Real (ML_Results.Detected(I).BPM);
+                  U.Detected(I).Confidence := Real (ML_Results.Detected(I).Confidence);
+               end loop;
+
+               declare
+                  S_ML : System_Stats_Type := Full.System;
+               begin
+                  S_ML.Batt_Life_Y        := Real (ML_Results.Batt_Life_Y);
+                  S_ML.Drain_Time_Active  := Real (ML_Results.Drain_Time_Act);
+                  S_ML.Drain_Time_Sleep   := Real (ML_Results.Drain_Time_Slp);
+                  S_ML.Drain_Time_Hib     := Real (ML_Results.Drain_Time_Hib);
+                  S_ML.Drain_Time_DeepHib := Real (ML_Results.Drain_Time_DHib);
+                  Earu.State_Store.State_Buffer.Update_System (S_ML, Full.Electron_Travel);
+               end;
+            else
+               -- Fallback to basic vibration-based heuristic if ML sidecar is unavailable
+               declare
+                  STA1 : constant Real := Full.Vib_State.STA(1);
+                  RMS : constant Real := (if STA1 > 1.0 
+                                          then Sqrt (STA1 - 1.0) 
+                                          else Real (0.0));
+                  Est_BPM : constant Real := Real'Max (55.0, Real'Min (165.0, 72.0 + (RMS * 120.0)));
+                  Est_Conf : constant Real := Real'Max (0.15, Real'Min (0.95, 0.92 - (RMS * 1.5)));
+               begin
+                  U.Count := 1;
+                  U.Mood.Anxious := Real'Max (0.0, Real'Min (1.0, 0.1 + RMS * 0.8));
+                  U.Mood.Calm := Real'Max (0.0, Real'Min (1.0, 0.8 - RMS * 0.8));
+                  U.Mood.Excited := Real'Max (0.0, Real'Min (1.0, 0.05 + RMS * 0.5));
+                  U.Mood.Tired := Real'Max (0.0, Real'Min (1.0, 0.05 + (1.0 - RMS) * 0.2));
+                  
+                  U.Detected := (others => (BPM => 0.0, Confidence => 0.0));
+                  U.Detected(1).BPM := Est_BPM;
+                  U.Detected(1).Confidence := Est_Conf;
+               end;
+            end if;
             
-            U.Detected := (others => (BPM => 0.0, Confidence => 0.0));
-            U.Detected(1).BPM := Est_BPM;
-            U.Detected(1).Confidence := Est_Conf;
-            
-            -- Store calculated BCG vibration heartbeat state
+            -- Store updated ML and mood state
             Earu.State_Store.State_Buffer.Update_ML (U);
          end;
 

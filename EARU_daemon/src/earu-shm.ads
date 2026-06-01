@@ -262,6 +262,11 @@ package Earu.Shm is
       Mood_Tired      : Interfaces.IEEE_Float_32;
       Detection_Count : Interfaces.Unsigned_32;
       Detected        : Entity_Array_C;
+      Batt_Life_Y     : Interfaces.IEEE_Float_32;
+      Drain_Time_Act  : Interfaces.IEEE_Float_32;
+      Drain_Time_Slp  : Interfaces.IEEE_Float_32;
+      Drain_Time_Hib  : Interfaces.IEEE_Float_32;
+      Drain_Time_DHib : Interfaces.IEEE_Float_32;
    end record with Convention => C;
    type ML_SHM_Ptr is access all ML_SHM;
 

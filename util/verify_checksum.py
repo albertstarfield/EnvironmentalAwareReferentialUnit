@@ -1,5 +1,3 @@
-import json
-import base64
 import hashlib
 import time
 
@@ -24,7 +22,7 @@ try:
     assert rec_gen.endswith("]")
     payload_checksum = rec_gen[len("[RECOVERY_V1:"):-1]
     payload, checksum = payload_checksum.split(":")
-    
+
     # Calculate SHA256 of payload
     sha = hashlib.sha256(payload.encode('utf-8')).hexdigest()
     print(f"Payload len: {len(payload)}")

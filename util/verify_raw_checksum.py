@@ -1,7 +1,5 @@
-import json
 import base64
 import hashlib
-import time
 
 with open("/Volumes/EARU_dataIO/EARU_data.dat", "r") as f:
     content = f.read()

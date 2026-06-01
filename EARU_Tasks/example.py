@@ -20,7 +20,7 @@ def run_task(data):
         - als: bytes or None (raw ALS report)
         - events: list of recent vibration events
     """
-    
+
     # 1. Simple movement detection
     if data['accel']['mag'] > 1.2:
         print(f"[*] Movement detected! Magnitude: {data['accel']['mag']:.3f}g")

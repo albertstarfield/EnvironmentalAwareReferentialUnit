@@ -34,7 +34,7 @@ def bootstrap() -> None:
 if __name__ == "__main__" and "--no-bootstrap" not in sys.argv:
     try: bootstrap()
     except Exception: pass
-    
+
     # Strict Self-Check with pyrefly
     pyrefly_bin = shutil.which("pyrefly")
     if pyrefly_bin:
@@ -45,7 +45,7 @@ if __name__ == "__main__" and "--no-bootstrap" not in sys.argv:
             if "ERROR" in line or "WARN" in line:
                 has_issues = True
                 break
-        
+
         if cp.returncode != 0 or has_issues:
             sys.stderr.write(f"STRICT CHECK FAILED (pyrefly):\n{output}\n")
             sys.exit(1)
@@ -84,7 +84,7 @@ class TileManager:
             if key in self.textures: return self.textures[key]
             if key in self.loading: return None
             self.loading.add(key)
-        
+
         # Start async download/load
         threading.Thread(target=self._load_tile, args=(z, x, y), daemon=True).start()
         return None
@@ -112,7 +112,7 @@ class TileManager:
             with self.lock: self.loading.remove((z, x, y))
 
     def _finalize_tile(self, z, x, y, data):
-        # This is a bit of a hack for pyopengltk: 
+        # This is a bit of a hack for pyopengltk:
         # textures must be created in the rendering thread.
         # We store the data and check for it in the redraw loop.
         with self.lock:
@@ -165,7 +165,7 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
         self.tile_manager.upload_pending()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) # pyrefly: ignore
         glLoadIdentity()
-        
+
         if self.mode == "HORIZON":
             self.render_horizon()
         else:
@@ -195,16 +195,16 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
         # Simple 2D tile grid
         cx, cy = w/2, h/2
         tx, ty = latlon_to_tile(self.lat, self.lon, self.zoom)
-        
+
         # Calculate pixel offset within central tile
         n = 2.0 ** self.zoom
-        lon_deg_per_tile = 360.0 / n
+        360.0 / n
         lat_rad = math.radians(self.lat)
         # Approximate pixel offset (not perfect Mercator but good for rendering center)
         # Use fractional tile coordinates
         xt = (self.lon + 180.0) / 360.0 * n
         yt = (1.0 - math.log(math.tan(lat_rad) + (1 / math.cos(lat_rad))) / math.pi) / 2.0 * n
-        
+
         off_x = (xt - tx) * 256
         off_y = (yt - ty) * 256
 
@@ -218,10 +218,10 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
                 else:
                     glBindTexture(GL_TEXTURE_2D, 0)
                     glColor4f(0.1, 0.1, 0.1, 1)
-                
+
                 x1 = cx + (dx * 256) - off_x
                 y1 = cy + (dy * 256) - off_y
-                
+
                 glBegin(GL_QUADS)
                 glTexCoord2f(0, 0); glVertex2f(x1, y1)
                 glTexCoord2f(1, 0); glVertex2f(x1 + 256, y1)
@@ -249,13 +249,13 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
                 lng = 2 * math.pi * float(j - 1) / longs
                 x = math.cos(lng)
                 y = math.sin(lng)
-                
+
                 # Color based on latitude (Sky/Ground)
                 if lat1 > 0:
                     glColor4f(0.0, 0.2, 0.5, 0.8) # Blue sky
                 else:
                     glColor4f(0.3, 0.15, 0.0, 0.8) # Brown ground
-                
+
                 glNormal3f(x * zr0, y * zr0, z0)
                 glVertex3f(x * zr0 * radius, y * zr0 * radius, z0 * radius)
                 glNormal3f(x * zr1, y * zr1, z1)
@@ -280,7 +280,7 @@ class PrimaryFlightDisplay:
         self.root.geometry("1000x800")
         self.root.configure(bg='black')
 
-        self.page: int = 0 
+        self.page: int = 0
         self.data_path: str = "EARU_data.dat"
         self.weather_history_path: str = "EARU_WeatherAPIHistory.dat"
         self.auto_center: bool = True
@@ -319,7 +319,7 @@ class PrimaryFlightDisplay:
             self.root.bind("<KeyPress>", self.on_key_press)
             self.root.bind("<KeyRelease>", self.on_key_release)
             self.map_widget.canvas.bind("<Button-1>", self.on_map_click, add="+")
-        
+
         # State Variables
         self.pitch: float = 0.0
         self.roll: float = 0.0
@@ -373,9 +373,8 @@ class PrimaryFlightDisplay:
         self.smooth_power: float = 0.0
         self.smooth_work_efficiency: float = 0.0
         self.last_telemetry_time: float = 0.0
-        from collections import deque
         self.work_efficiency_history: deque[float] = deque(maxlen=3600)
-        
+
         # Master Warning and Caution systems
         self.prev_warning: bool = False
         self.prev_caution: bool = False
@@ -402,7 +401,7 @@ class PrimaryFlightDisplay:
         self.road_path_coords: list[tuple[float, float]] = []
         self.is_fetching_road: bool = False
         self.last_road_update: float = 0.0
-        
+
         # Search UI
         self.search_frame = tk.Frame(self.content_frame, bg='#111')
         self.search_entry = tk.Entry(self.search_frame, bg='black', fg='white', insertbackground='white', font=("Monaco", 12))
@@ -431,18 +430,18 @@ class PrimaryFlightDisplay:
         self.lerp_factor: float = 0.1
         self.pitch_sign: float = 1.0
         self.roll_sign: float = -1.0
-        
+
         self.show_profile: bool = False
-        
+
         self.adv_subpage: int = 0
         self.wifi_devices: list[dict[str, Any]] = []
         self.bt_devices: list[dict[str, Any]] = []
-        
+
         # Start background wireless scanning thread
         self.stop_wireless_scan = threading.Event()
         self.wireless_thread = threading.Thread(target=self._wireless_scan_loop, daemon=True)
         self.wireless_thread.start()
-        
+
         self.update_data()
         self.animate()
 
@@ -457,7 +456,7 @@ class PrimaryFlightDisplay:
                 self.adv_subpage = 1
                 return
         if self.page != 4: return
-        
+
         # Continuous movement keys
         if lower_key in ('w', 's', 'a', 'd') or key in ('Up', 'Down', 'Left', 'Right'):
             self.panning_keys.add(key if key in ('Up', 'Down', 'Left', 'Right') else lower_key)
@@ -476,7 +475,6 @@ class PrimaryFlightDisplay:
         if key in self.panning_keys: self.panning_keys.remove(key)
 
     def _wireless_scan_loop(self) -> None:
-        import re
         import random
         while not self.stop_wireless_scan.is_set():
             # WiFi Scan (silently via airport -s)
@@ -508,7 +506,7 @@ class PrimaryFlightDisplay:
                             })
             except Exception:
                 pass
-            
+
             if not wifi_list:
                 wifi_list = [
                     {"ssid": "EARU-Tactical-Mesh-01", "bssid": "ac:86:74:28:aa:11", "rssi": -40 - random.randint(0, 5), "channel": "36 (5 GHz)"},
@@ -540,7 +538,7 @@ class PrimaryFlightDisplay:
                         curr_device = None
             except Exception:
                 pass
-            
+
             if not bt_list:
                 bt_list = [
                     {"name": "EARU-IMU-Beacon-A", "address": "aa-bb-cc-dd-ee-11", "type": "Seismic Sensor / BLE", "rssi": -45 - random.randint(0, 5)},
@@ -549,7 +547,7 @@ class PrimaryFlightDisplay:
                     {"name": "BLE-Temperature-04", "address": "00-11-22-33-44-55", "type": "Environmental Sensor", "rssi": -80 - random.randint(0, 12)}
                 ]
             self.bt_devices = sorted(bt_list, key=lambda x: x["rssi"], reverse=True)
-            
+
             for _ in range(150):
                 if self.stop_wireless_scan.is_set():
                     break
@@ -559,18 +557,18 @@ class PrimaryFlightDisplay:
         if not self.panning_keys or self.page != 4:
             self.pan_accel = 1.0
             return
-        
+
         # Accelerate over time (max 12x)
         self.pan_accel = min(12.0, self.pan_accel + 0.4)
         base_step = 0.0001 / max(1.0, self.map_zoom - 10.0)
         step = base_step * self.pan_accel
-        
+
         d_lat, d_lon = 0.0, 0.0
         if 'w' in self.panning_keys or 'Up' in self.panning_keys: d_lat += step
         if 's' in self.panning_keys or 'Down' in self.panning_keys: d_lat -= step
         if 'a' in self.panning_keys or 'Left' in self.panning_keys: d_lon -= step
         if 'd' in self.panning_keys or 'Right' in self.panning_keys: d_lon += step
-        
+
         if d_lat != 0.0 or d_lon != 0.0:
             self.pan_map(d_lat, d_lon)
 
@@ -645,7 +643,7 @@ class PrimaryFlightDisplay:
         if not self.map_widget: return
         addr = self.search_entry.get()
         if not addr: return
-        
+
         self.search_status = "SEARCHING..."
         self.search_results = []
         try:
@@ -654,13 +652,13 @@ class PrimaryFlightDisplay:
             d_lat = 100.0 / 60.0 # 1.666... degrees
             # Longitude adjustment based on latitude
             d_lon = d_lat / math.cos(math.radians(self.lat))
-            
+
             # Viewbox: [left, top, right, bottom] -> [lon1, lat1, lon2, lat2]
             viewbox = f"{self.lon-d_lon:.4f},{self.lat+d_lat:.4f},{self.lon+d_lon:.4f},{self.lat-d_lat:.4f}"
-            
+
             url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=10&viewbox={viewbox}&bounded=1"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0 (contact: albertstarfield)'})
-            
+
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode())
                 if data:
@@ -673,7 +671,7 @@ class PrimaryFlightDisplay:
                     self.search_status = f"FOUND {len(self.search_results)} RESULTS (100NM RANGE)."
                 else:
                     self.search_status = "NO RESULTS FOUND IN 100NM RANGE."
-                    
+
         except Exception as e:
             self.search_status = f"SEARCH ERROR: {e}"
 
@@ -704,7 +702,7 @@ class PrimaryFlightDisplay:
 
     def update_navigation_path(self) -> None:
         if not self.map_widget: return
-        
+
         # If in AIRWAY mode, just draw straight lines between waypoints
         if self.env_mode == "AIRWAY":
             self.draw_straight_path()
@@ -726,7 +724,7 @@ class PrimaryFlightDisplay:
             now = time.time()
             if not self.is_fetching_road and (now - self.last_road_update > 5.0 or not self.road_path_coords or deviated):
                 threading.Thread(target=self.fetch_road_routing, daemon=True).start()
-            
+
             if self.road_path_coords:
                 if self.dest_path: self.dest_path.delete(); self.dest_path = None
                 path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
@@ -743,7 +741,7 @@ class PrimaryFlightDisplay:
             pts.append((wp["lat"], wp["lon"]))
         if self.dest_lat is not None and self.dest_lon is not None:
             pts.append((self.dest_lat, self.dest_lon))
-        
+
         if len(pts) >= 2:
             path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
             self.dest_path = self.map_widget.set_path(pts, color=path_color, width=3)
@@ -758,7 +756,7 @@ class PrimaryFlightDisplay:
             for wp in self.waypoints:
                 coords_list.append(f"{wp['lon']:.6f},{wp['lat']:.6f}")
             coords_list.append(f"{self.dest_lon:.6f},{self.dest_lat:.6f}")
-            
+
             coords_str = ";".join(coords_list)
             url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0'})
@@ -776,7 +774,7 @@ class PrimaryFlightDisplay:
     def update_path_arrow(self) -> None:
         if not self.map_widget: return
         self.map_widget.canvas.delete("path_dir")
-        
+
         # Determine target point for the arrow (first waypoint or destination)
         target_pt = None
         if self.waypoints:
@@ -785,7 +783,7 @@ class PrimaryFlightDisplay:
             target_pt = (self.dest_lat, self.dest_lon)
 
         if not target_pt: return
-        
+
         pos_x, pos_y = self.get_canvas_pos(self.lat, self.lon)
         if pos_x > -50 and pos_y > -50:
             d_lat = target_pt[0] - self.lat
@@ -825,7 +823,7 @@ class PrimaryFlightDisplay:
                 self.opengl_pfd.visible = False
             if self.search_frame: self.search_frame.pack_forget()
             self.canvas.place_forget()
-            
+
             if self.map_widget:
                 self.map_widget.pack(fill=tk.BOTH, expand=True)
                 if self.auto_center:
@@ -848,10 +846,10 @@ class PrimaryFlightDisplay:
                 with open(self.data_path, 'r') as f:
                     lines = f.readlines()
                     if not lines: return
-                    
+
                     data = None
                     primary_error = None
-                    
+
                     # Try first line (Primary JSON)
                     line = lines[0].strip()
                     if line:
@@ -895,7 +893,7 @@ class PrimaryFlightDisplay:
 
                     data = clean_none(data)
                     self.full_data = data
-                    
+
                     # Smooth rates & thermodynamics (EMA filters)
                     smc = data.get('smc', {})
                     raw_massflow = float(smc.get('massflow_kg_s', 0.0))
@@ -904,7 +902,7 @@ class PrimaryFlightDisplay:
                     raw_inefficiency = float(smc.get('thermal_inefficiency_w', 0.0))
                     raw_efficiency = float(smc.get('cooling_efficiency_pct', 0.0))
                     raw_work_eff = float(smc.get('work_efficiency_pct', 0.0))
-                    
+
                     alpha = 0.08  # Silky-smooth coefficient
                     if self.smooth_power == 0.0 and raw_power > 0.0:
                         self.smooth_massflow = raw_massflow
@@ -930,7 +928,7 @@ class PrimaryFlightDisplay:
                     # Master Warning / Caution state updates
                     raw_warning = bool(data.get('master_warning', False))
                     raw_caution = bool(data.get('master_caution', False))
-                    
+
                     if raw_warning:
                         if not self.prev_warning:
                             self.warn_acknowledged = False
@@ -938,7 +936,7 @@ class PrimaryFlightDisplay:
                     else:
                         self.prev_warning = False
                         self.warn_acknowledged = False
-                        
+
                     if raw_caution:
                         if not self.prev_caution:
                             self.caution_acknowledged = False
@@ -952,7 +950,7 @@ class PrimaryFlightDisplay:
                     self.raw_roll = float(orient.get('roll', 0.0))
                     self.targets['pitch'] = self.raw_pitch * self.pitch_sign
                     self.targets['roll'] = self.raw_roll * self.roll_sign
-                    
+
                     loc = data.get('location', {})
                     self.transportation_category = str(loc.get('transportation_category', 'stationary')).strip()
                     self.targets['alt'] = float(loc.get('alt', 0.0))
@@ -962,7 +960,7 @@ class PrimaryFlightDisplay:
                     self.targets['lon'] = float(loc.get('lon', 0.0))
                     self.targets['alt_rate'] = float(loc.get('alt_rate', 0.0) * 196.85)
                     self.targets['mach'] = float(loc.get('mach', 0.0))
-                    
+
                     vel_list = loc.get('vel', [0.0, 0.0, 0.0])
                     if isinstance(vel_list, list) and len(vel_list) >= 3:
                         self.targets['vel_x'] = float(vel_list[0])
@@ -972,13 +970,13 @@ class PrimaryFlightDisplay:
                         self.targets['vel_x'] = 0.0
                         self.targets['vel_y'] = 0.0
                         self.targets['vel_z'] = 0.0
-                    
+
                     # Corrected values from EARU
                     self.targets['cf_velocity'] = float(loc.get('CorrectionFactor_Reckoning_Velocity', 1.0))
                     self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
                     self.targets['cf_altitude'] = float(loc.get('CorrectionFactor_Reckoning_Altitude', 0.0))
                     self.targets['cf_vertical_rate'] = float(loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0))
-                    
+
                     sys_d = data.get('system', {})
                     self.cpu = float(sys_d.get('cpu_usage', 0.0))
                     self.batt = int(sys_d.get('battery_percent', 0))
@@ -1016,10 +1014,10 @@ class PrimaryFlightDisplay:
                     avg_fan = sum(self.fan_rpms) / len(self.fan_rpms) if self.fan_rpms else 0.0
                     fallback_flow = 15.0 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
                     self.hinge_airflow = float(data.get('hinge_airflow', max(0.0, fallback_flow)))
-                    
+
                     fallback_mass = 0.003 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
                     self.outflow_mass_flow = float(data.get('outflow_mass_flow', max(0.0, fallback_mass)))
-                    
+
                     delta_t = max(0.0, self.airflow_outlet_c - self.airflow_inlet_c)
                     fallback_heatflux = self.outflow_mass_flow * 1005.0 * delta_t
                     self.outflow_heatflux = float(data.get('outflow_heatflux', max(0.0, fallback_heatflux)))
@@ -1087,10 +1085,10 @@ class PrimaryFlightDisplay:
         if self.full_data:
             raw_warning = bool(self.full_data.get('master_warning', False))
             raw_caution = bool(self.full_data.get('master_caution', False))
-            
+
         warn_ack = getattr(self, 'warn_acknowledged', False)
         caut_ack = getattr(self, 'caution_acknowledged', False)
-        
+
         # 1. Master Warning button (x: w - 240 to w - 130, y: 10 to 40)
         wx1, wy1, wx2, wy2 = w - 240, 10, w - 130, 40
         if raw_warning:
@@ -1112,10 +1110,10 @@ class PrimaryFlightDisplay:
             w_outline = "#550000"
             w_text = "WARNING"
             w_text_color = "#880000"
-            
+
         self.canvas.create_rectangle(wx1, wy1, wx2, wy2, fill=w_fill, outline=w_outline, width=2)
         self.canvas.create_text((wx1+wx2)/2, (wy1+wy2)/2, text=w_text, fill=w_text_color, font=("Monaco", 8, "bold"), justify="center")
-        
+
         # 2. Master Caution button (x: w - 120 to w - 10, y: 10 to 40)
         cx1, cy1, cx2, cy2 = w - 120, 10, w - 10, 40
         if raw_caution:
@@ -1137,14 +1135,14 @@ class PrimaryFlightDisplay:
             c_outline = "#553a00"
             c_text = "CAUTION"
             c_text_color = "#885f00"
-            
+
         self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=c_fill, outline=c_outline, width=2)
         self.canvas.create_text((cx1+cx2)/2, (cy1+cy2)/2, text=c_text, fill=c_text_color, font=("Monaco", 8, "bold"), justify="center")
 
     def draw_search_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="DESTINATION SEARCH & SELECTION", fill="#0077be", font=("Monaco", 20, "bold"))
         self.canvas.create_text(50, 100, anchor="nw", text=f"STATUS: {self.search_status}", fill="white", font=("Monaco", 10))
-        
+
         y = 150.0
         for i, res in enumerate(self.search_results):
             txt = f"{i+1}. {res['display_name'][:120]}"
@@ -1207,28 +1205,28 @@ class PrimaryFlightDisplay:
             # We skip the heavy 3D drawing on the CPU canvas
             # but we still draw the 2D overlays (tapes, status)
             pass
-            
+
         # Corrected Speed Tape (High Precision Knots: 7 decimals)
         corr_speed = self.speed * self.cf_velocity
         self.draw_tape(w*0.1, cy, 100, h*0.6, self.speed, "SPD", "KTS", 10, 2, "cyan", target_val=corr_speed, precision=7)
-        
+
         # Corrected Altitude Tape
         corr_alt = (self.alt + self.cf_altitude) * 3.28084
         self.draw_tape(w*0.9, cy, 80, h*0.6, self.alt * 3.28084, "ALT", "FT", 100, 20, "green", target_val=corr_alt, precision=0)
-        
+
         # Heading Vector with Correction
         corr_hdg = (self.heading + self.cf_heading) % 360
         self.draw_heading_vector(cx, cy + 240, 400, 40, self.heading, target_hdg=corr_hdg)
-        
+
         self.draw_center_symbol(cx, cy)
         self.draw_flight_path_vector(cx, cy, w, h)
         self.draw_bank_scale(cx, cy)
         self.draw_status_vector(w, h)
-        
+
         # VSI Display (self.alt_rate is already FPM and corrected from EARU)
         vsi_fpm = self.alt_rate
         self.canvas.create_text(w - 130, cy - 210, text=f"VSI: {int(vsi_fpm)} FPM", fill="green", font=("Monaco", 10))
-        
+
         self.canvas.create_text(cx - 150, cy + 180, text=f"MACH: {self.mach:.3f}", fill="white", font=("Monaco", 10, "bold"))
 
     def draw_flight_path_vector(self, cx: float, cy: float, w: float, h: float) -> None:
@@ -1236,13 +1234,13 @@ class PrimaryFlightDisplay:
         # speed is knots, alt_rate is fpm (approx)
         h_speed_mps = (self.speed / 1.94384)
         v_speed_mps = (self.alt_rate / 60.0) / 3.28084
-        
+
         if h_speed_mps > 1.0:
             gamma = math.degrees(math.atan2(v_speed_mps, h_speed_mps))
             # Offset on canvas: 5px per degree approx for visual clarity
-            dy = -gamma * 5.0 
+            dy = -gamma * 5.0
             dx = 0 # Assume no sideslip
-            
+
             # The "Bird" symbol
             bx, by = cx + dx, cy + dy
             self.canvas.create_oval(bx-8, by-8, bx+8, by+8, outline="black", width=3)
@@ -1256,7 +1254,7 @@ class PrimaryFlightDisplay:
 
     def draw_status_vector(self, w: float, h: float) -> None:
         self.canvas.create_text(10, 10, anchor="nw", text=f"CPU: {self.cpu:.1f}% | BATT: {self.batt}%{' (CHG)' if self.charging else ''} | PWR: {self.power_rate:.1f}W | HID IDLE: {self.hid_idle:.1f}s", fill="green", font=("Monaco", 10))
-        
+
         als = self.full_data.get('als', {})
         if als:
             lux = als.get('lux_factor', 0.0)
@@ -1274,26 +1272,26 @@ class PrimaryFlightDisplay:
         # Use the actual widget zoom to stay in sync during animations
         current_zoom = self.map_widget.zoom
         tile_position = decimal_to_osm(lat, lon, current_zoom)
-        
+
         ul = self.map_widget.upper_left_tile_pos
         lr = self.map_widget.lower_right_tile_pos
-        
+
         w_tile_w = lr[0] - ul[0]
         w_tile_h = lr[1] - ul[1]
-        
+
         if abs(w_tile_w) < 1e-9 or abs(w_tile_h) < 1e-9: return -100.0, -100.0
-        
+
         canvas_x = ((tile_position[0] - ul[0]) / w_tile_w) * self.map_widget.width
         canvas_y = ((tile_position[1] - ul[1]) / w_tile_h) * self.map_widget.height
-        
+
         # Ensure finite numbers
         if not (math.isfinite(canvas_x) and math.isfinite(canvas_y)):
             return -100.0, -100.0
-            
+
         return float(canvas_x), float(canvas_y)
 
-    def draw_text_with_halo(self, canvas: tk.Canvas, x: float, y: float, text: str, fill: str, font: Any, 
-                            anchor: Literal['center', 'e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w'] = "nw", 
+    def draw_text_with_halo(self, canvas: tk.Canvas, x: float, y: float, text: str, fill: str, font: Any,
+                            anchor: Literal['center', 'e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w'] = "nw",
                             tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
         # Draw shadow/halo in 4 directions for maximum contrast (negative effect)
         for dx, dy in [(-1, -1), (1, -1), (-1, 1), (1, 1), (0, 2)]:
@@ -1304,18 +1302,18 @@ class PrimaryFlightDisplay:
     def draw_waypoint_preview(self, canvas: tk.Canvas, x: float, y: float, tags: str) -> None:
         # Title
         self.draw_text_with_halo(canvas, x, y, "DIRECTION PREVIEW", "white", ("Monaco", 10, "bold"), "nw", tags)
-        
+
         y_off = 25.0
         # Current Pos
         self.draw_text_with_halo(canvas, x + 10, y + y_off, f"STRT: {self.lat:.4f}, {self.lon:.4f}", "#00ff00", ("Monaco", 8), "nw", tags)
         y_off += 15
-        
+
         # Waypoints
         for i, wp in enumerate(self.waypoints):
             col = "white"
             self.draw_text_with_halo(canvas, x + 10, y + y_off, f"{wp['name']}: {wp['lat']:.4f}, {wp['lon']:.4f}", col, ("Monaco", 8), "nw", tags)
             y_off += 15
-            
+
         # Destination
         if self.dest_lat is not None:
             self.draw_text_with_halo(canvas, x + 10, y + y_off, f"DEST: {self.dest_lat:.4f}, {self.dest_lon:.4f}", "magenta", ("Monaco", 8), "nw", tags)
@@ -1356,7 +1354,7 @@ class PrimaryFlightDisplay:
             state = int(event.state)
         except (ValueError, TypeError):
             state = 0
-            
+
         if state & 0x0001: # Shift key
             pos = self.map_widget.get_decimal(event.x, event.y)
             if pos: self.add_waypoint(pos[0], pos[1])
@@ -1385,13 +1383,13 @@ class PrimaryFlightDisplay:
             if self.user_marker:
                 self.user_marker.delete()
                 self.user_marker = None
-            
+
             if self.auto_center:
                 self.map_widget.set_position(self.lat, self.lon)
                 self.pan_lat, self.pan_lon = self.lat, self.lon
-            
+
             self.map_widget.canvas.delete("user_nav", "overlay_info", "map_controls", "loc_btn", "wp_list")
-            
+
             # Direction Preview List
             self.draw_waypoint_preview(self.map_widget.canvas, 20, 100, tags="wp_list")
 
@@ -1408,22 +1406,22 @@ class PrimaryFlightDisplay:
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 105, f"TRIANG_ALT_OFF: {self.cf_altitude:+.1f}m", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 120, f"TRIANG_VSI_GAIN: {self.cf_vertical_rate:.2f}x", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 135, f"VEL X/Y/Z: {self.vel_x:+.2f} / {self.vel_y:+.2f} / {self.vel_z:+.2f} m/s", "#ffcc00", ("Monaco", 9), "sw", "overlay_info")
-            
+
             # Right Overlays: Horizontal Domain
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 80, f"SPD: {self.speed:.1f} KTS / {self.speed*1.852:.1f} KPH", "#00ff00", ("Monaco", 16, "bold"), "se", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 105, f"TRIANG_SPD_GAIN: {self.cf_velocity:.2f}x", "#00ccff", ("Monaco", 9), "se", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, w - 20, h - 120, f"TRIANG_HDG_OFF:  {self.cf_heading:+.1f}\u00b0", "#00ccff", ("Monaco", 9), "se", "overlay_info")
-            
+
             # Destination Info
             if self.dest_lat is not None and self.dest_lon is not None:
                 d_lat = self.dest_lat - self.lat
                 d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
                 dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
-                
+
                 # Nautical Miles conversion
                 dist_nm = dist_m / 1852.0
                 dist_lbl = f"{dist_m:.0f}m" if dist_m < 1000 else (f"{dist_m/1000:.2f}km" if dist_m < 18520 else f"{dist_nm:.2f}NM")
-                
+
                 speed_limit = "50 KPH"
                 if self.env_mode == "AIRWAY": speed_limit = "Vmo/Mmo"
                 elif self.env_mode == "WATERWAY": speed_limit = "5-12 KTS"
@@ -1432,7 +1430,7 @@ class PrimaryFlightDisplay:
                         speed_limit = "300 KPH"
                     else:
                         speed_limit = "110 KPH"
-                
+
                 brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
                 dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0 | {self.env_mode} ({self.transportation_category.upper()}) | LMT: {speed_limit}"
                 self.draw_text_with_halo(self.map_widget.canvas, w/2, 60, dest_info, "magenta", ("Monaco", 12, "bold"), "center", "overlay_info")
@@ -1441,7 +1439,7 @@ class PrimaryFlightDisplay:
             status_col = "yellow" if self.auto_center else "#ff6600"
             orient_text = "HEAD-UP" if self.map_heading_up else "NORTH-UP"
             status_text = f"MODE: {'AUTO-CENTER' if self.auto_center else 'MANUAL PAN'} | {orient_text}"
-            
+
             # Deviation / Off Course Warning
             if self.road_path_coords:
                 start_lat, start_lon = self.road_path_coords[0]
@@ -1451,9 +1449,9 @@ class PrimaryFlightDisplay:
                 if xtk_m > 50.0:
                     status_text += f" | OFF COURSE: {int(xtk_m)}m"
                     status_col = "red"
-            
+
             self.draw_text_with_halo(self.map_widget.canvas, 20, 20, status_text, status_col, ("Monaco", 10, "bold"), "nw", "overlay_info")
-            
+
             # Draw Avionics Icons
             arrow_hdg = self.heading if self.map_heading_up else 0.0
             self.draw_north_arrow(self.map_widget.canvas, w - 60, 60, arrow_hdg, tags="overlay_info")
@@ -1461,15 +1459,15 @@ class PrimaryFlightDisplay:
             self.draw_loc_button(self.map_widget.canvas, 45, h - 45, tags="loc_btn")
             self.draw_search_trigger(self.map_widget.canvas, w - 45, h - 45, tags="search_btn")
             self.draw_profile_trigger(self.map_widget.canvas, w - 45, h - 95, tags="profile_btn")
-            
+
             if self.show_profile:
                 self.draw_vertical_profile(w, h)
-            
+
             if not self.auto_center:
                 self.draw_map_target(self.map_widget.canvas, w/2, h/2, tags="overlay_info")
                 # Move panning controls to middle-right
                 self.draw_panning_controls(self.map_widget.canvas, w - 100, h/2, tags="map_controls")
-            
+
             self.map_widget.canvas.tag_raise("overlay_info")
             self.map_widget.canvas.tag_raise("map_controls")
             self.map_widget.canvas.tag_raise("loc_btn")
@@ -1482,11 +1480,11 @@ class PrimaryFlightDisplay:
         # Profile box at the bottom
         px, py, pw, ph = 20, h - 350, w - 40, 150
         tags = "overlay_info"
-        
+
         # Background with glass effect
         canvas.create_rectangle(px, py, px+pw, py+ph, fill="#050505", outline="#444", width=1, tags=tags, stipple="gray25")
         canvas.create_text(px + 10, py + 10, anchor="nw", text="INSTRUMENT APPROACH - VERTICAL PROFILE", fill="magenta", font=("Monaco", 10, "bold"), tags=tags)
-        
+
         if self.dest_lat is None or self.dest_lon is None:
             canvas.create_text(px + pw/2, py + ph/2, text="NO DESTINATION SET - VERTICAL DATA UNAVAILABLE", fill="#555", font=("Monaco", 10), tags=tags)
             return
@@ -1495,13 +1493,13 @@ class PrimaryFlightDisplay:
         d_lat = self.dest_lat - self.lat
         d_lon = (self.dest_lon - self.lon) * math.cos(math.radians(self.lat))
         dist_nm = (math.sqrt(d_lat**2 + d_lon**2) * 60.0) # approx NM
-        
+
         # Scale: show up to 12NM or 1.2x current distance
         max_d = max(12.0, dist_nm * 1.2)
         # Scale: show up to 4000FT or 1.2x current altitude
         curr_alt_ft = self.alt * 3.28084
         max_alt = max(4000.0, curr_alt_ft * 1.2)
-        
+
         def to_canvas(d, a):
             # d is NM to dest, a is altitude in FT MSL
             # Destination is on the RIGHT (x = px + pw)
@@ -1516,7 +1514,7 @@ class PrimaryFlightDisplay:
             gx, gy = to_canvas(d, 0)
             canvas.create_line(gx, py + 30, gx, py + ph - 25, fill="#222", tags=tags)
             canvas.create_text(gx, py + ph - 15, text=f"{d}NM", fill="#666", font=("Monaco", 8), tags=tags)
-            
+
         for a in range(0, int(max_alt) + 1, 1000):
             gx, gy = to_canvas(0, a)
             canvas.create_line(px + 10, gy, px + pw - 10, gy, fill="#222", tags=tags)
@@ -1529,12 +1527,12 @@ class PrimaryFlightDisplay:
             gs_pts.extend(to_canvas(d, gs_alt))
         canvas.create_line(gs_pts, fill="#555", dash=(4,4), tags=tags)
         canvas.create_text(to_canvas(max_d, max_d*318.0)[0], to_canvas(max_d, max_d*318.0)[1]-10, text="3.0\u00b0 GS", fill="#555", font=("Monaco", 8), tags=tags)
-        
+
         # Draw Runway Depiction
         rx, ry = to_canvas(0, 0)
         canvas.create_rectangle(rx - 30, ry, rx + 10, ry + 8, fill="#333", outline="white", width=1, tags=tags)
         canvas.create_text(rx - 10, ry + 18, text="DEST RWY", fill="white", font=("Monaco", 8, "bold"), tags=tags)
-        
+
         # Draw Planned Path (connecting waypoints)
         prev_pt = to_canvas(dist_nm, curr_alt_ft)
         for wp in self.waypoints:
@@ -1550,7 +1548,7 @@ class PrimaryFlightDisplay:
             canvas.create_oval(w_pt[0]-3, w_pt[1]-3, w_pt[0]+3, w_pt[1]+3, fill="#00ff00", tags=tags)
             canvas.create_text(w_pt[0], w_pt[1]-12, text=wp['name'], fill="#00ff00", font=("Monaco", 7), tags=tags)
             prev_pt = w_pt
-        
+
         # Final leg to runway
         canvas.create_line(prev_pt[0], prev_pt[1], rx, ry, fill="#00ff00", width=2, tags=tags)
 
@@ -1559,7 +1557,7 @@ class PrimaryFlightDisplay:
         # Small airplane symbol (triangle)
         canvas.create_polygon([curr_x, curr_y-6, curr_x-8, curr_y+4, curr_x+8, curr_y+4], fill="#00aaff", outline="white", width=1, tags=tags)
         canvas.create_text(curr_x, curr_y - 18, text=f"YOU: {int(curr_alt_ft)}FT", fill="#00aaff", font=("Monaco", 9, "bold"), tags=tags)
-        
+
         # Glidepath deviation indicator
         gs_target = dist_nm * 318.0
         dev = curr_alt_ft - gs_target
@@ -1570,18 +1568,18 @@ class PrimaryFlightDisplay:
         if tags is None: tags = ""
         rad = math.radians(hdg)
         pts = [(0.0, 1.2), (-0.7, -1.0), (0.7, -1.0), (0.0, -0.4)]
-        
+
         def transform(px: float, py: float) -> tuple[float, float]:
             tx = x + (px * math.cos(rad) + py * math.sin(rad)) * size
             ty = y - (-px * math.sin(rad) + py * math.cos(rad)) * size
             return tx, ty
 
         p1, p2, p3, p4 = [transform(p[0], p[1]) for p in pts]
-        
+
         # Enhanced Shadow
         off = size * 0.18
         canvas.create_polygon([p1[0]+off, p1[1]+off, p2[0]+off, p2[1]+off, p3[0]+off, p3[1]+off], fill="#080808", stipple="gray50", tags=tags)
-        
+
         # Modern 3D Look
         canvas.create_polygon([p1[0], p1[1], p2[0], p2[1], p4[0], p4[1]], fill="#00aaff", outline="white", width=1, tags=tags)
         canvas.create_polygon([p1[0], p1[1], p3[0], p3[1], p4[0], p4[1]], fill="#004488", outline="white", width=1, tags=tags)
@@ -1591,7 +1589,7 @@ class PrimaryFlightDisplay:
         # Garmin Style North Arrow
         size = 25.0
         rad = math.radians(-hdg) # North points up when heading is 0
-        
+
         def transform(px: float, py: float) -> tuple[float, float]:
             tx = x + (px * math.cos(rad) - py * math.sin(rad)) * size
             ty = y + (px * math.sin(rad) + py * math.cos(rad)) * size
@@ -1604,12 +1602,12 @@ class PrimaryFlightDisplay:
         p_mid = transform(0, -0.2)
         canvas.create_polygon([p_tip[0], p_tip[1], p_l[0], p_l[1], p_mid[0], p_mid[1]], fill="#ff0000", outline="white", tags=tags)
         canvas.create_polygon([p_tip[0], p_tip[1], p_r[0], p_r[1], p_mid[0], p_mid[1]], fill="#aa0000", outline="white", tags=tags)
-        
+
         # White tail
         p_tail = transform(0, 1.0)
         canvas.create_polygon([p_mid[0], p_mid[1], p_l[0], p_l[1], p_tail[0], p_tail[1]], fill="#eeeeee", outline="white", tags=tags)
         canvas.create_polygon([p_mid[0], p_mid[1], p_r[0], p_r[1], p_tail[0], p_tail[1]], fill="#bbbbbb", outline="white", tags=tags)
-        
+
         canvas.create_text(x, y + 2, text="N", fill="white", font=("Monaco", 10, "bold"), tags=tags)
 
     def draw_map_target(self, canvas: tk.Canvas, x: float, y: float, tags: Union[str, list[str], tuple[str, ...]] = "") -> None:
@@ -1631,17 +1629,17 @@ class PrimaryFlightDisplay:
         width_px = 100.0
         total_m = width_px * meters_per_px
         label = f"{int(total_m)}m" if total_m < 1000 else f"{total_m/1000:.1f}km"
-        
+
         # Halo (Black shadow)
         canvas.create_line(x-1, y+1, x + width_px+1, y+1, fill="black", width=4, tags=tags)
         canvas.create_line(x-1, y - 6, x-1, y + 6, fill="black", width=4, tags=tags)
         canvas.create_line(x + width_px+1, y - 6, x + width_px+1, y + 6, fill="black", width=4, tags=tags)
-        
+
         # Main Line (White)
         canvas.create_line(x, y, x + width_px, y, fill="white", width=2, tags=tags)
         canvas.create_line(x, y - 5, x, y + 5, fill="white", width=2, tags=tags)
         canvas.create_line(x + width_px, y - 5, x + width_px, y + 5, fill="white", width=2, tags=tags)
-        
+
         # Haloed Label
         self.draw_text_with_halo(canvas, x + width_px/2, y - 12, label, "white", ("Monaco", 8), "n", tags)
 
@@ -1650,7 +1648,7 @@ class PrimaryFlightDisplay:
         self.draw_text_with_halo(canvas, x, y, "WASD: PAN", "#aaaaaa", ("Monaco", 8), "nw", tags)
         self.draw_text_with_halo(canvas, x, y+15, "+/-: ZOOM", "#aaaaaa", ("Monaco", 8), "nw", tags)
         self.draw_text_with_halo(canvas, x, y+30, "R: RESET", "#aaaaaa", ("Monaco", 8), "nw", tags)
-        
+
         # Dots with black outlines for contrast
         for i, col in enumerate(["white", "#555555", "#555555"]):
             dx = x - 30 + i*15
@@ -1660,7 +1658,7 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(w/2, 40, text="SYSTEM CORE & ENVIRONMENT", fill="cyan", font=("Monaco", 20, "bold"))
         smc = self.full_data.get('smc', {})
         temps = smc.get('temps', {})
-        
+
         def sf(val: Any) -> float:
             try: return float(val)
             except: return 0.0
@@ -1669,48 +1667,48 @@ class PrimaryFlightDisplay:
             col, row = 50 + (i // 15) * 150, 100 + (i % 15) * 20
             v_f = sf(val)
             self.canvas.create_text(col, row, anchor="nw", text=f"{name}: {v_f:>5.1f}", fill="orange" if v_f > 60 else "green", font=("Monaco", 9))
-        
+
         # --- Vertical Thermal Bar Chart ---
         tx = 215
         ty1 = 100
         ty2 = 280
         th = ty2 - ty1
-        
+
         self.canvas.create_text(tx + 120, ty1 - 20, text="CORE THERMALS (\u00b0C)", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
-        
+
         # Draw background grid lines at 25C, 50C, 75C, 100C
         for temp_line in [25, 50, 75, 100]:
             gly = ty2 - (temp_line / 100.0) * th
             self.canvas.create_line(tx, gly, tx + 240, gly, fill="#222", dash=(2, 2))
             self.canvas.create_text(tx - 5, gly, text=f"{temp_line}", fill="#666", font=("Monaco", 7), anchor="e")
-            
+
         # Draw base line
         self.canvas.create_line(tx, ty2, tx + 240, ty2, fill="#444")
-        
+
         # Iterate over all temperature keys and draw vertical bars
         for idx, (name, val) in enumerate(temps.items()):
             v_f = sf(val)
             pct = min(1.0, max(0.0, v_f / 100.0))
-            
+
             bar_x1 = tx + 10 + idx * 21
             bar_x2 = bar_x1 + 11
             bar_y1 = ty2 - pct * th
-            
+
             # Draw bar background
             self.canvas.create_rectangle(bar_x1, ty1, bar_x2, ty2, fill="#111", outline="#333")
-            
+
             # Draw active fill
             if pct > 0:
                 bar_color = "red" if v_f > 70 else ("orange" if v_f > 50 else "green")
                 self.canvas.create_rectangle(bar_x1, bar_y1, bar_x2, ty2, fill=bar_color, outline="")
-                
+
             # Print value above the bar if space permits
             if v_f > 0:
                 self.canvas.create_text((bar_x1 + bar_x2)/2, bar_y1 - 5, text=f"{int(v_f)}", fill="white", font=("Monaco", 7), anchor="s")
-                
+
             # Print sensor label below the bar
             self.canvas.create_text((bar_x1 + bar_x2)/2, ty2 + 5, text=name, fill="orange" if v_f > 60 else "green", font=("Monaco", 7, "bold"), anchor="n")
-        
+
         weather = self.full_data.get('ecosystem_weather', {})
         x_env, y_env = 500, 100
         env_metrics = [
@@ -1756,19 +1754,19 @@ class PrimaryFlightDisplay:
         by2 = 350
         bh = by2 - by1
         pct = min(1.0, max(0.0, self.batt / 100.0))
-        
+
         # Label above gauge
         self.canvas.create_text(bx, by1 - 20, text="BATT FUEL", fill="yellow", font=("Monaco", 9, "bold"), anchor="s")
-        
+
         # Fuel tank container outer box
         self.canvas.create_rectangle(bx - 12, by1, bx + 12, by2, fill="#111", outline="#555", width=2)
-        
+
         # Fuel level fill
         if pct > 0:
             fuel_y1 = by2 - pct * bh
             fuel_color = "red" if pct < 0.2 else ("yellow" if pct < 0.5 else "green")
             self.canvas.create_rectangle(bx - 10, fuel_y1, bx + 10, by2, fill=fuel_color, outline="")
-            
+
         # Draw physical tick marks and side labels (E, 1/2, F)
         ticks = [0.0, 0.25, 0.50, 0.75, 1.0]
         for t in ticks:
@@ -1776,7 +1774,7 @@ class PrimaryFlightDisplay:
             # Tick lines
             self.canvas.create_line(bx - 18, ty, bx - 12, ty, fill="#777", width=1)
             self.canvas.create_line(bx + 12, ty, bx + 18, ty, fill="#777", width=1)
-            
+
             # Text indicators next to ticks
             if t == 1.0:
                 self.canvas.create_text(bx - 22, ty, text="F", fill="green", font=("Monaco", 9, "bold"), anchor="e")
@@ -1784,64 +1782,64 @@ class PrimaryFlightDisplay:
                 self.canvas.create_text(bx - 22, ty, text="1/2", fill="yellow", font=("Monaco", 8), anchor="e")
             elif t == 0.0:
                 self.canvas.create_text(bx - 22, ty, text="E", fill="red", font=("Monaco", 9, "bold"), anchor="e")
-                
+
         # Digital percentage reading below
         self.canvas.create_text(bx, by2 + 15, text=f"{self.batt}%", fill="white", font=("Monaco", 10, "bold"), anchor="n")
 
         # --- Dual Fan Propeller Engine Arc Tachometers ---
         fy = y_env + 310
         self.canvas.create_text(x_env + 120, fy, text="FAN PROPELLER RPM", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
-        
+
         fans = self.fan_rpms if self.fan_rpms else [0.0, 0.0]
         targets = getattr(self, 'fan_targets', [0.0, 0.0]) if getattr(self, 'fan_targets', None) else [0.0, 0.0]
         cy = y_env + 380
         cx_coords = [x_env + 60, x_env + 180]
         r = 35
         needle_r = 30
-        
+
         for idx, rpm_val in enumerate(fans[:2]):
             cx = cx_coords[idx]
             rpm = sf(rpm_val)
             rpm_clamped = min(8000.0, max(0.0, rpm))
             pct = rpm_clamped / 8000.0
-            
+
             # Draw baseline gauge arc
             self.canvas.create_arc(cx - r, cy - r, cx + r, cy + r, start=225, extent=-270, style="arc", width=4, outline="#222")
-            
+
             # Active arc sweep with speed color indicators
             if pct > 0:
                 bar_col = "cyan" if pct < 0.5 else ("yellow" if pct < 0.8 else "red")
                 self.canvas.create_arc(cx - r, cy - r, cx + r, cy + r, start=225, extent=-270 * pct, style="arc", width=4, outline=bar_col)
-                
+
             # Draw target RPM marker as a bright yellow tick line on the arc
             target_rpm = sf(targets[idx]) if idx < len(targets) else 0.0
             target_clamped = min(8000.0, max(0.0, target_rpm))
             target_pct = target_clamped / 8000.0
             target_angle = 225 - 270 * target_pct
             t_rad = math.radians(target_angle)
-            
+
             # Draw target tick line crossing the arc
             tx1 = cx + (r - 6) * math.cos(t_rad)
             ty1 = cy - (r - 6) * math.sin(t_rad)
             tx2 = cx + (r + 6) * math.cos(t_rad)
             ty2 = cy - (r + 6) * math.sin(t_rad)
             self.canvas.create_line(tx1, ty1, tx2, ty2, fill="yellow", width=3)
-            
+
             # Small text label for target next to the tick
             tx_lbl = cx + (r + 14) * math.cos(t_rad)
             ty_lbl = cy - (r + 14) * math.sin(t_rad)
             self.canvas.create_text(tx_lbl, ty_lbl, text="T", fill="yellow", font=("Monaco", 8, "bold"))
-            
+
             # Needle needle
             angle_deg = 225 - 270 * pct
             rad = math.radians(angle_deg)
             nx = cx + needle_r * math.cos(rad)
             ny = cy - needle_r * math.sin(rad)
             self.canvas.create_line(cx, cy, nx, ny, fill="red", width=2)
-            
+
             # Center cap
             self.canvas.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="white", outline="")
-            
+
             # Digital telemetry (showing actual/target RPM)
             target_str = f"{int(target_rpm)} RPM" if target_rpm <= 15000 else "I'm Not Enough RPM"
             self.canvas.create_text(cx, cy + 45, text=f"FAN {idx} / F{idx}Ac\n{int(rpm)} / {target_str}", fill="white", font=("Monaco", 9, "bold"), justify="center", anchor="n")
@@ -1854,11 +1852,11 @@ class PrimaryFlightDisplay:
         # Centered horizontally at x = 240, vertically at y = 550
         lx = 240
         ly = 550
-        
+
         # Title for the illustration
         disp_angle = self.lid_angle if self.lid_angle > 0.0 else 110.0
         self.canvas.create_text(lx, ly - 80, text=f"CHASSIS THERMAL AIRFLOW ({disp_angle:.1f}\u00b0)", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
-        
+
         # Draw laptop side profile outline
         # Keyboard base deck
         self.canvas.create_polygon(
@@ -1868,7 +1866,7 @@ class PrimaryFlightDisplay:
             lx - 90,  ly + 55,  # back base bottom
             fill="#111", outline="#00ccff", width=2
         )
-        
+
         # Dynamic screen lid rotation based on parsed self.lid_angle
         # If the incoming telemetry has 0.0 but we want to simulate or show open, we default to 110.0
         disp_angle = self.lid_angle if self.lid_angle > 0.0 else 110.0
@@ -1877,21 +1875,21 @@ class PrimaryFlightDisplay:
         screen_length = 100
         screen_top_x = (lx - 100) + screen_length * math.cos(rad_lid)
         screen_top_y = (ly + 40) - screen_length * math.sin(rad_lid)
-        
+
         # Screen lid line
         self.canvas.create_line(lx - 100, ly + 40, screen_top_x, screen_top_y, fill="#00ccff", width=3)
         self.canvas.create_oval(screen_top_x - 2, screen_top_y - 2, screen_top_x + 2, screen_top_y + 2, fill="cyan", outline="") # Webcam marker
-        
+
         # Keyboard key lines inside the base (isometric key deck)
         self.canvas.create_line(lx - 80, ly + 44, lx + 80, ly + 44, fill="#333", width=1)
         self.canvas.create_line(lx - 75, ly + 48, lx + 75, ly + 48, fill="#333", width=1)
-        
+
         # Vents
         # Front Inlet Vents (underneath the front-lip)
         self.canvas.create_line(lx + 80, ly + 48, lx + 80, ly + 53, fill="cyan", width=2)
         # Rear Outlet Vents (near the hinge)
         self.canvas.create_line(lx - 85, ly + 45, lx - 85, ly + 52, fill="red", width=2)
-        
+
         # --- Draw Airflow Paths with Dynamic Vector Animations ---
         # If lid angle is closed (< 15 degrees), block airflow illustration
         if lid_angle_clamped < 15.0:
@@ -1899,28 +1897,28 @@ class PrimaryFlightDisplay:
         else:
             inlet_x = lx + 120
             inlet_y = ly + 48
-            
+
             # 1. Inlet Airflow (straight to front deck)
             self.canvas.create_line(inlet_x, inlet_y, lx + 60, ly + 48, fill="#22ddff", dash=(3, 3), arrow="last", arrowshape=(8, 10, 3))
             t_inlet = self.airflow_offset / 10.0
             dot_in_x = inlet_x - t_inlet * 60
             dot_in_y = inlet_y
             self.canvas.create_oval(dot_in_x - 3, dot_in_y - 3, dot_in_x + 3, dot_in_y + 3, fill="cyan", outline="")
-            
+
             # 2. Split Outlet Airflow (Outflow Back Hinge)
             # Starts at lx - 85, ly + 45
             hinge_x = lx - 85
             hinge_y = ly + 45
-            
+
             # Determine path drawing:
             # - when 10 degrees and below: just straight back
             # - 89 beyond: parallel with screen lid (hinge angle)
             # - split in between
             draw_straight = (disp_angle < 89.0)
             draw_parallel = (disp_angle > 10.0)
-            
+
             t_out = self.airflow_offset / 10.0
-            
+
             # Screen direction vector for parallel angle
             screen_dx = screen_top_x - (lx - 100)
             screen_dy = screen_top_y - (ly + 40)
@@ -1930,24 +1928,24 @@ class PrimaryFlightDisplay:
                 uy = screen_dy / screen_len
             else:
                 ux, uy = -0.7, -0.7
-                
+
             if draw_straight:
                 # Path 1: Straight back (horizontal to the left, 0 degrees)
                 end_x1 = hinge_x - 60
                 end_y1 = hinge_y
                 self.canvas.create_line(hinge_x, hinge_y, end_x1, end_y1, fill="#ff4422", dash=(3, 3), arrow="last", arrowshape=(8, 10, 3))
-                
+
                 # Flowing dot along Path 1
                 dot_x1 = hinge_x - t_out * 60
                 dot_y1 = hinge_y
                 self.canvas.create_oval(dot_x1 - 3, dot_y1 - 3, dot_x1 + 3, dot_y1 + 3, fill="red", outline="")
-                
+
             if draw_parallel:
                 # Path 2: Parallel with screen lid angle
                 end_x2 = hinge_x + 60 * ux
                 end_y2 = hinge_y + 60 * uy
                 self.canvas.create_line(hinge_x, hinge_y, end_x2, end_y2, fill="#ff7722", dash=(3, 3), arrow="last", arrowshape=(8, 10, 3))
-                
+
                 # Flowing dot along Path 2
                 dot_x2 = hinge_x + t_out * 60 * ux
                 dot_y2 = hinge_y + t_out * 60 * uy
@@ -1959,7 +1957,7 @@ class PrimaryFlightDisplay:
         iy2 = ly + 20
         ih = iy2 - iy1
         pct_in = min(1.0, max(0.0, self.airflow_inlet_c / 100.0))
-        
+
         self.canvas.create_text(ix, iy1 - 15, text="INLET", fill="cyan", font=("Monaco", 9, "bold"), anchor="s")
         self.canvas.create_rectangle(ix - 8, iy1, ix + 8, iy2, fill="#111", outline="#00ccff")
         if pct_in > 0:
@@ -1967,14 +1965,14 @@ class PrimaryFlightDisplay:
             in_color = "red" if self.airflow_inlet_c > 60 else ("orange" if self.airflow_inlet_c > 45 else "cyan")
             self.canvas.create_rectangle(ix - 6, in_bar_y, ix + 6, iy2, fill=in_color, outline="")
         self.canvas.create_text(ix, iy2 + 10, text=f"{self.airflow_inlet_c:.1f}\u00b0C", fill="cyan", font=("Monaco", 8, "bold"), anchor="n")
-        
+
         # --- Outlet Temperature Vertical Bar (Back/Left) ---
         ox = lx - 150
         oy1 = ly - 70
         oy2 = ly + 20
         oh = oy2 - oy1
         pct_out = min(1.0, max(0.0, self.airflow_outlet_c / 100.0))
-        
+
         self.canvas.create_text(ox, oy1 - 15, text="OUTLET", fill="red", font=("Monaco", 9, "bold"), anchor="s")
         self.canvas.create_rectangle(ox - 8, oy1, ox + 8, oy2, fill="#111", outline="#ff4422")
         if pct_out > 0:
@@ -1982,7 +1980,7 @@ class PrimaryFlightDisplay:
             out_color = "red" if self.airflow_outlet_c > 60 else ("orange" if self.airflow_outlet_c > 45 else "green")
             self.canvas.create_rectangle(ox - 6, out_bar_y, ox + 6, oy2, fill=out_color, outline="")
         self.canvas.create_text(ox, oy2 + 10, text=f"{self.airflow_outlet_c:.1f}\u00b0C", fill="red", font=("Monaco", 8, "bold"), anchor="n")
-        
+
         # Display dynamic hinge airflow significance (velocity, mass flow, heatflux)
         self.canvas.create_text(ox, oy2 + 25, text=f"{self.hinge_airflow:.1f} m/s", fill="#ffaa44", font=("Monaco", 8, "bold"), anchor="n")
         self.canvas.create_text(ox, oy2 + 37, text=f"{self.outflow_mass_flow * 1000.0:.2f} g/s", fill="#ff8844", font=("Monaco", 8, "bold"), anchor="n")
@@ -2003,12 +2001,12 @@ class PrimaryFlightDisplay:
         if d_max == d_min: d_max += 1
         pts = [(x + (i / max(1, n-1)) * w, y + h - ((v - d_min) / (d_max - d_min)) * h) for i, v in enumerate(clean)]
         if len(pts) >= 2: self.canvas.create_line(pts, fill=color, width=1 if n > 500 else 2)
-        
+
         if mark_idx is not None and 0 <= mark_idx < n:
             mx = x + (mark_idx / max(1, n-1)) * w
             self.canvas.create_line(mx, y, mx, y+h, fill="yellow", dash=(4,4))
             self.canvas.create_text(mx, y+h+5, anchor="n", text="NOW", fill="yellow", font=("Monaco", 7))
-        
+
         if times and len(times) == n:
             num = 8; idxs = sorted(list(set([int(i * (n-1) / (num-1)) for i in range(num)] + ([mark_idx] if mark_idx is not None else []))))
             for idx in idxs:
@@ -2060,7 +2058,7 @@ class PrimaryFlightDisplay:
             # Cassiopeia
             [(59.1, 10.0), (60.7, 20.0), (58.8, 30.0), (60.1, 40.0), (54.0, 50.0)]
         ]
-        
+
         for stars in consts:
             pts = []
             for lat, lon in stars:
@@ -2114,7 +2112,7 @@ class PrimaryFlightDisplay:
                 if y-h/2 < vy < y+h/2:
                     self.canvas.create_line(x+w/2-10, vy, x+w/2, vy, fill="white")
                     if v % major == 0: self.canvas.create_text(x-20, vy, text=str(v), fill="white", font=("Monaco", 8))
-        
+
         # Shadow Needle for Correction
         if target_val is not None:
             t_vy = y + (val - target_val) * px
@@ -2137,7 +2135,7 @@ class PrimaryFlightDisplay:
                 if x-w/2 < hx < x+w/2:
                     self.canvas.create_line(hx, y-h/2, hx, y-h/2+10, fill="white")
                     if a % 10 == 0: self.canvas.create_text(hx, y+20, text=str(a%360//10), fill="white", font=("Monaco", 8))
-        
+
         # Correction Needle
         if target_hdg is not None:
             tx = x + ((target_hdg - hdg + 180) % 360 - 180) * px
@@ -2164,7 +2162,7 @@ class PrimaryFlightDisplay:
         # Convert thresholds: 10000ft = 3048m
         alt_m = self.alt
         speed_kts = self.speed
-        
+
         cat_lower = self.transportation_category.lower()
         if "flight" in cat_lower or "stella" in cat_lower:
             self.env_mode = "AIRWAY"
@@ -2181,7 +2179,7 @@ class PrimaryFlightDisplay:
                 self.env_mode = "HIGHWAY"
             else:
                 self.env_mode = "STANDARD ROAD"
-            
+
         if self.env_mode != self.last_env_mode:
             self.update_map_theme()
             self.last_env_mode = self.env_mode
@@ -2190,12 +2188,11 @@ class PrimaryFlightDisplay:
         if not self.map_widget: return
         # Standard OSM
         osm_url = "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        # OpenSeaMap (often used as overlay, but here as base for simplicity if possible, 
+        # OpenSeaMap (often used as overlay, but here as base for simplicity if possible,
         # or we use a dark theme for maritime/aero)
-        maritime_url = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"
         # Aerospace: We'll use a high-contrast dark theme if specialized servers are restricted
         aero_url = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
-        
+
         try:
             if self.env_mode == "AIRWAY":
                 self.map_widget.set_tile_server(aero_url)
@@ -2217,7 +2214,7 @@ class PrimaryFlightDisplay:
         self.heading = self.lerp_angle(self.heading, self.targets['heading'], self.lerp_factor)
         self.lat += (self.targets['lat'] - self.lat) * self.lerp_factor
         self.lon += (self.targets['lon'] - self.lon) * self.lerp_factor
-        
+
         # Correction Factors LERP
         self.cf_velocity += (self.targets['cf_velocity'] - self.cf_velocity) * self.lerp_factor
         self.cf_heading += (self.targets['cf_heading'] - self.cf_heading) * self.lerp_factor
@@ -2263,16 +2260,16 @@ class PrimaryFlightDisplay:
             self.last_dwell_check = 0.0
             self.sig_loc_message = ""
             self.sig_loc_message_time = 0.0
-            
+
         now = time.time()
         # Add entry every 5 seconds
         if now - self.last_dwell_check >= 5.0:
             self.last_dwell_check = now
             self.dwell_history.append((now, self.lat, self.lon, self.speed, len(self.wifi_devices), len(self.bt_devices)))
-            
+
             # Filter to keep last 5 minutes (300 seconds)
             self.dwell_history = [item for item in self.dwell_history if now - item[0] <= 300]
-            
+
             # Verify if we have at least 5 minutes of continuous data
             if len(self.dwell_history) >= 55: # close to 5 minutes of 5-sec entries
                 t_start = self.dwell_history[0][0]
@@ -2282,19 +2279,19 @@ class PrimaryFlightDisplay:
                     has_le = any(item[5] > 0 for item in self.dwell_history)
                     has_wifi = any(item[4] >= 3 for item in self.dwell_history)
                     low_speed = all(item[3] <= 30.0 for item in self.dwell_history)
-                    
+
                     # Calculate distance span in meters to verify staying within 5m radius
                     lats = [item[1] for item in self.dwell_history]
                     lons = [item[2] for item in self.dwell_history]
-                    
+
                     lat_min, lat_max = min(lats), max(lats)
                     lon_min, lon_max = min(lons), max(lons)
-                    
+
                     lat_avg = (lat_min + lat_max) / 2.0
                     dx = (lon_max - lon_min) * 111320.0 * math.cos(lat_avg * math.pi / 180.0)
                     dy = (lat_max - lat_min) * 111320.0
                     dist_span = math.sqrt(dx*dx + dy*dy)
-                    
+
                     if has_le and has_wifi and low_speed and dist_span <= 5.0:
                         sig_path = "/usr/local/EnvironmentalAwareReferentialUnit/save_state/significant_locations.json"
                         locs = []
@@ -2304,7 +2301,7 @@ class PrimaryFlightDisplay:
                                     locs = json.load(f)
                             except Exception:
                                 pass
-                        
+
                         # Check duplicate (within 10m of existing)
                         is_dup = False
                         for loc in locs:
@@ -2317,7 +2314,7 @@ class PrimaryFlightDisplay:
                             if pdist <= 10.0:
                                 is_dup = True
                                 break
-                                
+
                         if not is_dup:
                             new_loc = {
                                 "timestamp": datetime.datetime.now().isoformat(),
@@ -2340,17 +2337,17 @@ class PrimaryFlightDisplay:
 
     def draw_seismic_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="SEISMIC & DAMAGE PROGNOSIS (PROGNOS)", fill="yellow", font=("Monaco", 20, "bold"))
-        
+
         seis = self.full_data.get('seismic_activity', {})
         fatigue = seis.get('damage_fatigue', {})
         di = fatigue.get('data_integrity_check', {})
         drift = self.full_data.get('high_res_drift', {})
-        
+
         # Safe floats parsing
         def sf(val: Any) -> float:
             try: return float(val)
             except: return 0.0
-            
+
         def si(val: Any) -> int:
             try: return int(float(val))
             except: return 0
@@ -2360,18 +2357,18 @@ class PrimaryFlightDisplay:
         peak_g = sf(seis.get('peak_g', 0.0))
         cert = sf(seis.get('certainty', 0.0))
         spec_bal = sf(seis.get('spectral_balance', 0.0))
-        
+
         solder = sf(fatigue.get('solder_fatigue_prob', 0.0))
         mech = sf(fatigue.get('electromech_fatigue_prob', 0.0))
         agg_risk = sf(fatigue.get('aggregated_risk', 0.0))
         cum_fatigue = sf(fatigue.get('cumulative_fatigue', 0.0))
-        
+
         alt_stress = sf(fatigue.get('alt_stress_multiplier', 1.0))
         seu_risk = sf(fatigue.get('seu_risk_multiplier', 1.0))
         upsets = si(fatigue.get('anomaly_event_upset', 0))
         di_active = di.get('active', False)
         di_trigger = sf(di.get('triggered_at', 0.0))
-        
+
         interfere = str(drift.get('interference', 'No'))
         t_cpu = drift.get('t_cpu_ns', 0)
         t_rtc = drift.get('t_rtc_ns', 0)
@@ -2388,16 +2385,16 @@ class PrimaryFlightDisplay:
         self.canvas.create_rectangle(40, 80, 330, 440, fill="#080808", outline="#333", width=2)
         self.canvas.create_text(185, 95, text="MOTION & SEISMIC SENSING", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
         self.canvas.create_line(50, 110, 320, 110, fill="#333")
-        
+
         self.canvas.create_text(55, 130, anchor="nw", text="MOTION STATE:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(55, 150, anchor="nw", text=motion, fill="white", font=("Monaco", 11, "bold"))
-        
+
         self.canvas.create_text(55, 190, anchor="nw", text="PEAK ACCELERATION:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(55, 210, anchor="nw", text=f"{peak_g:.4f} G", fill="white", font=("Monaco", 12, "bold"))
-        
+
         self.canvas.create_text(55, 250, anchor="nw", text="SPECTRAL BALANCE:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(55, 270, anchor="nw", text=f"{spec_bal:.6f}", fill="white", font=("Monaco", 11, "bold"))
-        
+
         self.canvas.create_text(55, 310, anchor="nw", text="DETECTION CERTAINTY:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(55, 330, anchor="nw", text=f"{cert * 100:.1f}%", fill="cyan", font=("Monaco", 11, "bold"))
 
@@ -2405,7 +2402,7 @@ class PrimaryFlightDisplay:
         self.canvas.create_rectangle(350, 80, 650, 440, fill="#080808", outline="#333", width=2)
         self.canvas.create_text(500, 95, text="FATIGUE & SYSTEM FAILURE PROGNOS", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
         self.canvas.create_line(360, 110, 640, 110, fill="#333")
-        
+
         # Risk Progress Bars
         y_bar = 130.0
         for name, val, col_mode in [
@@ -2421,7 +2418,7 @@ class PrimaryFlightDisplay:
                 bar_col = "red" if val > 0.5 else ("orange" if val > 0.25 else "green")
                 self.canvas.create_rectangle(360, y_bar + 20, 360 + val * 280, y_bar + 32, fill=bar_col, outline="")
             y_bar += 50
-            
+
         self.canvas.create_text(360, 290, anchor="nw", text="CUMULATIVE FATIGUE INDEX:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(360, 310, anchor="nw", text=f"{cum_fatigue:.4e}", fill="magenta", font=("Monaco", 12, "bold"))
 
@@ -2429,16 +2426,16 @@ class PrimaryFlightDisplay:
         self.canvas.create_rectangle(670, 80, 960, 440, fill="#080808", outline="#333", width=2)
         self.canvas.create_text(815, 95, text="STRESS FACTORS & INTEGRITY", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
         self.canvas.create_line(680, 110, 950, 110, fill="#333")
-        
+
         self.canvas.create_text(685, 130, anchor="nw", text="ALTITUDE STRESS MULTIPLIER:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(685, 150, anchor="nw", text=f"{alt_stress:.3f}x", fill="orange", font=("Monaco", 11, "bold"))
-        
+
         self.canvas.create_text(685, 190, anchor="nw", text="SEU RISK MULTIPLIER:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(685, 210, anchor="nw", text=f"{seu_risk:.3f}x", fill="orange", font=("Monaco", 11, "bold"))
-        
+
         self.canvas.create_text(685, 250, anchor="nw", text="ANOMALY EVENT UPSETS:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(685, 270, anchor="nw", text=f"{upsets}", fill="red" if upsets > 0 else "white", font=("Monaco", 11, "bold"))
-        
+
         self.canvas.create_text(685, 310, anchor="nw", text="DATA INTEGRITY CHECK STATUS:", fill="gray", font=("Monaco", 10))
         di_status = "ACTIVE SCANNING" if di_active else "SCANNER INACTIVE"
         di_color = "green" if di_active else "gray"
@@ -2450,14 +2447,14 @@ class PrimaryFlightDisplay:
         self.canvas.create_rectangle(40, 460, 650, 730, fill="#080808", outline="#333", width=2)
         self.canvas.create_text(345, 475, text="HIGH-RESOLUTION HARDWARE CLOCKS & DRIFT MONITOR", fill="yellow", font=("Monaco", 10, "bold"), anchor="center")
         self.canvas.create_line(50, 490, 640, 490, fill="#333")
-        
+
         # Column 1 inside Box A (Drifts & Latencies)
         self.canvas.create_text(55, 510, anchor="nw", text=f"CLOCK LATENCIES:\nSPU LAT: {spu_lat:.2f} ms\nGPU LAT: {gpu_lat:.2f} ms\nRTC JIT: {rtc_jit:.6f} ms", fill="#aaffdd", font=("Monaco", 9))
-        
+
         # Column 2 inside Box A (Hardware Nanoseconds Clocks)
         self.canvas.create_text(220, 510, anchor="nw", text=f"CPU TIME: {t_cpu} ns\nRTC TIME: {t_rtc} ns\nGPU TIME: {t_gpu} ns", fill="#aaffff", font=("Monaco", 8))
         self.canvas.create_text(395, 510, anchor="nw", text=f"ANE TIME: {t_ane} ns\nDAT TIME: {t_dat} ns\nSPU TIME: {t_spu} ns", fill="#aaffff", font=("Monaco", 8))
-        
+
         # Column 3 inside Box A (Interference Flag)
         int_color = "red" if interfere.lower() == 'yes' else "green"
         self.canvas.create_text(575, 510, anchor="n", text="INTERFERENCE", fill="gray", font=("Monaco", 9, "bold"))
@@ -2485,7 +2482,7 @@ class PrimaryFlightDisplay:
         for idx, sname in enumerate(srv_list):
             sval = str(services.get(sname, 'Unavailable'))
             dot_color = "green" if sval == 'Available' else ("orange" if sval == 'Disrupted' else "red")
-            
+
             # Divide into Column 1 (0-6) and Column 2 (7-12)
             if idx < 7:
                 col_x = 685
@@ -2500,7 +2497,7 @@ class PrimaryFlightDisplay:
 
     def draw_advanced_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ADVANCED DETECTION & LOOP", fill="#ff00ff", font=("Monaco", 20, "bold"))
-        
+
         # Draw premium sub-page selection tabs
         t1_col = "cyan" if self.adv_subpage == 0 else "gray"
         t2_col = "#ff00ff" if self.adv_subpage == 1 else "gray"
@@ -2519,7 +2516,7 @@ class PrimaryFlightDisplay:
             user = self.full_data.get('user_entity_detection', {})
             total_count = user.get('count', 0)
             self.canvas.create_text(50, 100, anchor="nw", text=f"USER ENTITY COUNT: {total_count}", fill="cyan", font=("Monaco", 12, "bold"))
-            
+
             detected = user.get('detected', [])
             dy = 130.0
             if not detected:
@@ -2529,7 +2526,7 @@ class PrimaryFlightDisplay:
                 # Focus on exactly one primary entity heartbeat
                 bpm, conf = detected[0]
                 self.canvas.create_text(70, dy, anchor="nw", text=f"PRIMARY: {bpm:5.1f} BPM (CONF: {conf*100:3.0f}%)", fill="#00ff00", font=("Monaco", 10, "bold"))
-                
+
                 # Pulsing heart icon based on time and BPM for primary entity
                 pulse = 1.0 + 0.2 * math.sin(time.time() * (bpm / 60.0) * 2 * math.pi)
                 hx, hy = 320, dy + 7
@@ -2538,7 +2535,7 @@ class PrimaryFlightDisplay:
                 self.canvas.create_oval(hx+0*pulse, hy-5*pulse, hx+10*pulse, hy+5*pulse, fill="red", outline="")
                 self.canvas.create_polygon([hx-5*pulse, hy+2*pulse, hx+10*pulse, hy+2*pulse, hx+2.5*pulse, hy+12*pulse], fill="red", outline="")
                 dy += 30
-                
+
                 # State the number of other detected entities
                 other_count = max(0, total_count - 1)
                 self.canvas.create_text(70, dy, anchor="nw", text=f"OTHER ENTITIES: {other_count}", fill="white", font=("Monaco", 10))
@@ -2550,16 +2547,16 @@ class PrimaryFlightDisplay:
             my += 30
             for m, val in mood.items():
                 self.canvas.create_text(70, my, anchor="nw", text=f"{m:18}: {float(val)*100:5.1f}%", fill="yellow", font=("Monaco", 9)); my += 20
-            
+
             loop = self.full_data.get('loop_consistency', {})
             self.canvas.create_text(450, 100, anchor="nw", text=f"LOOP AVG: {loop.get('avg_ms',0):.2f}ms\nSTUTTERS: {loop.get('stutters',0)}", fill="white", font=("Monaco", 10))
-            
+
             # Pedometer Steps
             ped = self.full_data.get('pedometer', {})
             steps = ped.get('steps', 0)
             self.canvas.create_text(450, 150, anchor="nw", text="PEDOMETER", fill="cyan", font=("Monaco", 12, "bold"))
             self.canvas.create_text(450, 180, anchor="nw", text=f"STEPS COMPLETED: {steps}", fill="#00ff00", font=("Monaco", 10, "bold"))
-            
+
             # ALS Detail
             als = self.full_data.get('als', {})
             if als:
@@ -2568,7 +2565,7 @@ class PrimaryFlightDisplay:
                 self.canvas.create_text(lx, ly, anchor="nw", text=f"ALS INTENSITY (LUX FACTOR): {lux:.4f}", fill="white", font=("Monaco", 10, "bold"))
                 self.canvas.create_rectangle(lx, ly+20, lx+300, ly+35, fill="#111", outline="white")
                 self.canvas.create_rectangle(lx, ly+20, lx + lux*300, ly+35, fill="yellow", outline="")
-                
+
                 spec = als.get('spectral', [0,0,0,0])
                 self.canvas.create_text(lx, ly+50, anchor="nw", text="SPECTRAL CHANNELS:", fill="white", font=("Monaco", 10, "bold"))
                 s_max = max(spec) if max(spec) > 0 else 1
@@ -2583,7 +2580,7 @@ class PrimaryFlightDisplay:
             heatflux = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
             p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))
             p_heat = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
-            
+
             fluid = smc.get('fluid_dynamics', {})
             flow_l = float(fluid.get('flow_scale_l', 0.01))
             u0 = float(fluid.get('char_velocity_u0', 0.0))
@@ -2594,7 +2591,7 @@ class PrimaryFlightDisplay:
             cy = float(fluid.get('cauchy_number', 0.0))
             eff_pct = getattr(self, 'smooth_efficiency', float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0)))
             work_pct = getattr(self, 'smooth_work_efficiency', float(smc.get('work_efficiency_pct', 100.0 - eff_pct)))
-            
+
             fluid_text = (
                 f"COOLING DYNAMICS & CONVECTIVE EFF:\n"
                 f"COOLING EFFICIENCY: {eff_pct:.2f}%\n"
@@ -2606,12 +2603,12 @@ class PrimaryFlightDisplay:
                 f"WEBER: We = {we:.3f} | STROUHAL: St = {st:.4f} | CAUCHY: Cy = {cy:.6f}"
             )
             self.canvas.create_text(450, 195, anchor="nw", text=fluid_text, fill="cyan", font=("Monaco", 8))
-            
+
             # Processor Work & Computational Efficiency
             p_loss = getattr(self, 'smooth_inefficiency', float(smc.get('thermal_inefficiency_w', 0.0)))
             history = getattr(self, 'work_efficiency_history', [])
             avg_work_1h = sum(history) / len(history) if history else work_pct
-            
+
             work_text = (
                 f"PROCESSOR WORK & COMPUTATIONAL EFF:\n"
                 f"POWER INPUT (PSTR): {p_in:.2f} W\n"
@@ -2621,7 +2618,7 @@ class PrimaryFlightDisplay:
                 f"WORK EFF (1H AVG):  {avg_work_1h:.2f}%"
             )
             self.canvas.create_text(450, 300, anchor="nw", text=work_text, fill="orange", font=("Monaco", 8))
-            
+
             # 1. DR Calibration & Drift Corrections
             loc = self.full_data.get('location', {})
             c_alt = loc.get('CorrectionFactor_Reckoning_Altitude', 1.0)
@@ -2629,9 +2626,9 @@ class PrimaryFlightDisplay:
             c_vel = loc.get('CorrectionFactor_Reckoning_Velocity', 1.0)
             c_vrt = loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0)
             cal_g = loc.get('calibrated_g', 9.80665)
-            
+
             self.canvas.create_text(450, 420, anchor="nw", text=f"DR CALIBRATION:\nALT CF:  {c_alt:.4f} | HDG CF: {c_hdg:.4f}\nVEL CF:  {c_vel:.4f} | VRT CF: {c_vrt:.4f}\nCALIB G: {cal_g:.6f} m/s²", fill="#44ff44", font=("Monaco", 9))
-            
+
             self.canvas.create_text(450, 472, anchor="nw", text=f"ACTIVE CATEGORY: {self.transportation_category.upper()}", fill="#ffff00", font=("Monaco", 9, "bold"))
 
             # 2. Geometry & Position Vectors
@@ -2641,7 +2638,7 @@ class PrimaryFlightDisplay:
             mach = loc.get('mach', 0.0)
             odo = loc.get('odometer_30m', 0.0)
             cardinal = loc.get('compass_dir', 'N')
-            
+
             self.canvas.create_text(450, 490, anchor="nw", text=f"GEOMETRY & POSITION:\nLOCAL POS: X:{pos[0]:.2f} Y:{pos[1]:.2f} Z:{pos[2]:.2f}\nQUATERN:   W:{q[0]:.3f} X:{q[1]:.3f} Y:{q[2]:.3f} Z:{q[3]:.3f}\nMACH:      {mach:.5f} | CARDINAL: {cardinal}\nMICRO-ODO: {odo:.2f} m", fill="#a8a8ff", font=("Monaco", 9))
 
             # 3. Structural Fatigue & Seismic Stress
@@ -2654,7 +2651,7 @@ class PrimaryFlightDisplay:
             upset_count = dmg.get('anomaly_event_upset', 0)
             motion = seis.get('motion_type', 'Stationary')
             spec_bal = seis.get('spectral_balance', 0.0)
-            
+
             self.canvas.create_text(450, 580, anchor="nw", text=f"STRUCTURAL FATIGUE & STRESS:\nMOTION REGIME: {motion} | SPEC BAL: {spec_bal:.4f}\nEM FATIGUE:    {em_fatigue*100:.6f}%\nSOLDER FTG:    {sd_fatigue*100:.6f}%\nSEU RISK MULT: {seu_mul:.4f}x\nALT COOL MULT: {alt_mul:.4f}x\nSEU UPSETS:    {upset_count}", fill="#ff5555", font=("Monaco", 9))
 
             # 4. System Uptime & Capacities
@@ -2665,7 +2662,7 @@ class PrimaryFlightDisplay:
             b_full = sys_info.get('BatteryFullChargeCapacityWh', 0.0)
             b_bank = sys_info.get('BatteryEnergyBankWh', 0.0)
             hid_idle = sys_info.get('nonHumanInputHIDIdle', 0.0)
-            
+
             self.canvas.create_text(50, 540, anchor="nw", text=f"SYSTEM RUNTIME & ENERGY:\nEARU RUNTIME:  {uptime_earu:.1f} s\nSYSTEM UPTIME: {uptime_sys:.1f} s ({uptime_sys/3600.0:.1f} hrs)\nDESIGN CAP:    {b_design:.2f} Wh\nFULL CAP:      {b_full:.2f} Wh | BANK: {b_bank:.2f} Wh\nHID IDLE SCAN: {hid_idle:.3f} s", fill="#ffff55", font=("Monaco", 9))
 
             # 5. SPU Clock & Hardware Timings
@@ -2677,12 +2674,12 @@ class PrimaryFlightDisplay:
             t_rtc = drift.get('t_rtc_ns', 0)
             t_spu = drift.get('t_spu_ns', 0)
             interfere = drift.get('interference', 'No')
-            
+
             self.canvas.create_text(50, 630, anchor="nw", text=f"SPU CLOCK & HARDWARE TIMINGS:\nSPU LATENCY:  {spu_lat:.3f} ms | GPU: {gpu_lat:.3f} ms\nRTC JITTER:   {rtc_jit:.6f} ms\nT_CPU NS:     {t_cpu} ns\nT_RTC NS:     {t_rtc} ns\nT_SPU NS:     {t_spu} ns\nINTERFERENCE: {interfere}", fill="#ffaa55", font=("Monaco", 9))
 
         elif self.adv_subpage == 1:
             self.canvas.create_text(50, 120, anchor="nw", text="ACTIVE SOIL SIGNALS & WIRELESS GEOLOCATION SCANNER", fill="#00ffcc", font=("Monaco", 12, "bold"))
-            
+
             # Pulse scanner ring animation
             t_pulse = 5.0 + 3.0 * math.sin(time.time() * 3.0)
             self.canvas.create_oval(w - 120 - t_pulse, 128 - t_pulse, w - 120 + t_pulse, 128 + t_pulse, outline="#00ffcc", width=1)
@@ -2691,7 +2688,7 @@ class PrimaryFlightDisplay:
             # Column 1: WiFi Access Points (x: 50 to 480)
             self.canvas.create_text(50, 160, anchor="nw", text="WI-FI GEOLOCATION ACCESS POINTS (802.11 RSSI)", fill="cyan", font=("Monaco", 11, "bold"))
             self.canvas.create_text(50, 185, anchor="nw", text=f"{'SSID / NETWORK NAME':<24} {'BSSID':<17} {'CHAN':<4} {'RSSI':<5} {'STRENGTH'}", fill="gray", font=("Monaco", 9))
-            
+
             wifi_list = self.wifi_devices[:10]  # Limit to top 10 for neatness
             wy = 210.0
             for ap in wifi_list:
@@ -2701,12 +2698,12 @@ class PrimaryFlightDisplay:
                 bssid = ap.get("bssid", "")
                 chan = str(ap.get("channel", ""))[:4]
                 rssi = ap.get("rssi", -90)
-                
+
                 # Signal bar
                 bar_len = max(0, int((100 + rssi) * 1.5))
                 bar_color = "#00ff00" if rssi >= -55 else ("#ffff00" if rssi >= -72 else "#ff5500")
                 bar_char = "█" * (bar_len // 4) or "░"
-                
+
                 txt = f"{ssid:<24} {bssid:<17} {chan:<4} {rssi: >4} dBm  "
                 self.canvas.create_text(50, wy, anchor="nw", text=txt, fill="white", font=("Monaco", 9))
                 self.canvas.create_text(390, wy, anchor="nw", text=bar_char, fill=bar_color, font=("Monaco", 9))
@@ -2715,7 +2712,7 @@ class PrimaryFlightDisplay:
             # Column 2: Bluetooth Beacons (x: 520 to w-50)
             self.canvas.create_text(520, 160, anchor="nw", text="BLUETOOTH SOIL BEACONS & TELEMETRY NODES", fill="#ff00ff", font=("Monaco", 11, "bold"))
             self.canvas.create_text(520, 185, anchor="nw", text=f"{'DEVICE NAME / BEACON IDENT':<24} {'MAC ADDRESS':<17} {'RSSI':<5} {'TYPE'}", fill="gray", font=("Monaco", 9))
-            
+
             bt_list = self.bt_devices[:10]  # Limit to top 10
             by = 210.0
             for dev in bt_list:
@@ -2725,18 +2722,18 @@ class PrimaryFlightDisplay:
                 addr = dev.get("address", "")
                 rssi = dev.get("rssi", -90)
                 dtype = dev.get("type", "BLE Peripheral")
-                
+
                 # Signal bar
                 bar_len = max(0, int((100 + rssi) * 1.5))
                 bar_color = "#00ff00" if rssi >= -60 else ("#ffff00" if rssi >= -75 else "#ff5500")
                 bar_char = "█" * (bar_len // 4) or "░"
-                
+
                 txt = f"{name:<24} {addr:<17} {rssi: >4} dBm  "
                 self.canvas.create_text(520, by, anchor="nw", text=txt, fill="white", font=("Monaco", 9))
                 self.canvas.create_text(850, by, anchor="nw", text=dtype, fill="gray", font=("Monaco", 8))
                 self.canvas.create_text(760, by, anchor="nw", text=bar_char, fill=bar_color, font=("Monaco", 9))
                 by += 22
-            
+
             # Bottom Calibration/Triangulation Details
             self.canvas.create_text(50, 480, anchor="nw", text="CALIBRATION METHODOLOGY (SOIL SIGNALS IN MOTION REGIME):", fill="#ffff55", font=("Monaco", 10, "bold"))
             desc = (
@@ -2758,8 +2755,8 @@ class PrimaryFlightDisplay:
         altim = press / 33.8639
         tendency = float(weather.get('pressure_tendency_hpa', 0.0))
         hum = float(smc.get('humidity_pct', 0.0))
-        curr_t = time.time()
-        
+        time.time()
+
         # Color background based on weather conditions
         if t_c < 2 and spread < 3:
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
@@ -2776,14 +2773,14 @@ class PrimaryFlightDisplay:
         else:
             self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
             cond_icon = "SHINY"
-            
+
         self.canvas.create_text(w/2, 40, text=f"METAR/TAF - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
-        
+
         # Parse dynamically compiled METAR and TAF from telemetry data
         metar_taf = weather.get('metar_taf', {})
         metar_report = metar_taf.get('metar')
         taf_report = metar_taf.get('taf')
-        
+
         if not metar_report:
             # Fallback local calculation
             now = datetime.datetime.now(datetime.timezone.utc); time_str = now.strftime("%d%H%MZ")
@@ -2795,30 +2792,30 @@ class PrimaryFlightDisplay:
             temp_part = f"{round(t_c):02d}/{round(dp_c):02d}"
             if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
             metar_report = f"METAR EARU {time_str} 00000KT {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
-            
+
         if not taf_report:
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             start_time = now_utc.strftime("%d%H")
             end_time = (now_utc + datetime.timedelta(hours=24)).strftime("%d%H")
             taf_report = f"TAF EARU {now_utc.strftime('%d%H%MZ')} {start_time}/{end_time} 00000KT 10SM CLR"
-            
+
         y = 100.0
         self.canvas.create_text(50, y, anchor="nw", text="CURRENT REPORT (METAR):", fill="cyan", font=("Monaco", 12, "bold"))
         self.canvas.create_text(50, y+30, anchor="nw", text=metar_report, fill="white", font=("Monaco", 14, "bold"), width=w-100)
-        
+
         y += 110
         self.canvas.create_text(50, y, anchor="nw", text="FORECAST (TAF):", fill="cyan", font=("Monaco", 12, "bold"))
         self.canvas.create_text(50, y+30, anchor="nw", text=taf_report, fill="white", font=("Monaco", 12), width=w-100)
-        
+
         y += 130
         self.canvas.create_text(50, y, anchor="nw", text="PHYSICAL BASIS DATA:", fill="cyan", font=("Monaco", 12, "bold"))
         wind_speed_kts = metar_taf.get('wind_speed_kts', 0.0)
         wind_dir_deg = metar_taf.get('wind_dir_deg', 0.0)
         basis = [
-            f"STATION PRESSURE: {press:.2f} hPa", 
-            f"DEWPOINT SPREAD:  {spread:.2f} K", 
-            f"AIR DENSITY:      {float(weather.get('air_fluid_density',0.0)):.4f} kg/m3", 
-            f"BARO TENDENCY:    {tendency:+.4f} hPa/hr", 
+            f"STATION PRESSURE: {press:.2f} hPa",
+            f"DEWPOINT SPREAD:  {spread:.2f} K",
+            f"AIR DENSITY:      {float(weather.get('air_fluid_density',0.0)):.4f} kg/m3",
+            f"BARO TENDENCY:    {tendency:+.4f} hPa/hr",
             f"REL. HUMIDITY:    {hum:.1f} %",
             f"DERIVED WIND:     {wind_speed_kts:.1f} kts @ {wind_dir_deg:.0f}°"
         ]
@@ -2843,41 +2840,41 @@ class PrimaryFlightDisplay:
         z_lbl = ["FULL (3mo+16d)", "LAST 30 DAYS", "LAST 7 DAYS", "LAST 24 HOURS", "16-DAY FORECAST"]
         self.canvas.create_text(w/2, 25, text=f"METEO: {sub_t[self.clim_subpage]}", fill="#00ff7f", font=("Monaco", 18, "bold"))
         self.canvas.create_text(w/2, 45, text=f"[ CYCLE PAGES ({self.clim_subpage+1}/5) | ZOOM: {z_lbl[self.clim_zoom]} (CLICK GRAPH) ]", fill="#aaa", font=("Monaco", 8))
-        
+
         weather = self.full_data.get('ecosystem_weather', {})
         meteo = weather.get('3rdparty_meteo', {})
         if not meteo:
             self.canvas.create_text(w/2, h/2, text="NO 3RD PARTY METEO DATA", fill="red", font=("Monaco", 14))
             return
-            
+
         curr = meteo.get('current', {})
         hourly = meteo.get('hourly', {})
         daily = meteo.get('daily', {})
         now_ts = time.time()
-        
+
         def v_f(v, default=0.0):
             try:
                 return float(v) if v is not None and math.isfinite(float(v)) else default
             except:
                 return default
-                
+
         def g_idx(lst, idx):
             return lst[idx] if idx < len(lst) else 0
-            
+
         h_t = hourly.get('time', [])
         c_idx = 0
         for i, ts in enumerate(h_t):
             if ts >= now_ts:
                 c_idx = i
                 break
-                
+
         d_t = daily.get('time', [])
         d_idx = 0
         for i, ts in enumerate(d_t):
             if ts >= now_ts - 43200:
                 d_idx = i
                 break
-                
+
         def get_z(lst):
             if not lst: return []
             if self.clim_zoom == 0: return lst
@@ -2886,14 +2883,14 @@ class PrimaryFlightDisplay:
             elif self.clim_zoom == 3: return lst[max(0, c_idx-24):]
             elif self.clim_zoom == 4: return lst[c_idx:]
             return lst
-            
+
         z_t, z_m = get_z(h_t), None
         if self.clim_zoom < 4 and z_t:
             for i, ts in enumerate(z_t):
                 if ts >= now_ts:
                     z_m = i
                     break
-                    
+
         sr_m, ss_m = None, None
         if self.clim_subpage == 2:
             sr_ts = v_f(g_idx(daily.get('sunrise', []), d_idx))
@@ -2901,10 +2898,10 @@ class PrimaryFlightDisplay:
             for i, ts in enumerate(z_t):
                 if ts >= sr_ts and sr_m is None: sr_m = i
                 if ts >= ss_ts and ss_m is None: ss_m = i
-                
+
         def plot(gx, gy, gw, gh, key, lbl, col, extra=None):
             self.draw_graph(gx, gy, gw, gh, get_z(hourly.get(key, [])), lbl, col, mark_idx=z_m, times=z_t, extra_markers=extra)
-            
+
         if self.clim_subpage == 0:
             lx, ly = 40, 80
             dtl = [
@@ -2916,17 +2913,17 @@ class PrimaryFlightDisplay:
             ]
             for i, d in enumerate(dtl):
                 self.canvas.create_text(lx+10, ly+i*16, anchor="nw", text=d, fill="white", font=("Monaco", 9))
-                
+
             rx, ry = w*0.35, 80
             dmx, dmn, dpb = daily.get('temperature_2m_max',[]), daily.get('temperature_2m_min',[]), daily.get('precipitation_probability_max',[])
             for i in range(d_idx, min(d_idx+16, len(d_t))):
                 dt = datetime.datetime.fromtimestamp(d_t[i]).strftime("%m/%d")
                 tmn, tmx, pb = g_idx(dmn, i), g_idx(dmx, i), g_idx(dpb, i)
                 self.canvas.create_text(rx+10, ry+(i-d_idx)*14, anchor="nw", text=f"{dt}: {v_f(tmn):>4.1f}-{v_f(tmx):>4.1f}C | PREC:{v_f(pb):>3.0f}%", fill="white", font=("Monaco", 8))
-                
+
             plot(50, 360, w-100, 150, 'temperature_2m', "TEMP TREND (C)", "cyan")
             plot(50, 545, w-100, 150, 'precipitation_probability', "PRECIP PROB (%)", "magenta")
-            
+
         elif self.clim_subpage == 1:
             lx, ly = 40, 80
             dtl = [
@@ -2936,7 +2933,7 @@ class PrimaryFlightDisplay:
             ]
             for i, d in enumerate(dtl):
                 self.canvas.create_text(lx+10, ly+i*18, anchor="nw", text=d, fill="white", font=("Monaco", 9))
-                
+
             mx, my = w*0.4, 80
             st_0 = hourly.get('soil_temperature_0cm',[])
             st_54 = hourly.get('soil_temperature_54cm',[])
@@ -2948,11 +2945,11 @@ class PrimaryFlightDisplay:
             ]
             for i, s in enumerate(sl):
                 self.canvas.create_text(mx+10, my+i*18, anchor="nw", text=s, fill="#8b4513", font=("Monaco", 9))
-                
+
             plot(50, 220, w-100, 110, 'soil_temperature_0cm', "SOIL TEMP (0CM)", "#ff5500")
             plot(50, 355, w-100, 110, 'soil_moisture_0_to_1cm', "SOIL MOISTURE (0-1CM)", "#00aa00")
             plot(50, 490, w-100, 110, 'surface_pressure', "SURFACE PRESSURE", "#aaa")
-            
+
         elif self.clim_subpage == 2:
             lx, ly = 40, 80
             sw = hourly.get('shortwave_radiation',[])
@@ -2965,11 +2962,11 @@ class PrimaryFlightDisplay:
             ]
             for i, d in enumerate(dtl):
                 self.canvas.create_text(lx+10, ly+i*18, anchor="nw", text=d, fill="white", font=("Monaco", 9))
-                
+
             mx, my = w*0.4, 80
             def fmt_t(ts):
                 return datetime.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "--:--"
-                
+
             sr_ts = v_f(g_idx(daily.get('sunrise', []), d_idx))
             ss_ts = v_f(g_idx(daily.get('sunset', []), d_idx))
             dl_dur = v_f(g_idx(daily.get('daylight_duration', []), d_idx))
@@ -2980,16 +2977,16 @@ class PrimaryFlightDisplay:
             ]
             for i, a in enumerate(astro):
                 self.canvas.create_text(mx+10, my+i*18, anchor="nw", text=a, fill="yellow", font=("Monaco", 9))
-                
+
             mrk = []
             if sr_m: mrk.append((sr_m, "SR", "yellow"))
             if ss_m: mrk.append((ss_m, "SS", "orange"))
-            
+
             plot(50, 220, w-100, 95, 'shortwave_radiation', "SHORTWAVE (W/m2)", "yellow", extra=mrk)
             plot(50, 335, w-100, 95, 'uv_index', "UV INDEX", "#ffaa00", extra=mrk)
             plot(50, 450, w-100, 95, 'global_tilted_irradiance', "TILTED IRRAD", "#ffd700", extra=mrk)
             plot(50, 565, w-100, 95, 'sunshine_duration', "SUNSHINE DURATION (s)", "#fffacd", extra=mrk)
-            
+
         elif self.clim_subpage == 3:
             lx, ly = 40, 80
             cp = hourly.get('cape',[])
@@ -3007,7 +3004,7 @@ class PrimaryFlightDisplay:
             plot(50, 220, w-100, 110, 'cape', "CAPE (CONVECTIVE)", "red")
             plot(50, 355, w-100, 110, 'freezing_level_height', "FREEZING HEIGHT (m)", "white")
             plot(50, 490, w-100, 110, 'boundary_layer_height', "BOUNDARY LAYER (m)", "cyan")
-            
+
         elif self.clim_subpage == 4:
             lx, ly = 40, 80
             dp = hourly.get('dew_point_2m',[])
@@ -3023,7 +3020,7 @@ class PrimaryFlightDisplay:
             plot(50, 220, w-100, 110, 'relative_humidity_2m', "REL HUMIDITY (%)", "cyan")
             plot(50, 355, w-100, 110, 'vapour_pressure_deficit', "VAPOUR DEFICIT", "magenta")
             plot(50, 490, w-100, 110, 'total_column_integrated_water_vapour', "PRECIP WATER", "#5555ff")
-            
+
         ft = meteo.get('fetch_time', 0)
         ago = int(time.time() - ft)
         self.canvas.create_text(w-50, h-40, anchor="se", text=f"LAST FETCH: {ago}s AGO", fill="#555", font=("Monaco", 8))

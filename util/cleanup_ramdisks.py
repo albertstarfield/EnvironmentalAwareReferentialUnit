@@ -1,5 +1,4 @@
 import subprocess
-import sys
 
 def cleanup():
     print("[*] Gathering hdiutil info...")
@@ -11,12 +10,12 @@ def cleanup():
 
     blocks = output.split("================================================")
     to_detach = []
-    
+
     for block in blocks:
         lines = [l.strip() for l in block.splitlines() if l.strip()]
         if not lines:
             continue
-            
+
         is_ram = any(l.startswith("image-path") and "ram://" in l for l in lines)
         if is_ram:
             # Find lines starting with /dev/disk
@@ -35,7 +34,7 @@ def cleanup():
         return
 
     print(f"[*] Found {len(to_detach)} RAM disks to detach.")
-    
+
     success_count = 0
     for disk in sorted(list(set(to_detach))):
         print(f"[*] Detaching {disk}...")

@@ -35,7 +35,7 @@ def get_adb_devices():
         if os.path.exists(android_home):
             paths.append(os.path.join(android_home, "platform-tools"))
         env["PATH"] = ":".join(paths) + ":" + env.get("PATH", "")
-            
+
         res = subprocess.run(["adb", "devices"], capture_output=True, text=True, check=True, env=env)
         devices = []
         for line in res.stdout.splitlines():
@@ -77,8 +77,7 @@ def send_mock_location(device, lat, lon, alt):
 
 def main():
     print("[*] EARU ADB Mock Sidecar started", flush=True)
-    last_sent = None
-    
+
     while True:
         loc = get_location()
         if loc is not None:

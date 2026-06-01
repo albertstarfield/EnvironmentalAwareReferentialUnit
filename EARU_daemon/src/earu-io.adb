@@ -554,6 +554,11 @@ package body Earu.IO is
       AP    ("BatteryEnergyBankWh",       F (State.System.Battery_Energy_Wh));
       AP    ("BatteryFullChargeCapacityWh",F (State.System.Battery_Full_Wh));
       AP    ("BatteryHealthPct",          F (State.System.Battery_Health_Pct));
+      AP    ("Batt_Life_Y",               F (State.System.Batt_Life_Y));
+      AP    ("Drain_Time_Active",         F (State.System.Drain_Time_Active));
+      AP    ("Drain_Time_Sleep",          F (State.System.Drain_Time_Sleep));
+      AP    ("Drain_Time_Hib",            F (State.System.Drain_Time_Hib));
+      AP    ("Drain_Time_DeepHib",        F (State.System.Drain_Time_DeepHib));
       Append (Buf, """load_avg"": [" &
          F (State.System.Load_Avg (1)) & ", " &
          F (State.System.Load_Avg (2)) & ", " &
