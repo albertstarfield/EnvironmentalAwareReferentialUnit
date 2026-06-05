@@ -50,6 +50,13 @@ package Earu.Shm is
 
    type Unsigned_32_Array_4 is array (1 .. 4) of Interfaces.Unsigned_32;
 
+   type Lid_SHM is record
+      Update_Count : Interfaces.Unsigned_32;
+      Padding      : Interfaces.Unsigned_32;
+      Angle        : Interfaces.IEEE_Float_32;
+   end record with Convention => C;
+   type Lid_SHM_Ptr is access all Lid_SHM;
+
    type ALS_SHM_Record is record
       Spectral   : Unsigned_32_Array_4;
       Padding    : Interfaces.Unsigned_32;
@@ -270,18 +277,16 @@ package Earu.Shm is
    end record with Convention => C;
    type ML_SHM_Ptr is access all ML_SHM;
 
-   type Float_32_Ptr is access all Interfaces.IEEE_Float_32;
-
    -- Shared Memory Management
    function Open_IMU_SHM (Name : String) return IMU_SHM_Ptr;
    function Open_Stats_SHM (Name : String) return Stats_SHM_Ptr;
    function Open_Weather_SHM (Name : String) return Weather_SHM_Ptr;
    function Open_ML_SHM (Name : String) return ML_SHM_Ptr;
-   function Open_Lid_SHM (Name : String) return Float_32_Ptr;
+   function Open_Lid_SHM (Name : String) return Lid_SHM_Ptr;
    function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
 
    function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr;
-   function Create_Lid_SHM (Name : String) return Float_32_Ptr;
+   function Create_Lid_SHM (Name : String) return Lid_SHM_Ptr;
    function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
 
 end Earu.Shm;

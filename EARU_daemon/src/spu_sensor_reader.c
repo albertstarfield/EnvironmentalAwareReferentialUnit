@@ -26,7 +26,7 @@ double g_mach_to_sec = 1e-9;
 // Global pointers to the metrics allocated in Ada
 IMU_SHM *g_accel_shm = NULL;
 IMU_SHM *g_gyro_shm = NULL;
-float *g_lid_data = NULL;
+Lid_SHM *g_lid_shm = NULL;
 ALS_SHM_Record *g_als_data = NULL;
 
 void init_timebase(void) {
@@ -107,14 +107,13 @@ void on_als_report(void *context, IOReturn result, void *sender, IOHIDReportType
 }
 
 void on_lid_report(void *context, IOReturn result, void *sender, IOHIDReportType type, uint32_t reportID, uint8_t *report, CFIndex reportLength, uint64_t timeStamp) {
-    if (reportLength >= 3 && g_lid_data) {
+    if (reportLength >= 3 && g_lid_shm) {
         if (report[0] == 1) {
             uint16_t raw_angle;
             memcpy(&raw_angle, report + 1, 2);
             float angle = (float)(raw_angle & 0x1FF);
-            *g_lid_data = angle;
-            uint32_t *cnt = (uint32_t *)((uint8_t *)g_lid_data - 8);
-            (*cnt)++;
+            g_lid_shm->angle = angle;
+            g_lid_shm->update_count++;
         }
     }
 }
@@ -212,10 +211,10 @@ void *spu_thread_func(void *arg) {
     return NULL;
 }
 
-void start_iokit_sensors(IMU_SHM *accel, IMU_SHM *gyro, float *lid, ALS_SHM_Record *als) {
+void start_iokit_sensors(IMU_SHM *accel, IMU_SHM *gyro, Lid_SHM *lid, ALS_SHM_Record *als) {
     g_accel_shm = accel;
     g_gyro_shm = gyro;
-    g_lid_data = lid;
+    g_lid_shm = lid;
     g_als_data = als;
     
     pthread_t thread;

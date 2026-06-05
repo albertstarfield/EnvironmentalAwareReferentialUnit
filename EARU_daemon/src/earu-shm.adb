@@ -21,7 +21,7 @@ package body Earu.Shm is
    package ML_Conv is new System.Address_To_Access_Conversions (ML_SHM);
    package Stats_Conv is new System.Address_To_Access_Conversions (Stats_SHM);
    
-   package Lid_Data_Conv is new System.Address_To_Access_Conversions (Interfaces.IEEE_Float_32);
+   package Lid_Data_Conv is new System.Address_To_Access_Conversions (Lid_SHM);
    package ALS_Data_Conv is new System.Address_To_Access_Conversions (ALS_SHM_Record);
 
    function Map_Generic (Name : String; Size : size_t) return System.Address is
@@ -70,11 +70,11 @@ package body Earu.Shm is
       return Stats_SHM_Ptr (Stats_Conv.To_Pointer (Addr));
    end Open_Stats_SHM;
 
-   function Open_Lid_SHM (Name : String) return Float_32_Ptr is
+   function Open_Lid_SHM (Name : String) return Lid_SHM_Ptr is
       Addr : System.Address := Map_Generic (Name, 12);
    begin
       if Addr = System.Null_Address then return null; end if;
-      return Float_32_Ptr (Lid_Data_Conv.To_Pointer (Addr + Storage_Offset (8)));
+      return Lid_SHM_Ptr (Lid_Data_Conv.To_Pointer (Addr));
    end Open_Lid_SHM;
 
    function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr is
@@ -115,11 +115,11 @@ package body Earu.Shm is
       return IMU_SHM_Ptr (IMU_Conv.To_Pointer (Addr));
    end Create_IMU_SHM;
 
-   function Create_Lid_SHM (Name : String) return Float_32_Ptr is
+   function Create_Lid_SHM (Name : String) return Lid_SHM_Ptr is
       Addr : System.Address := Create_And_Map_Generic (Name, 12);
    begin
       if Addr = System.Null_Address then return null; end if;
-      return Float_32_Ptr (Lid_Data_Conv.To_Pointer (Addr + Storage_Offset (8)));
+      return Lid_SHM_Ptr (Lid_Data_Conv.To_Pointer (Addr));
    end Create_Lid_SHM;
 
    function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr is

@@ -150,12 +150,16 @@ procedure Earu_Daemon is
    Weather_SHM : Weather_SHM_Ptr := null;
    Stats_SHM   : Stats_SHM_Ptr := null;
    ML_Results  : ML_SHM_Ptr := null;
-   Lid_Data    : Float_32_Ptr := null;
+   Lid_Data    : Lid_SHM_Ptr := null;
    ALS_Data    : ALS_SHM_Record_Ptr := null;
 
    task Sensors_Task;
    task body Sensors_Task is
       Last_Total : Unsigned_64 := 0;
+      Last_Lid_Angle : Real := -1.0;
+      Last_Lid_Count : Unsigned_32 := 0;
+      Last_Lid_Time  : Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Current_Lid_Speed : Real := 0.0;
       Local_Accel, Local_Gyro : Vector3;
       Local_Q : Quaternion := (1.0, 0.0, 0.0, 0.0);
       Last_T : Real := 0.0;
@@ -298,9 +302,34 @@ procedure Earu_Daemon is
          
          if Lid_Data /= null or ALS_Data /= null then
             declare
-               Lid : Real := (if Lid_Data /= null then Real(Lid_Data.all) else 0.0);
+               Lid : constant Real := (if Lid_Data /= null then Real(Lid_Data.Angle) else 0.0);
+               Lid_Cnt : constant Unsigned_32 := (if Lid_Data /= null then Lid_Data.Update_Count else 0);
                ALS : ALS_Type;
+               Now_Time : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
             begin
+               if Lid_Cnt /= Last_Lid_Count then
+                  declare
+                     use Ada.Real_Time;
+                     DT : constant Time_Span := Now_Time - Last_Lid_Time;
+                     DT_S : constant Real := Real (To_Duration (DT));
+                  begin
+                     if DT_S > 0.0 and Last_Lid_Angle >= 0.0 then
+                        declare
+                           Raw_Speed : constant Real := Abs (Lid - Last_Lid_Angle) / DT_S;
+                        begin
+                           -- Responsive filter (0.3/0.7) for 1000Hz loop but lid updates are ~10-60Hz
+                           Current_Lid_Speed := Current_Lid_Speed * 0.7 + Raw_Speed * 0.3;
+                        end;
+                     end if;
+                  end;
+                  Last_Lid_Angle := Lid;
+                  Last_Lid_Time := Now_Time;
+                  Last_Lid_Count := Lid_Cnt;
+               else
+                  -- Slow decay if no updates (approx 0.998^1000 = 0.13 per second)
+                  Current_Lid_Speed := Current_Lid_Speed * 0.998;
+               end if;
+
                ALS.Lux_Factor := (if ALS_Data /= null then Real'Max (0.0, Real'Min (1.0, Real (ALS_Data.Lux_Factor))) else 0.0);
                if ALS_Data /= null then
                   for I in 1 .. 4 loop
@@ -309,7 +338,7 @@ procedure Earu_Daemon is
                else
                   ALS.Spectral := (others => 0);
                end if;
-               Earu.State_Store.State_Buffer.Update_Misc (Lid, 0.0, ALS);
+               Earu.State_Store.State_Buffer.Update_Misc (Lid, Current_Lid_Speed, ALS);
             end;
          end if;
 
@@ -822,7 +851,7 @@ begin
       procedure start_iokit_sensors (
          accel : Earu.Shm.IMU_SHM_Ptr;
          gyro  : Earu.Shm.IMU_SHM_Ptr;
-         lid   : Earu.Shm.Float_32_Ptr;
+         lid   : Earu.Shm.Lid_SHM_Ptr;
          als   : Earu.Shm.ALS_SHM_Record_Ptr
       );
       pragma Import (C, start_iokit_sensors, "start_iokit_sensors");

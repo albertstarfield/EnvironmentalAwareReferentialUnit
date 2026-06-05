@@ -421,6 +421,7 @@ class PrimaryFlightDisplay:
         self.airflow_outlet_c: float = 20.0
         self.airflow_offset: int = 0
         self.lid_angle: float = 110.0
+        self.lid_speed: float = 0.0
         self.hinge_airflow: float = 0.0
         self.outflow_mass_flow: float = 0.0
         self.outflow_heatflux: float = 0.0
@@ -1169,6 +1170,7 @@ class PrimaryFlightDisplay:
                     self.airflow_inlet_c = float(smc.get('airflow_inlet_k', 293.15)) - 273.15
                     self.airflow_outlet_c = float(smc.get('airflow_outlet_k', 293.15)) - 273.15
                     self.lid_angle = float(data.get('lid_angle', 110.0))
+                    self.lid_speed = float(data.get('lid_speed', 0.0))
                     # Parse hinge_airflow with a solid mathematical fallback based on fan RPMs and screen angle
                     avg_fan = sum(self.fan_rpms) / len(self.fan_rpms) if self.fan_rpms else 0.0
                     fallback_flow = 15.0 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
@@ -1920,7 +1922,8 @@ class PrimaryFlightDisplay:
             ("RECKON_HDG", f"{self.cf_heading:+.2f}\u00b0"),
             ("RECKON_ALT", f"{self.cf_altitude:+.1f} m"),
             ("RECKON_VSI", f"{self.cf_vertical_rate:.3f}x"),
-            ("HID IDLE", f"{self.hid_idle:.1f} s")
+            ("HID IDLE", f"{self.hid_idle:.1f} s"),
+            ("LID SPEED", f"{self.lid_speed:.1f} deg/s")
         ]
         for i, (n, v) in enumerate(env_metrics):
             col = "#00ccff" if "RECKON" in n else "white"
@@ -2058,7 +2061,7 @@ class PrimaryFlightDisplay:
 
         # Title for the illustration
         disp_angle = self.lid_angle if self.lid_angle > 0.0 else 110.0
-        self.canvas.create_text(lx, ly - 80, text=f"CHASSIS THERMAL AIRFLOW ({disp_angle:.1f}\u00b0)", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
+        self.canvas.create_text(lx, ly - 80, text=f"CHASSIS THERMAL AIRFLOW ({disp_angle:.1f}\u00b0) @ {self.lid_speed:.1f} deg/s", fill="cyan", font=("Monaco", 11, "bold"), anchor="n")
 
         # Draw laptop side profile outline
         # Keyboard base deck
@@ -2606,6 +2609,9 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(55, 310, anchor="nw", text="DETECTION CERTAINTY:", fill="gray", font=("Monaco", 10))
         self.canvas.create_text(55, 330, anchor="nw", text=f"{cert * 100:.1f}%", fill="cyan", font=("Monaco", 11, "bold"))
 
+        self.canvas.create_text(55, 370, anchor="nw", text="LID DYNAMICS:", fill="gray", font=("Monaco", 10))
+        self.canvas.create_text(55, 390, anchor="nw", text=f"{self.lid_angle:.1f}\u00b0 @ {self.lid_speed:.1f} deg/s", fill="white", font=("Monaco", 11, "bold"))
+
         # Column 2 Box
         self.canvas.create_rectangle(350, 80, 650, 440, fill="#080808", outline="#333", width=2)
         self.canvas.create_text(500, 95, text="FATIGUE & SYSTEM FAILURE PROGNOS", fill="yellow", font=("Monaco", 11, "bold"), anchor="center")
@@ -2857,6 +2863,10 @@ class PrimaryFlightDisplay:
             steps = ped.get('steps', 0)
             self.canvas.create_text(450, 150, anchor="nw", text="PEDOMETER", fill="cyan", font=("Monaco", 12, "bold"))
             self.canvas.create_text(450, 180, anchor="nw", text=f"STEPS COMPLETED: {steps}", fill="#00ff00", font=("Monaco", 10, "bold"))
+
+            self.canvas.create_text(450, 220, anchor="nw", text="LID SENSOR", fill="cyan", font=("Monaco", 12, "bold"))
+            self.canvas.create_text(450, 250, anchor="nw", text=f"ANGLE: {self.lid_angle:.1f}\u00b0", fill="white", font=("Monaco", 10, "bold"))
+            self.canvas.create_text(450, 270, anchor="nw", text=f"SPEED: {self.lid_speed:.1f} deg/s", fill="#00ff00", font=("Monaco", 10, "bold"))
 
             # ALS Detail
             als = self.full_data.get('als', {})

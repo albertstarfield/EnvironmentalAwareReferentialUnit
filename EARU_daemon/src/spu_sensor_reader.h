@@ -23,7 +23,13 @@ typedef struct {
     float lux_factor;
 } ALS_SHM_Record;
 
-void start_iokit_sensors(IMU_SHM *accel, IMU_SHM *gyro, float *lid, ALS_SHM_Record *als);
+typedef struct {
+    uint32_t update_count;
+    uint32_t padding;
+    float angle;
+} Lid_SHM;
+
+void start_iokit_sensors(IMU_SHM *accel, IMU_SHM *gyro, Lid_SHM *lid, ALS_SHM_Record *als);
 uint64_t get_hid_idle_time_ns(void);
 
 #endif
