@@ -3140,7 +3140,7 @@ class PrimaryFlightDisplay:
                 ts_s = ns / 1e9
                 dt_local = datetime.datetime.fromtimestamp(ts_s).astimezone()
                 dt_utc = datetime.datetime.fromtimestamp(ts_s, datetime.timezone.utc)
-                
+
                 offset_td = dt_local.utcoffset()
                 offset_sec = int(offset_td.total_seconds()) if offset_td is not None else 0
                 sign = "+" if offset_sec >= 0 else "-"
@@ -3148,7 +3148,7 @@ class PrimaryFlightDisplay:
                 hrs = offset_sec // 3600
                 mins = (offset_sec % 3600) // 60
                 tz_str = f"UTC{sign}{hrs}" if mins == 0 else f"UTC{sign}{hrs}:{mins:02d}"
-                
+
                 local_str = f"{dt_local.strftime('%H:%M:%S')} {tz_str}"
                 utc_str = dt_utc.strftime("%H:%M:%S UTC")
                 return f"{local_str} | {utc_str} | {ns} ns"
@@ -3162,12 +3162,12 @@ class PrimaryFlightDisplay:
             basis.extend([
                 "",
                 "--- SOL BLUE MARBLE TIME ANCHORS ---",
-                f"DAWN:       {fmt_t(fajr)}",
-                f"NOON:       {fmt_t(dhuhr)}",
-                f"SHADOW:     {fmt_t(asr)}",
-                f"DUSK:       {fmt_t(maghrib)}",
-                f"TWILIGHT:   {fmt_t(isha)}",
-                f"LATE NIGHT: {fmt_t(tahajjud)}"
+                f"AKATSUKI (暁):   {fmt_t(fajr)}",
+                f"ZENITH (天頂):   {fmt_t(dhuhr)}",
+                f"UMBRA (影):      {fmt_t(asr)}",
+                f"TASOGARE (黄昏): {fmt_t(maghrib)}",
+                f"AETHER (ｴｰﾃﾙ):   {fmt_t(isha)}",
+                f"SHIN'YA (深夜):  {fmt_t(tahajjud)}"
             ])
 
         for i, b in enumerate(basis): self.canvas.create_text(70, y+30+i*20, anchor="nw", text=b, fill="white", font=("Monaco", 10))

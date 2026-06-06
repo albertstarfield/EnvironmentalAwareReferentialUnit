@@ -987,11 +987,11 @@ First, standard Unix epoch time is converted into Julian Days ($J$) and the Cent
 ### 25.2 Spherical Trigonometry $\arccos$ Anchors
 The remaining anchors are derived using the classic Hour Angle ($H$) formula:
 $$\cos(H) = \frac{\sin(\theta_{target}) - \sin(\text{Lat})\sin(\delta)}{\cos(\text{Lat})\cos(\delta)}$$
-*   **Fajr (Morning Astronomical Twilight):** Target angle $\theta = -18^\circ$.
-*   **Maghrib (Evening Civil Clearance):** Target angle $\theta = -0.833^\circ$ (standard accounting for horizon refraction and solar disc semi-diameter).
-*   **Isha (Evening Astronomical Twilight):** Target angle $\theta = -18^\circ$.
-*   **Asr (Dynamic Shadow Ratio):** Found using the explicit cotangent shadow projection ratio $SF$:
-    $$\theta_{asr} = -\operatorname{arccot}(SF + \tan|\text{Lat} - \delta|)$$
+*   **DAWN (Morning Astronomical Twilight):** Target angle $\theta_{DAWN}$ (Defaults to $-18^\circ$).
+*   **DUSK (Evening Civil Clearance):** Target angle $\theta = -0.833^\circ$ (standard accounting for horizon refraction and solar disc semi-diameter).
+*   **TWILIGHT (Evening Astronomical Twilight):** Target angle $\theta_{TWILIGHT}$ (Defaults to $-18^\circ$).
+*   **SHADOW (Dynamic Shadow Ratio):** Found using the explicit cotangent shadow projection ratio $SF$:
+    $$\theta_{shadow} = \operatorname{arccot}(SF + \tan|\text{Lat} - \delta|)$$
     *(Currently configured at Standard ratio $SF = 1.0$)*
 
 ### 25.3 High-Latitude Defensive Mitigations
@@ -999,6 +999,24 @@ A critical vulnerability of spherical ephemeris math is the $\arccos(x)$ domain 
 To prevent system crashes, the engine employs a strict clamping mitigation:
 1.  **Safety Clamp:** If $\cos(H) > 1.0$, the function bounds the hour angle input tightly to $1.0$.
 2.  **Fraction of the Night Mitigation:** In abnormal polar cases where standard twilight vanishes, the algorithm defaults to extracting ratios of the remaining visible darkness segments.
+
+### 25.4 Global Metrological Ephemeris Matrix (Methodology Look-Up Table)
+Because the exact moment the horizon geometry meets the $\theta_{DAWN}$ and $\theta_{TWILIGHT}$ thresholds varies dramatically based on regional atmospheric assumptions, different regional authorities rely on highly localized, historically validated metrological angles. 
+
+When deploying the `Sol_BlueMarble_TimeAnchor` equations in specific geographic regions, developers should swap the default mathematical constants ($18^\circ$) to match the corresponding local parameter IDs below:
+
+| Authority Code | Formal Authority Name | Target Region | Dawn Angle ($\theta_{DAWN}$) | Twilight Angle ($\theta_{TWILIGHT}$) | Shadow Projection Method ($SF$) | Specialized Rules / Safety Buffers |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **THE_NUSANTARA_GUILD** | The Nusantara Guild | Indonesia | $-20.0^\circ$ | $-18.0^\circ$ | `SF = 1.0` (Standard) | **Ihtiyat Rule**: Add 2 mins to Dawn/Noon/Shadow/Dusk/Twilight. Ceiling Rounding. |
+| **THE_MALAYAN_ORDER** | The Malayan Order | Malaysia | $-20.0^\circ$ | $-18.0^\circ$ | `SF = 1.0` (Standard) | **Ihtiyat Rule**: Add 2 mins to all anchors. Uses exact national ephemeris data. |
+| **LION_CITY_COVENANT** | The Lion City Covenant | Singapore | $-20.0^\circ$ | $-18.0^\circ$ | `SF = 1.0` (Standard) | Exact horizon corrections based on local geoid placement. |
+| **INDUS_VALLEY_SYNDICATE** | The Indus Valley Syndicate | Pakistan, India, Bangladesh | $-18.0^\circ$ | $-18.0^\circ$ | `SF = 2.0` (Extended) | Used universally across the South Asian subcontinent. |
+| **DESERT_SANDS_ACCORD** | The Desert Sands Accord | Saudi Arabia, UAE, Gulf Region | $-18.5^\circ$ | *Fixed Interval* | `SF = 1.0` (Standard) | **Fixed Interval Rule**: Twilight is hardcoded to exactly 90 minutes after Dusk (120 mins during thermal maximums). |
+| **NORTHERN_VANGUARD** | The Northern Vanguard | USA, Canada | $-15.0^\circ$ | $-15.0^\circ$ | `SF = 1.0` (Standard) | Uses shallow angles to prevent early morning math breakdown in high latitudes. |
+| **GLOBAL_BASELINE** | The Global Metrological Baseline | Europe, Global Default | $-18.0^\circ$ | $-17.0^\circ$ | `SF = 1.0` (Standard) | The standard fallback engine for regions without an established metrological authority. |
+| **PHARAONIC_COUNCIL** | The Pharaonic Council | Egypt, North Africa, Levant | $-19.5^\circ$ | $-17.5^\circ$ | `SF = 1.0` (Standard) | Deepest morning twilight angle, leading to very early Dawn times. |
+| **ANATOLIAN_REGISTRY** | The Anatolian Registry | Turkey, SE Europe | $-18.0^\circ$ | $-17.0^\circ$ | `SF = 1.0` (Standard) | Applies localized safety minute adjustments depending on the province. |
+| **FRANKISH_DIRECTORATE** | The Frankish Directorate | France | $-12.0^\circ$ | $-12.0^\circ$ | `SF = 1.0` (Standard) | Uses extremely shallow angles specifically to handle severe European summer twilight. |
 
 ---
 

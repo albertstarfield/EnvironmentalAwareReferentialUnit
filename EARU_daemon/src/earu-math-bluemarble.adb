@@ -68,37 +68,92 @@ package body Earu.Math.BlueMarble is
       -- Latitudes in rad
       Lat_Rad : constant Real := Lat * Deg2Rad;
       
-      -- Sunrise / Sunset Angles
-      Theta_Dawn : constant Real := -15.0;
-      Theta_Dusk : constant Real := -15.0;
+      -- Geofenced JRPG Ephemeris Switch
+      Theta_Dawn : Real := -18.0;
+      Theta_Dusk : Real := -17.0;
+      SF : Real := 1.0;
+      Is_Desert_Sands : Boolean := False;
       
-      HA_Dawn : constant Real := Hour_Angle (Theta_Dawn, Lat_Rad, Delta_Rad);
-      HA_Dusk : constant Real := Hour_Angle (Theta_Dusk, Lat_Rad, Delta_Rad);
+      HA_Dawn, HA_Dusk, HA_Maghrib, HA_Asr : Real;
+      Dawn_Epoch, Dusk_Epoch, Maghrib_Epoch, Asr_Epoch : Real;
       
-      Dawn_Epoch : constant Real := Dhuhr_Epoch - HA_Dawn * 3600.0;
-      Dusk_Epoch : constant Real := Dhuhr_Epoch + HA_Dusk * 3600.0;
+      Alt_Clamped, Alt_Sqrt, Alpha, X_Val, Angle_Asr_Deg : Real;
+      Dawn_Tomorrow_Epoch, Tahajjud_Epoch : Real;
       
-      -- Horizon clearance (Maghrib)
-      Alt_Clamped : constant Real := (if Alt < 0.0 then 0.0 else Alt);
-      -- Approx sqrt
-      Alt_Sqrt : constant Real := Alt_Clamped ** 0.5;
-      Alpha : constant Real := -0.8333 - 0.0347 * Alt_Sqrt;
-      HA_Maghrib : constant Real := Hour_Angle (Alpha, Lat_Rad, Delta_Rad);
-      Maghrib_Epoch : constant Real := Dhuhr_Epoch + HA_Maghrib * 3600.0;
+      Lat_Deg : constant Real := Lat;
+      Lon_Deg : constant Real := Lon;
+   begin
+      -- Dynamic JRPG Profile Detection
+      if Lat_Deg >= 1.1 and then Lat_Deg <= 1.5 and then Lon_Deg >= 103.6 and then Lon_Deg <= 104.1 then
+         -- The Lion City Covenant
+         Theta_Dawn := -20.0;
+         Theta_Dusk := -18.0;
+      elsif Lat_Deg >= 1.0 and then Lat_Deg <= 7.5 and then Lon_Deg >= 99.5 and then Lon_Deg <= 119.5 then
+         -- The Malayan Order
+         Theta_Dawn := -20.0;
+         Theta_Dusk := -18.0;
+      elsif Lat_Deg >= -11.0 and then Lat_Deg <= 6.0 and then Lon_Deg >= 95.0 and then Lon_Deg <= 141.0 then
+         -- The Nusantara Guild
+         Theta_Dawn := -20.0;
+         Theta_Dusk := -18.0;
+      elsif Lat_Deg >= 8.0 and then Lat_Deg <= 37.0 and then Lon_Deg >= 61.0 and then Lon_Deg <= 97.0 then
+         -- The Indus Valley Syndicate
+         Theta_Dawn := -18.0;
+         Theta_Dusk := -18.0;
+         SF := 2.0;
+      elsif Lat_Deg >= 12.0 and then Lat_Deg <= 32.0 and then Lon_Deg >= 34.0 and then Lon_Deg <= 60.0 then
+         -- The Desert Sands Accord
+         Theta_Dawn := -18.5;
+         Is_Desert_Sands := True;
+      elsif Lat_Deg >= 24.0 and then Lat_Deg <= 83.0 and then Lon_Deg >= -168.0 and then Lon_Deg <= -52.0 then
+         -- The Northern Vanguard
+         Theta_Dawn := -15.0;
+         Theta_Dusk := -15.0;
+      elsif Lat_Deg >= 22.0 and then Lat_Deg <= 32.0 and then Lon_Deg >= 24.0 and then Lon_Deg <= 36.0 then
+         -- The Pharaonic Council
+         Theta_Dawn := -19.5;
+         Theta_Dusk := -17.5;
+      elsif Lat_Deg >= 35.0 and then Lat_Deg <= 43.0 and then Lon_Deg >= 25.0 and then Lon_Deg <= 45.0 then
+         -- The Anatolian Registry
+         Theta_Dawn := -18.0;
+         Theta_Dusk := -17.0;
+      elsif Lat_Deg >= 41.0 and then Lat_Deg <= 51.0 and then Lon_Deg >= -5.0 and then Lon_Deg <= 10.0 then
+         -- The Frankish Directorate
+         Theta_Dawn := -12.0;
+         Theta_Dusk := -12.0;
+      else
+         -- The Global Metrological Baseline
+         Theta_Dawn := -18.0;
+         Theta_Dusk := -17.0;
+      end if;
+
+      HA_Dawn := Hour_Angle (Theta_Dawn, Lat_Rad, Delta_Rad);
+      Dawn_Epoch := Dhuhr_Epoch - HA_Dawn * 3600.0;
       
-      -- Asr (Shadow Ratio 1.0)
-      SF : constant Real := 1.0;
-      -- arccot(x) = arctan(1/x)
-      X_Val : constant Real := SF + Tan (abs(Lat_Rad - Delta_Rad));
-      Angle_Asr_Deg : constant Real := -(Arctan (1.0 / X_Val) * Rad2Deg);
-      HA_Asr : constant Real := Hour_Angle (Angle_Asr_Deg, Lat_Rad, Delta_Rad);
-      Asr_Epoch : constant Real := Dhuhr_Epoch + HA_Asr * 3600.0;
+      -- Horizon clearance (Dusk)
+      Alt_Clamped := (if Alt < 0.0 then 0.0 else Alt);
+      Alt_Sqrt := Alt_Clamped ** 0.5;
+      Alpha := -0.8333 - 0.0347 * Alt_Sqrt;
+      HA_Maghrib := Hour_Angle (Alpha, Lat_Rad, Delta_Rad);
+      Maghrib_Epoch := Dhuhr_Epoch + HA_Maghrib * 3600.0;
+
+      if Is_Desert_Sands then
+         Dusk_Epoch := Maghrib_Epoch + 90.0 * 60.0;
+      else
+         HA_Dusk := Hour_Angle (Theta_Dusk, Lat_Rad, Delta_Rad);
+         Dusk_Epoch := Dhuhr_Epoch + HA_Dusk * 3600.0;
+      end if;
+      
+      -- Shadow projection (SF)
+      X_Val := SF + Tan (abs(Lat_Rad - Delta_Rad));
+      Angle_Asr_Deg := Arctan (1.0 / X_Val) * Rad2Deg;
+      HA_Asr := Hour_Angle (Angle_Asr_Deg, Lat_Rad, Delta_Rad);
+      Asr_Epoch := Dhuhr_Epoch + HA_Asr * 3600.0;
       
       -- Tahajjud
-      Dawn_Tomorrow_Epoch : constant Real := Dawn_Epoch + 86400.0;
-      Tahajjud_Epoch : constant Real := Maghrib_Epoch + (2.0 / 3.0) * (Dawn_Tomorrow_Epoch - Maghrib_Epoch);
+      Dawn_Tomorrow_Epoch := Dawn_Epoch + 86400.0;
+      Tahajjud_Epoch := Maghrib_Epoch + (2.0 / 3.0) * (Dawn_Tomorrow_Epoch - Maghrib_Epoch);
 
-   begin
       Result.Morning_Astronomical_Twilight   := Long_Long_Integer(Dawn_Epoch * 1_000_000_000.0);
       Result.Solar_Noon_Transit              := Long_Long_Integer(Dhuhr_Epoch * 1_000_000_000.0);
       Result.Dynamic_Shadow_Ratio_Match      := Long_Long_Integer(Asr_Epoch * 1_000_000_000.0);
