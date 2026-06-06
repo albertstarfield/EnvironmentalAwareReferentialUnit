@@ -253,6 +253,7 @@ package Earu.Types is
       ANE_Lat_ms             : aliased Real := 0.0;
       RTC_Jitter_ms          : aliased Real := 0.0;
       Interference           : aliased Boolean := False;
+      Log_Error              : aliased Boolean := False;
       TS_ISO                 : aliased String (1 .. 32) := (others => ' ');
    end record;
 
@@ -317,6 +318,15 @@ package Earu.Types is
       Last_Evt_T : aliased Real := 0.0;
    end record;
 
+   type Sol_BlueMarble_Type is record
+      Morning_Astronomical_Twilight   : aliased Long_Long_Integer := 0;
+      Solar_Noon_Transit              : aliased Long_Long_Integer := 0;
+      Dynamic_Shadow_Ratio_Match      : aliased Long_Long_Integer := 0;
+      Evening_Civil_Horizon_Clearance : aliased Long_Long_Integer := 0;
+      Evening_Astronomical_Twilight   : aliased Long_Long_Integer := 0;
+      Last_Third_Night_Segment        : aliased Long_Long_Integer := 0;
+   end record;
+
    type Earu_State is record
       Time                : aliased Real := 0.0;
       Loop_Consistency    : aliased Loop_Consistency_Type := (others => <>);
@@ -342,6 +352,7 @@ package Earu.Types is
       Vib_State           : aliased Vibration_State_Type := (others => <>);
       Events              : aliased Event_Array := (others => (others => <>));
       Event_Count         : aliased Integer := 0;
+      Sol_BlueMarble      : aliased Sol_BlueMarble_Type := (others => <>);
    end record;
 
 end Earu.Types;

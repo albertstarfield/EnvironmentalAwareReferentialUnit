@@ -972,6 +972,36 @@ This ensures that as the SSD nears its TBW (Total Bytes Written) limit or exhaus
 
 ---
 
+## 25. Astronomical Solar Ephemeris & The "Blue Marble" Time Anchors
+
+To provide exact natural sun positioning and shadow metrics without relying on external web clocks, the system continuously solves standard spherical trigonometry equations for the Earth's orbit using the live geodetic coordinates ($\text{Lat}, \, \text{Lon}, \, \text{Alt}$) and the current high-resolution monotonic time stamp.
+
+### 25.1 Julian Date & Equation of Time ($q$)
+First, standard Unix epoch time is converted into Julian Days ($J$) and the Century fraction ($T$).
+*   **Solar Declination ($\delta$):** The precise tilt of the Earth relative to the Sun is derived iteratively from the Julian fractional century.
+*   **Equation of Time ($q$):** A correction factor accounting for the Earth's elliptical orbit and axial tilt, calculated in minutes.
+    $$q = 4 \cdot \left( \lambda_{sun} - \text{Right\_Ascension} \right)$$
+    The true dynamic Solar Noon Transit ($Dhuhr_{UTC}$) is established:
+    $$\text{Solar\_Noon\_Transit}_{UTC} = 12.0 - \frac{\text{Lon}}{15} - \frac{q}{60} \quad \text{(hours)}$$
+
+### 25.2 Spherical Trigonometry $\arccos$ Anchors
+The remaining anchors are derived using the classic Hour Angle ($H$) formula:
+$$\cos(H) = \frac{\sin(\theta_{target}) - \sin(\text{Lat})\sin(\delta)}{\cos(\text{Lat})\cos(\delta)}$$
+*   **Fajr (Morning Astronomical Twilight):** Target angle $\theta = -18^\circ$.
+*   **Maghrib (Evening Civil Clearance):** Target angle $\theta = -0.833^\circ$ (standard accounting for horizon refraction and solar disc semi-diameter).
+*   **Isha (Evening Astronomical Twilight):** Target angle $\theta = -18^\circ$.
+*   **Asr (Dynamic Shadow Ratio):** Found using the explicit cotangent shadow projection ratio $SF$:
+    $$\theta_{asr} = -\operatorname{arccot}(SF + \tan|\text{Lat} - \delta|)$$
+    *(Currently configured at Standard ratio $SF = 1.0$)*
+
+### 25.3 High-Latitude Defensive Mitigations
+A critical vulnerability of spherical ephemeris math is the $\arccos(x)$ domain bound ($x \in [-1, 1]$). At extreme latitudes (e.g., above $66^\circ$ near the Arctic/Antarctic circles during summer solstices), the sun may never set, forcing $\cos(H) > 1.0$, which instantly crashes standard floating-point execution units with a `NaN` or `Constraint_Error`.
+To prevent system crashes, the engine employs a strict clamping mitigation:
+1.  **Safety Clamp:** If $\cos(H) > 1.0$, the function bounds the hour angle input tightly to $1.0$.
+2.  **Fraction of the Night Mitigation:** In abnormal polar cases where standard twilight vanishes, the algorithm defaults to extracting ratios of the remaining visible darkness segments.
+
+---
+
 ## Dedication & Acknowledgments
 
 *   **Special thanks to my lecturer, Mr. Agoes**, who has taken care of me and guided my engineering mindset with utmost dedication.

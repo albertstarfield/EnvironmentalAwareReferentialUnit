@@ -24,6 +24,12 @@ EARU.py.bak
 tmpfs/
 EARU_dataIO
 smcFanPressurehPaDetection
+error_line.txt
+progress.txt
+.ruff_cache/
+check.json
+debug.json
+test.json
 
 # Build and Core
 EARU_app

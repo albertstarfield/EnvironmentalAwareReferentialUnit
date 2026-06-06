@@ -26,9 +26,11 @@ package Earu.State_Store is
       procedure Add_Event (E : Event_Type);
       procedure Update_Misc (Lid_Angle, Lid_Speed : Real; ALS : ALS_Type);
       procedure Update_Loop_Consistency (Duration_Ms : Real);
+      procedure Set_Log_Error (Detected : Boolean);
       function Get_Full_State return Earu_State;
    private
       State          : Earu_State;
+      Log_Error_Detected : Boolean := False;
       Loop_Times     : Loop_Times_Array := (others => 0.0);
       Write_Idx      : Positive range 1 .. WINDOW_SIZE := 1;
       Total_Recorded : Natural range 0 .. WINDOW_SIZE := 0;

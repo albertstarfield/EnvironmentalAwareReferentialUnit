@@ -1,4 +1,5 @@
 with Earu.Math;
+with Earu.Math.BlueMarble;
 with Earu.Shm;
 with System;
 with Earu.Types;
@@ -351,6 +352,27 @@ procedure Earu_Daemon is
     task Telemetry_Task;
     task Symlink_Watcher_Task;
     task Network_Probe_Task;
+    task System_Log_Watcher_Task;
+
+    task body System_Log_Watcher_Task is
+       Ret : Interfaces.C.int;
+       pragma Unreferenced (Ret);
+    begin
+       delay 10.0;
+       loop
+          -- Check for any system errors in the last 60 seconds using the recommended filter.
+          -- log show ... | grep -q . returns 0 if errors are found.
+          Ret := C_System (Interfaces.C.To_C (
+             "log show --predicate 'logType == error OR category == ""Error""' --last 1m --style compact | grep -v 'Filtering the log data using' | grep -v 'Log architecture' | grep -q ."
+          ));
+          Earu.State_Store.State_Buffer.Set_Log_Error (Ret = 0);
+          delay 60.0;
+       end loop;
+    exception
+       when others =>
+          null;
+    end System_Log_Watcher_Task;
+
    task body Monitor_Task is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
       Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 301.0);
@@ -458,7 +480,8 @@ procedure Earu_Daemon is
                       end if;
                    end Add_W;
                 begin
-                   if Full.Electron_Travel.Interference then Add_W("INTERFERENCE [MOVE AWAY FROM EM]"); end if;
+                   if Full.Electron_Travel.Log_Error then Add_W("INTERFERENCE [SYSTEM_INTEGRITY_EXCUSE_FAILURE]"); end if;
+                   if Full.Electron_Travel.Interference and not Full.Electron_Travel.Log_Error then Add_W("INTERFERENCE [MOVE AWAY FROM EM]"); end if;
                    if Full.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0 then Add_W("ANOMALY [CHECK HARDWARE]"); end if;
                    if Full.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.48 then Add_W("HIGH_RISK [SUSPEND OPERATIONS]"); end if;
                    if Full.SMC.Temps.TCMz > 100.0 then Add_W("TCMZ_OVERHEAT [COOL DEVICE]"); end if;
@@ -633,7 +656,7 @@ procedure Earu_Daemon is
                   SMC.Must_Hibernate := False;
                end if;
                
-               Earu.State_Store.State_Buffer.Update_System (S, (T_CPU_ns => Long_Long_Integer (Stats_SHM.T_CPU_ns), T_RTC_ns => Long_Long_Integer (Stats_SHM.T_RTC_ns), T_GPU_ns => Long_Long_Integer (Stats_SHM.T_GPU_ns), T_ANE_ns => Long_Long_Integer (Stats_SHM.T_ANE_ns), T_DAT_ns => Long_Long_Integer (Stats_SHM.T_DAT_ns), T_SPU_ns => Long_Long_Integer (Stats_SHM.T_SPU_ns), SPU_Lat_ms => Real (Stats_SHM.SPU_Lat_ms), GPU_Lat_ms => Real (Stats_SHM.GPU_Lat_ms), ANE_Lat_ms => Real (Stats_SHM.ANE_Lat_ms), RTC_Jitter_ms => Real (Stats_SHM.RTC_Jitter_ms), Interference => Stats_SHM.Header.Padding /= 0, TS_ISO => Stats_SHM.TS_ISO));
+               Earu.State_Store.State_Buffer.Update_System (S, (T_CPU_ns => Long_Long_Integer (Stats_SHM.T_CPU_ns), T_RTC_ns => Long_Long_Integer (Stats_SHM.T_RTC_ns), T_GPU_ns => Long_Long_Integer (Stats_SHM.T_GPU_ns), T_ANE_ns => Long_Long_Integer (Stats_SHM.T_ANE_ns), T_DAT_ns => Long_Long_Integer (Stats_SHM.T_DAT_ns), T_SPU_ns => Long_Long_Integer (Stats_SHM.T_SPU_ns), SPU_Lat_ms => Real (Stats_SHM.SPU_Lat_ms), GPU_Lat_ms => Real (Stats_SHM.GPU_Lat_ms), ANE_Lat_ms => Real (Stats_SHM.ANE_Lat_ms), RTC_Jitter_ms => Real (Stats_SHM.RTC_Jitter_ms), Interference => Stats_SHM.Header.Padding /= 0, Log_Error => False, TS_ISO => Stats_SHM.TS_ISO));
                Earu.State_Store.State_Buffer.Update_SMC (SMC);
                         Earu.State_Store.State_Buffer.Update_Damage (Real (Stats_SHM.Fatigue_Cum), Real (Stats_SHM.Seu_Risk), Full.Seismic_Activity.Peak_G);
                Last_S := Stats_SHM.Header.Update_Count;
@@ -721,6 +744,14 @@ procedure Earu_Daemon is
                Earu.Bridge.Update_Structural_Fatigue (State);
                Earu.State_Store.State_Buffer.Update_Damage_Fatigue (State.Seismic_Activity.Damage_Fatigue);
                State.Time := Real (C_Time (null));
+               
+               State.Sol_BlueMarble := Earu.Math.BlueMarble.Calculate_Time_Anchors (
+                  Time_Epoch => State.Time,
+                  Lat        => State.Location.Lat,
+                  Lon        => State.Location.Lon,
+                  Alt        => State.Location.Alt
+               );
+               
                if State.Electron_Travel.TS_ISO(1) = ' ' then
                   State.Electron_Travel.TS_ISO (1 .. 10) := TS (1 .. 10);
                   State.Electron_Travel.TS_ISO (11) := 'T';

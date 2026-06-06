@@ -39,7 +39,16 @@ package body Earu.State_Store is
       begin
          State.System := S;
          State.Electron_Travel := E;
+         State.Electron_Travel.Log_Error := Log_Error_Detected;
+         if Log_Error_Detected then
+            State.Electron_Travel.Interference := True;
+         end if;
       end Update_System;
+
+      procedure Set_Log_Error (Detected : Boolean) is
+      begin
+         Log_Error_Detected := Detected;
+      end Set_Log_Error;
 
       procedure Update_SMC (SMC : SMC_Type) is
       begin

@@ -225,4 +225,39 @@ To ensure reliable telemetry exchange between the EARU background daemon and hig
 1.  **Raw Byte Consistency:** EARU_data.dat is written using raw byte streams (Stream_IO) rather than text-encoded I/O. This prevents system-level UTF-8 translation layers from altering non-ASCII characters after the hash has been calculated.
 2.  **SHA256 Parity Field:** The parity field at the end of the JSON object is a SHA256 digest of the entire JSON string preceding the parity field, including the closing brace.
 3.  **Robust Reconstruction:** Consumers should trim any trailing whitespace or null-padding from the line before attempting to verify the hash.
-4.  **ASCII-Only Symbols:** As of May 2026, all event symbols have been migrated to the standard ASCII range to maximize compatibility.
+
+---
+
+## System Log Monitoring (macOS)
+✦ To capture system logs and filter specifically for the "Error" category over a 1-day period, use these fundamental commands:
+
+1. **The Direct Category Filter**
+   This captures only logs where the developer explicitly tagged the category as "Error".
+   ```bash
+   log show --predicate 'category == "Error"' --last 24h --style compact
+   ```
+
+2. **The Comprehensive Error Filter (Recommended)**
+   Often, system "rots" are marked by logType rather than a specific category string. This command catches both:
+   ```bash
+   log show --predicate 'logType == error OR category == "Error"' --last 24h --style compact
+   ```
+
+3. **Handling "Missing Metadata" Errors**
+   If you see an error saying --last cannot be used due to missing metadata (which we encountered earlier), you must use the --start flag with a specific timestamp:
+   ```bash
+   # Example: If today is June 6, 2026
+   log show --predicate 'category == "Error"' --start "2026-06-05 00:00:00" --style compact
+   ```
+
+4. **Continuous Streaming (Live Monitoring)**
+   If you want to watch for these errors as they happen (capturing the stream):
+   ```bash
+   log stream --predicate 'category == "Error"' --style compact
+   ```
+
+**Summary of Flags:**
+* `--predicate`: The query engine (uses Apple's NSPredicate syntax).
+* `--last 24h`: Limits the search to the last 24 hours.
+* `--style compact`: Removes excessive header info, making it easier to read/parse.
+* `--start`: A hard timestamp fallback if the log archive is truncated.

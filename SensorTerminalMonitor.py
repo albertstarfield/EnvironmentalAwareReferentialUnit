@@ -711,7 +711,7 @@ class PrimaryFlightDisplay:
             {"label": "PROGNOS", "page": 2, "rect": (float(15+2*btn_w), 5.0, float(15+3*btn_w), 55.0)},
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
-            {"label": "METAR", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
+            {"label": "LOCAL_WEATHER", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
             {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
             {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
             {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
@@ -3132,7 +3132,28 @@ class PrimaryFlightDisplay:
             f"REL. HUMIDITY:    {hum:.1f} %",
             f"DERIVED WIND:     {wind_speed_kts:.1f} kts @ {wind_dir_deg:.0f}°"
         ]
-        for i, b in enumerate(basis): self.canvas.create_text(70, y+30+i*25, anchor="nw", text=b, fill="white", font=("Monaco", 10))
+
+        anchors = self.full_data.get("Sol_BlueMarble_TimeAnchor", {})
+        if anchors:
+            def fmt_t(ts): return datetime.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "--:--"
+            fajr = anchors.get("Morning_Astronomical_Twilight", 0) / 1e9
+            dhuhr = anchors.get("Solar_Noon_Transit", 0) / 1e9
+            asr = anchors.get("Dynamic_Shadow_Ratio_Match", 0) / 1e9
+            maghrib = anchors.get("Evening_Civil_Horizon_Clearance", 0) / 1e9
+            isha = anchors.get("Evening_Astronomical_Twilight", 0) / 1e9
+            tahajjud = anchors.get("Last_Third_Night_Segment", 0) / 1e9
+            basis.extend([
+                "",
+                "--- ASTRONOMICAL TIME ANCHORS ---",
+                f"DAWN/FAJR:     {fmt_t(fajr)}",
+                f"NOON/DHUHR:    {fmt_t(dhuhr)}",
+                f"SHADOW/ASR:    {fmt_t(asr)}",
+                f"DUSK/MAGHRIB:  {fmt_t(maghrib)}",
+                f"TWILIGHT/ISHA: {fmt_t(isha)}",
+                f"TAHAJJUD:      {fmt_t(tahajjud)}"
+            ])
+
+        for i, b in enumerate(basis): self.canvas.create_text(70, y+30+i*20, anchor="nw", text=b, fill="white", font=("Monaco", 10))
 
     def draw_wind_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="FLUID DYNAMICS: WIND MAPPING", fill="#00ffff", font=("Monaco", 20, "bold"))
@@ -3293,6 +3314,7 @@ class PrimaryFlightDisplay:
                 f"SUNSET: {fmt_t(ss_ts)}",
                 f"DAYLIGHT: {dl_dur/3600:>5.1f} hrs"
             ]
+
             for i, a in enumerate(astro):
                 self.canvas.create_text(mx+10, my+i*18, anchor="nw", text=a, fill="yellow", font=("Monaco", 9))
 

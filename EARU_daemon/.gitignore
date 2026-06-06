@@ -4,3 +4,12 @@
 /config/
 *.ali
 *.o
+*.stderr
+*.stdout
+*.bexch
+.source_hash
+build_err.txt
+/python/BatteryPredictor.mlpackage/
+b~*
+b__*
+.cache.sqlite*

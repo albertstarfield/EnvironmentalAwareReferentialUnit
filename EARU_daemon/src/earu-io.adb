@@ -693,6 +693,16 @@ package body Earu.IO is
       end;
       Append (Buf, "}}, ");
 
+      --  ── Sol_BlueMarble_TimeAnchor ─────────────────────────────────────────
+      Append (Buf, """Sol_BlueMarble_TimeAnchor"": {");
+      AL ("Morning_Astronomical_Twilight", State.Sol_BlueMarble.Morning_Astronomical_Twilight);
+      AL ("Solar_Noon_Transit", State.Sol_BlueMarble.Solar_Noon_Transit);
+      AL ("Dynamic_Shadow_Ratio_Match", State.Sol_BlueMarble.Dynamic_Shadow_Ratio_Match);
+      AL ("Evening_Civil_Horizon_Clearance", State.Sol_BlueMarble.Evening_Civil_Horizon_Clearance);
+      AL ("Evening_Astronomical_Twilight", State.Sol_BlueMarble.Evening_Astronomical_Twilight);
+      AL ("Last_Third_Night_Segment", State.Sol_BlueMarble.Last_Third_Night_Segment, False);
+      Append (Buf, "}, ");
+
       --  ── events ────────────────────────────────────────────────────────────
       Append (Buf, """events"": [");
       for I in 1 .. State.Event_Count loop
