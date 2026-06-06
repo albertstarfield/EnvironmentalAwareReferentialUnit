@@ -1,0 +1,6 @@
+with "earu_daemon.gpr";
+project Test_Atof is
+   for Source_Dirs use (".");
+   for Object_Dir use "obj";
+   for Main use ("test_atof.adb");
+end Test_Atof;

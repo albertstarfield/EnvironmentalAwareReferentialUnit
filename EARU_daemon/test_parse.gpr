@@ -1,0 +1,3 @@
+project Test_Parse is
+   for Main use ("test_parse.adb");
+end Test_Parse;

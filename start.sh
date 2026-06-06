@@ -38,29 +38,57 @@ fi
 # 2. Navigate to daemon directory to build
 cd "$DAEMON_DIR" || { echo "[!] Failed to enter daemon directory"; exit 1; }
 
-# 3. Cleanup stale background processes
+# 3. Source Hashing and Build Optimization
+HASH_FILE=".source_hash"
+calculate_hash() {
+    # Hash all relevant source files to detect changes, excluding build artifacts
+    find . \( -name "*.adb" -o -name "*.ads" -o -name "*.gpr" -o -name "*.toml" -o -name "*.c" -o -name "*.h" -o -name "*.py" \) \
+         -not -path "./obj/*" -not -path "./bin/*" -not -path "./.git/*" -not -path "*/__pycache__/*" \
+         -not -path "./alire/*" -not -path "./config/*" \
+         -not -name "b~*" -not -name "b__*" \
+         | sort | xargs shasum -a 256 | shasum -a 256 | awk '{ print $1 }'
+}
+
+CURRENT_HASH=$(calculate_hash)
+if [ -f "$HASH_FILE" ]; then
+    OLD_HASH=$(cat "$HASH_FILE")
+else
+    OLD_HASH=""
+fi
+
+# 4. Cleanup stale background processes (Always do this to ensure a clean run)
 echo "[*] Cleaning up existing EARU processes..."
 pkill -f "earu_ml_bridge.py" 2>/dev/null
 pkill -f "earu_adb_mock.py" 2>/dev/null
 pkill -f "earu_daemon" 2>/dev/null
 
-# Clean up stale locks or half-built compilation directories to resolve parallel build corruption
-echo "[*] Cleaning up build artifacts and locks..."
-rm -rf obj bin
-run_as_user alr --non-interactive clean 2>/dev/null
+# 5. Build or Skip
+if [ "$CURRENT_HASH" != "$OLD_HASH" ] || [ ! -f "./bin/earu_daemon" ]; then
+    echo "[*] Source changed or binary missing. Building EARU Daemon..."
 
-# 4. Build the project using the original user's toolchain
-echo "[*] Building EARU Daemon with Alire as $ORIGINAL_USER..."
-run_as_user alr --non-interactive build
-
-if [ $? -ne 0 ]; then
-    echo "[!] Build failed. Cleaning build cache and retrying..."
+    # Clean up stale locks or half-built compilation directories to resolve parallel build corruption
+    echo "[*] Cleaning up build artifacts and locks..."
     rm -rf obj bin
+    run_as_user alr --non-interactive clean 2>/dev/null
+
+    # Build the project using the original user's toolchain
+    echo "[*] Building with Alire as $ORIGINAL_USER..."
     run_as_user alr --non-interactive build
+
     if [ $? -ne 0 ]; then
-        echo "[!] Build failed again. Please check compilation logs."
-        exit 1
+        echo "[!] Build failed. Cleaning build cache and retrying..."
+        rm -rf obj bin
+        run_as_user alr --non-interactive build
+        if [ $? -ne 0 ]; then
+            echo "[!] Build failed again. Please check compilation logs."
+            exit 1
+        fi
     fi
+    
+    # Save the hash if build succeeded
+    echo "$CURRENT_HASH" > "$HASH_FILE"
+else
+    echo "[*] Source code unchanged and binary exists. Skipping build and verification."
 fi
 
 # Clean duplicate RPATH to prevent dyld abort trap
@@ -69,7 +97,7 @@ if [ -f "./bin/earu_daemon" ]; then
     install_name_tool -delete_rpath /Users/albertstarfield/.local/share/alire/toolchains/gnat_native_15.1.2_60748c54/lib ./bin/earu_daemon 2>/dev/null
 fi
 
-# 5. Run the daemon natively as root from project root (direct binary invocation for max speed)
+# 6. Run the daemon natively as root from project root (direct binary invocation for max speed)
 echo "[*] Launching EARU Daemon directly from project root..."
 cd "$PROJECT_ROOT" || { echo "[!] Failed to enter project root"; exit 1; }
 

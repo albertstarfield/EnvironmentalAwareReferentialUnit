@@ -1,0 +1,17 @@
+[GENERATED OBJECT FILE]
+b__test_parse.o
+[PROJECT FILES]
+/usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/test_parse.gpr
+20260606033223 e2d6eecdb810da5c9dd30ada525716db
+[BOUND OBJECT FILES]
+/usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/test_parse.o
+[GENERATED SOURCE FILES]
+b__test_parse.ads
+b__test_parse.adb
+b__test_parse.ali
+[RESULTING OPTIONS]
+-L/usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/
+-L/usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/
+-L/users/albertstarfield/.local/share/alire/toolchains/gnat_native_15.1.2_60748c54/lib/gcc/aarch64-apple-darwin23.6.0/15.0.1/adalib/
+-static
+/users/albertstarfield/.local/share/alire/toolchains/gnat_native_15.1.2_60748c54/lib/gcc/aarch64-apple-darwin23.6.0/15.0.1/adalib/libgnat.a
