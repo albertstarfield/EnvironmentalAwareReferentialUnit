@@ -3135,22 +3135,39 @@ class PrimaryFlightDisplay:
 
         anchors = self.full_data.get("Sol_BlueMarble_TimeAnchor", {})
         if anchors:
-            def fmt_t(ts): return datetime.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "--:--"
-            fajr = anchors.get("Morning_Astronomical_Twilight", 0) / 1e9
-            dhuhr = anchors.get("Solar_Noon_Transit", 0) / 1e9
-            asr = anchors.get("Dynamic_Shadow_Ratio_Match", 0) / 1e9
-            maghrib = anchors.get("Evening_Civil_Horizon_Clearance", 0) / 1e9
-            isha = anchors.get("Evening_Astronomical_Twilight", 0) / 1e9
-            tahajjud = anchors.get("Last_Third_Night_Segment", 0) / 1e9
+            def fmt_t(ns):
+                if not ns: return "--:--"
+                ts_s = ns / 1e9
+                dt_local = datetime.datetime.fromtimestamp(ts_s).astimezone()
+                dt_utc = datetime.datetime.fromtimestamp(ts_s, datetime.timezone.utc)
+                
+                offset_td = dt_local.utcoffset()
+                offset_sec = int(offset_td.total_seconds()) if offset_td is not None else 0
+                sign = "+" if offset_sec >= 0 else "-"
+                offset_sec = abs(offset_sec)
+                hrs = offset_sec // 3600
+                mins = (offset_sec % 3600) // 60
+                tz_str = f"UTC{sign}{hrs}" if mins == 0 else f"UTC{sign}{hrs}:{mins:02d}"
+                
+                local_str = f"{dt_local.strftime('%H:%M:%S')} {tz_str}"
+                utc_str = dt_utc.strftime("%H:%M:%S UTC")
+                return f"{local_str} | {utc_str} | {ns} ns"
+
+            fajr = anchors.get("Morning_Astronomical_Twilight", 0)
+            dhuhr = anchors.get("Solar_Noon_Transit", 0)
+            asr = anchors.get("Dynamic_Shadow_Ratio_Match", 0)
+            maghrib = anchors.get("Evening_Civil_Horizon_Clearance", 0)
+            isha = anchors.get("Evening_Astronomical_Twilight", 0)
+            tahajjud = anchors.get("Last_Third_Night_Segment", 0)
             basis.extend([
                 "",
-                "--- ASTRONOMICAL TIME ANCHORS ---",
-                f"DAWN/FAJR:     {fmt_t(fajr)}",
-                f"NOON/DHUHR:    {fmt_t(dhuhr)}",
-                f"SHADOW/ASR:    {fmt_t(asr)}",
-                f"DUSK/MAGHRIB:  {fmt_t(maghrib)}",
-                f"TWILIGHT/ISHA: {fmt_t(isha)}",
-                f"TAHAJJUD:      {fmt_t(tahajjud)}"
+                "--- SOL BLUE MARBLE TIME ANCHORS ---",
+                f"DAWN:       {fmt_t(fajr)}",
+                f"NOON:       {fmt_t(dhuhr)}",
+                f"SHADOW:     {fmt_t(asr)}",
+                f"DUSK:       {fmt_t(maghrib)}",
+                f"TWILIGHT:   {fmt_t(isha)}",
+                f"LATE NIGHT: {fmt_t(tahajjud)}"
             ])
 
         for i, b in enumerate(basis): self.canvas.create_text(70, y+30+i*20, anchor="nw", text=b, fill="white", font=("Monaco", 10))
