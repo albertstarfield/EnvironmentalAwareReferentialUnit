@@ -1443,7 +1443,7 @@ class PrimaryFlightDisplay:
         x1, y1 = 50, 100
         metrics1 = [
             ("POWER RATE", f"{self.power_rate:.2f} W"),
-            ("SURVIVE PWR", f"{self.power_survival_w:.2f} W"),
+            ("Survive PWR AVG SUG", f"{self.power_survival_w:.2f} W"),
             ("DAY USAGE", f"{self.day_usage_wh:.2f} Wh"),
             ("EST. TODAY", f"{self.est_today_wh:.2f} Wh"),
             ("MONTH USE", f"{self.month_usage_wh / 1000.0:.4f} kWh"),
@@ -1451,19 +1451,19 @@ class PrimaryFlightDisplay:
         ]
         self.canvas.create_text(x1, y1 - 30, anchor="nw", text="CORE POWER", fill="cyan", font=("Monaco", 12, "bold"))
         for i, (n, v) in enumerate(metrics1):
-            self.canvas.create_text(x1, y1 + i*25, anchor="nw", text=f"{n:12}: {v}", fill="white", font=("Monaco", 10))
+            self.canvas.create_text(x1, y1 + i*25, anchor="nw", text=f"{n:20}: {v}", fill="white", font=("Monaco", 10))
 
         # --- Column 2: Battery Health ---
-        x2, y2 = 300, 100
+        x2, y2 = 330, 100
         metrics2 = [
             ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
             ("BATT HEALTH", f"{self.battery_health:.1f} %"),
             ("FULL CAP", f"{self.battery_full_wh:.2f} Wh"),
             ("DESIGN CAP", f"{self.battery_design_wh:.2f} Wh"),
-            ("ACT DRAIN", f"{self.drain_time_act:.1f} h"),
-            ("SLP DRAIN", f"{self.drain_time_slp:.1f} h"),
+            ("ACTV DRAIN", f"{self.drain_time_act:.1f} h"),
+            ("SLEP DRAIN", f"{self.drain_time_slp:.1f} h"),
             ("HIB DRAIN", f"{self.drain_time_hib:.1f} h"),
-            ("DHIB DRAIN", f"{self.drain_time_dhib:.1f} h"),
+            ("DEEP HIB", f"{self.drain_time_dhib:.1f} h"),
         ]
         self.canvas.create_text(x2, y2 - 30, anchor="nw", text="BATTERY STATUS", fill="cyan", font=("Monaco", 12, "bold"))
         for i, (n, v) in enumerate(metrics2):
@@ -1471,7 +1471,7 @@ class PrimaryFlightDisplay:
             self.canvas.create_text(x2, y2 + i*25, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
 
         # --- Column 3: SMC SoC Management ---
-        x3, y3 = 550, 100
+        x3, y3 = 600, 100
         metrics3 = [
             ("aPMX", f"{self.smc_aPMX:.0f}", "Active Perf Mode"),
             ("mTPL", f"{self.smc_mTPL:.1f} W", "Max Turbo Pwr Lim"),
@@ -2068,16 +2068,16 @@ class PrimaryFlightDisplay:
             ("POWER RATE", f"{self.power_rate:.2f} W"),
             ("DAY USAGE", f"{self.day_usage_wh:.2f} Wh"),
             ("EST. TODAY", f"{self.est_today_wh:.2f} Wh"),
-            ("SURVIVE PWR", f"{self.power_survival_w:.2f} W"),
+            ("Survive PWR AVG SUG", f"{self.power_survival_w:.2f} W"),
             ("MONTH USE", f"{self.month_usage_wh / 1000.0:.4f} kWh"),
             ("METER USE", f"{self.meter_usage_wh / 1000.0:.4f} kWh"),
             ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
             ("BATT HEALTH", f"{self.battery_health:.1f} %"),
             ("FULL CAP", f"{self.battery_full_wh:.2f} Wh"),
-            ("ACT DRAIN", f"{self.drain_time_act:.1f} h"),
-            ("SLP DRAIN", f"{self.drain_time_slp:.1f} h"),
+            ("ACTV DRAIN", f"{self.drain_time_act:.1f} h"),
+            ("SLEP DRAIN", f"{self.drain_time_slp:.1f} h"),
             ("HIB DRAIN", f"{self.drain_time_hib:.1f} h"),
-            ("DHIB DRAIN", f"{self.drain_time_dhib:.1f} h"),
+            ("DEEP HIB", f"{self.drain_time_dhib:.1f} h"),
             ("SURVIVE", self.survive_today),
             ("HIBERNATE", self.must_hibernate),
             ("PULSE SUG", f"{self.pulse_wake:.0f}/{self.pulse_length:.0f}s")
@@ -2086,7 +2086,7 @@ class PrimaryFlightDisplay:
         for i, (n, v) in enumerate(pwr_metrics):
             col = "green" if (n == "SURVIVE" and v == "Yes") or (n == "HIBERNATE" and v == "No") else ("red" if (n == "SURVIVE" and v == "No") or (n == "HIBERNATE" and v == "Yes") else "white")
             if n == "BATT HEALTH": col = "green" if self.battery_health > 80 else "yellow"
-            self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
+            self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:20}: {v}", fill=col, font=("Monaco", 10))
 
         # --- SMC Power Management Keys ---
         x_smc, y_smc = 750, y_pwr + len(pwr_metrics) * 30 + 30
