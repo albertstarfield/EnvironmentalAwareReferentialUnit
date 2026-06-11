@@ -599,6 +599,21 @@ package body Earu.IO is
       AP ("talp_k",           F (State.SMC.TaLP_K));
       AP ("tarf_k",           F (State.SMC.TaRF_K));
       AI ("turbo",            State.SMC.Turbo);
+      --  SMC Power Management Keys
+      AP ("aPMX",  F (State.SMC.Active_Perf_Mode));
+      AP ("mTPL",  F (State.SMC.Max_Turbo_Power_Lim));
+      AP ("mUTL",  F (State.SMC.Max_User_Turbo_Lim));
+      AP ("xPPT",  F (State.SMC.Pkg_Power_Tracking));
+      AP ("xLPM",  F (State.SMC.Low_Power_Mode_Lim));
+      AP ("PHPB",  F (State.SMC.Pkg_High_Pwr_Budget));
+      AP ("PHPM",  F (State.SMC.Pkg_High_Pwr_Mode));
+      AP ("PHPC",  F (State.SMC.Pkg_High_Pwr_Curr));
+      AP ("PHPS",  F (State.SMC.Pkg_High_Pwr_Sensor));
+      AP ("PMVC",  F (State.SMC.Pwr_Mgmt_Vrm_Curr));
+      AP ("PPSC",  F (State.SMC.Pwr_Supply_Curr));
+      AP ("PSVR",  F (State.SMC.Pwr_Supply_Vrm));
+      AP ("PDBR",  F (State.SMC.Pwr_Device_Batt_Rate));
+      AP ("PDTR",  F (State.SMC.Pwr_Device_Temp_Rate));
       Append (Buf, """temps"": {");
       AP ("PSTR", F (State.SMC.Temps.PSTR));
       AP ("TCMz", F (State.SMC.Temps.TCMz));
