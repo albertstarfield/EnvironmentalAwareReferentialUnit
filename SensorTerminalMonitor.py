@@ -432,6 +432,7 @@ class PrimaryFlightDisplay:
         self.month_usage_wh: float = 0.0
         self.meter_usage_wh: float = 0.0
         self.est_today_wh: float = 0.0
+        self.power_survival_w: float = 0.0
         self.battery_bank_wh: float = 0.0
         self.battery_health: float = 100.0
         self.battery_full_wh: float = 0.0
@@ -1193,6 +1194,7 @@ class PrimaryFlightDisplay:
                     self.month_usage_wh = float(smc.get('AccumulativePowerUsageThisMonth_Wh', 0.0))
                     self.meter_usage_wh = float(smc.get('AccumulativePowerUsageMeter_Wh', 0.0))
                     self.est_today_wh = float(smc.get('EstimatedTodayPowerUsage_Wh', 0.0))
+                    self.power_survival_w = float(smc.get('PowerSurvivalW', 0.0))
                     self.survive_today = str(smc.get('WillBatterySurviveOneDay', "Yes"))
                     self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
                     self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
@@ -1998,6 +2000,7 @@ class PrimaryFlightDisplay:
             ("POWER RATE", f"{self.power_rate:.2f} W"),
             ("DAY USAGE", f"{self.day_usage_wh:.2f} Wh"),
             ("EST. TODAY", f"{self.est_today_wh:.2f} Wh"),
+            ("SURVIVE PWR", f"{self.power_survival_w:.2f} W"),
             ("MONTH USE", f"{self.month_usage_wh / 1000.0:.4f} kWh"),
             ("METER USE", f"{self.meter_usage_wh / 1000.0:.4f} kWh"),
             ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
