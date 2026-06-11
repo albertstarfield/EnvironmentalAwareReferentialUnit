@@ -746,18 +746,19 @@ class PrimaryFlightDisplay:
     def get_soft_keys(self, w: int) -> list[dict[str, Any]]:
         # Ensure w is at least a reasonable value for calculation
         if w < 100: w = 1000
-        btn_w = w // 12
+        btn_w = w // 13
         return [
             {"label": "SAVT", "page": 0, "rect": (5.0, 5.0, float(5+btn_w), 55.0)},
             {"label": "SYSTEM", "page": 1, "rect": (float(10+btn_w), 5.0, float(10+2*btn_w), 55.0)},
             {"label": "PROGNOS", "page": 2, "rect": (float(15+2*btn_w), 5.0, float(15+3*btn_w), 55.0)},
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
-            {"label": "LOCAL_WEATHER", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
+            {"label": "WEATHER", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
             {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
             {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
-            {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
-            {"label": "CENTER", "cmd": "center", "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
+            {"label": "ENERGY", "page": 9, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
+            {"label": "SEARCH", "page": 8, "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
+            {"label": "CENTER", "cmd": "center", "rect": (float(55+10*btn_w), 5.0, float(55+11*btn_w), 55.0)},
             {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 5.0, float(w - btn_w - 10), 55.0)},
             {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 5.0, float(w - 5), 55.0)}
         ]
@@ -777,9 +778,9 @@ class PrimaryFlightDisplay:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
                     self.page = page_val
                 elif key.get("cmd") == "next":
-                    self.page = (self.page + 1) % 9
+                    self.page = (self.page + 1) % 10
                 elif key.get("cmd") == "prev":
-                    self.page = (self.page - 1) % 9
+                    self.page = (self.page - 1) % 10
                 elif key.get("cmd") == "center":
                     self.set_auto_center(True)
                 self.switch_page_view()
@@ -1295,6 +1296,7 @@ class PrimaryFlightDisplay:
         elif self.page == 6: self.draw_wind_page(w, h)
         elif self.page == 7: self.draw_weather_page(w, h)
         elif self.page == 8: self.draw_search_page(w, h)
+        elif self.page == 9: self.draw_energy_page(w, h)
         self.draw_nav_keys()
         self.draw_warning_caution_buttons(w, h)
 
@@ -1433,6 +1435,72 @@ class PrimaryFlightDisplay:
                     self.switch_page_view()
                     return
                 y += 30
+
+    def draw_energy_page(self, w: float, h: float) -> None:
+        self.canvas.create_text(w/2, 40, text="ENERGY & POWER MANAGEMENT", fill="yellow", font=("Monaco", 20, "bold"))
+        
+        # --- Column 1: Core Power Stats ---
+        x1, y1 = 50, 100
+        metrics1 = [
+            ("POWER RATE", f"{self.power_rate:.2f} W"),
+            ("SURVIVE PWR", f"{self.power_survival_w:.2f} W"),
+            ("DAY USAGE", f"{self.day_usage_wh:.2f} Wh"),
+            ("EST. TODAY", f"{self.est_today_wh:.2f} Wh"),
+            ("MONTH USE", f"{self.month_usage_wh / 1000.0:.4f} kWh"),
+            ("METER USE", f"{self.meter_usage_wh / 1000.0:.4f} kWh"),
+        ]
+        self.canvas.create_text(x1, y1 - 30, anchor="nw", text="CORE POWER", fill="cyan", font=("Monaco", 12, "bold"))
+        for i, (n, v) in enumerate(metrics1):
+            self.canvas.create_text(x1, y1 + i*25, anchor="nw", text=f"{n:12}: {v}", fill="white", font=("Monaco", 10))
+
+        # --- Column 2: Battery Health ---
+        x2, y2 = 300, 100
+        metrics2 = [
+            ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
+            ("BATT HEALTH", f"{self.battery_health:.1f} %"),
+            ("FULL CAP", f"{self.battery_full_wh:.2f} Wh"),
+            ("DESIGN CAP", f"{self.battery_design_wh:.2f} Wh"),
+            ("ACT DRAIN", f"{self.drain_time_act:.1f} h"),
+            ("SLP DRAIN", f"{self.drain_time_slp:.1f} h"),
+            ("HIB DRAIN", f"{self.drain_time_hib:.1f} h"),
+            ("DHIB DRAIN", f"{self.drain_time_dhib:.1f} h"),
+        ]
+        self.canvas.create_text(x2, y2 - 30, anchor="nw", text="BATTERY STATUS", fill="cyan", font=("Monaco", 12, "bold"))
+        for i, (n, v) in enumerate(metrics2):
+            col = "green" if n == "BATT HEALTH" and self.battery_health > 80 else ("yellow" if n == "BATT HEALTH" else "white")
+            self.canvas.create_text(x2, y2 + i*25, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
+
+        # --- Column 3: SMC SoC Management ---
+        x3, y3 = 550, 100
+        metrics3 = [
+            ("aPMX", f"{self.smc_aPMX:.0f}", "Active Perf Mode"),
+            ("mTPL", f"{self.smc_mTPL:.1f} W", "Max Turbo Pwr Lim"),
+            ("mUTL", f"{self.smc_mUTL:.1f} W", "Max User Turbo Lim"),
+            ("xPPT", f"{self.smc_xPPT:.1f} W", "Pkg Pwr Tracking"),
+            ("xLPM", f"{self.smc_xLPM:.1f} W", "Low Pwr Mode Lim"),
+            ("PHPB", f"{self.smc_PHPB:.1f} W", "Pkg High Pwr Budget"),
+            ("PHPM", f"{self.smc_PHPM:.2f}", "Pkg High Pwr Mode"),
+            ("PHPC", f"{self.smc_PHPC:.2f} A", "Pkg High Pwr Curr"),
+            ("PHPS", f"{self.smc_PHPS:.2f} W", "Pkg High Pwr Sensor"),
+            ("PMVC", f"{self.smc_PMVC:.2f} A", "Pwr Mgmt VRM Curr"),
+            ("PPSC", f"{self.smc_PPSC:.2f} A", "Pwr Supply Curr"),
+            ("PSVR", f"{self.smc_PSVR:.0f}", "Pwr Supply VRM Stat"),
+            ("PDBR", f"{self.smc_PDBR:.1f} W", "Pwr Device Batt Rate"),
+            ("PDTR", f"{self.smc_PDTR:.1f} C", "Pwr Device Temp Rate"),
+        ]
+        self.canvas.create_text(x3, y3 - 30, anchor="nw", text="SMC SoC POWER MGMT", fill="cyan", font=("Monaco", 12, "bold"))
+        for i, (key, val, desc) in enumerate(metrics3):
+            # Cyan for writable keys (aPMX, mTPL), White for read keys
+            col = "#00ccff" if key in ("aPMX", "mTPL") else "white"
+            self.canvas.create_text(x3, y3 + i*22, anchor="nw", text=f"{key:5}: {val:10} ({desc})", fill=col, font=("Monaco", 9))
+
+        # --- Survival Pulsing Suggestion ---
+        sx, sy = 50, 350
+        self.canvas.create_text(sx, sy, anchor="nw", text="SURVIVAL PULSING SUGGESTION", fill="orange", font=("Monaco", 12, "bold"))
+        self.canvas.create_text(sx, sy+25, anchor="nw", text=f"WAKE INTERVAL : {self.pulse_wake:.0f} s", fill="white", font=("Monaco", 10))
+        self.canvas.create_text(sx, sy+50, anchor="nw", text=f"WAKE DURATION : {self.pulse_length:.0f} s", fill="white", font=("Monaco", 10))
+        duty = (self.pulse_length / self.pulse_wake * 100.0) if self.pulse_wake > 0 else 100.0
+        self.canvas.create_text(sx, sy+75, anchor="nw", text=f"DUTY CYCLE    : {duty:.1f} %", fill="white", font=("Monaco", 10))
 
     def draw_nav_keys(self) -> None:
         self.nav_canvas.delete("all")
