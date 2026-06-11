@@ -805,28 +805,49 @@ package body Earu.IO is
       File : File_Type;
       Val  : Real := 0.0;
       Read_Success : Boolean := False;
-   begin
+
+      function Try_Read (Path : String) return Boolean is
       begin
-         Open (File, In_File, "/Volumes/EARU_dataIO/" & Filename);
-      exception
-         when Name_Error | Use_Error =>
-            begin
-               Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/" & Filename);
-            exception
-               when others =>
-                  null;
-            end;
-      end;
-      
-      if Is_Open (File) then
-         begin
-            Real_IO.Get (File, Val);
-            Read_Success := True;
-         exception
-            when others =>
-               Val := 0.0;
-         end;
+         Open (File, In_File, Path);
+         Real_IO.Get (File, Val);
          Close (File);
+         return Val /= 0.0; -- Success if we got a non-zero value
+      exception
+         when others =>
+            if Is_Open (File) then Close (File); end if;
+            return False;
+      end Try_Read;
+
+   begin
+      -- Try primary RAM disk path
+      Read_Success := Try_Read ("/Volumes/EARU_dataIO/" & Filename);
+
+      -- Fallback 1: Try local project root
+      if not Read_Success then
+         Read_Success := Try_Read ("/usr/local/EnvironmentalAwareReferentialUnit/" & Filename);
+      end if;
+
+      -- Fallback 2: Handle prefix mismatch (SMC vs TEMP)
+      if not Read_Success then
+         if Filename'Length > 11 and then Filename (1 .. 11) = "sensor_smc_" then
+            declare
+               Fallback_Name : constant String := "sensor_temp_" & Filename (12 .. Filename'Last);
+            begin
+               Read_Success := Try_Read ("/Volumes/EARU_dataIO/" & Fallback_Name);
+               if not Read_Success then
+                  Read_Success := Try_Read ("/usr/local/EnvironmentalAwareReferentialUnit/" & Fallback_Name);
+               end if;
+            end;
+         elsif Filename'Length > 12 and then Filename (1 .. 12) = "sensor_temp_" then
+             declare
+               Fallback_Name : constant String := "sensor_smc_" & Filename (13 .. Filename'Last);
+            begin
+               Read_Success := Try_Read ("/Volumes/EARU_dataIO/" & Fallback_Name);
+               if not Read_Success then
+                  Read_Success := Try_Read ("/usr/local/EnvironmentalAwareReferentialUnit/" & Fallback_Name);
+               end if;
+            end;
+         end if;
       end if;
       
       if Read_Success then

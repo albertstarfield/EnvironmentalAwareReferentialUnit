@@ -17,6 +17,7 @@ with Ada.Real_Time;
 with GNAT.Sockets;
 with Earu.Network_Status;
 with Ada.Strings.Fixed;
+with Earu.Weather_Fetcher;
 
 procedure Earu_Daemon is
    use Earu.Types;
@@ -354,6 +355,8 @@ procedure Earu_Daemon is
     task Network_Probe_Task;
     task System_Log_Watcher_Task;
 
+    Weather_Fetcher_Task : Earu.Weather_Fetcher.Fetcher;
+
     task body System_Log_Watcher_Task is
        Ret : Interfaces.C.int;
        pragma Unreferenced (Ret);
@@ -631,11 +634,27 @@ procedure Earu_Daemon is
                SMC.Thrust_N := Real (Stats_SHM.SMC_Thrust_N);
                SMC.Massflow_Kg_S := Real (Stats_SHM.SMC_Massflow);
                
-               SMC.Pulse_Wake := Real (Stats_SHM.SMC_Pulse_Wake);
-               SMC.Pulse_Length := Real (Stats_SHM.SMC_Pulse_Len);
-               SMC.Heatflux_J := Real (Stats_SHM.Heatflux_J);
-               SMC.Airflow_Inlet_K := Real (Stats_SHM.SMC_Inlet_K);
-               SMC.Airflow_Outlet_K := Real (Stats_SHM.SMC_Outlet_K);
+                SMC.Pulse_Wake := Real (Stats_SHM.SMC_Pulse_Wake);
+                SMC.Pulse_Length := Real (Stats_SHM.SMC_Pulse_Len);
+                SMC.Heatflux_J := Real (Stats_SHM.Heatflux_J);
+                SMC.Airflow_Inlet_K := Real (Stats_SHM.SMC_Inlet_K);
+                SMC.Airflow_Outlet_K := Real (Stats_SHM.SMC_Outlet_K);
+
+                --  SMC Power Management Keys (read from sensor files)
+                SMC.Active_Perf_Mode    := Earu.IO.Read_Sensor_Real ("sensor_smc_aPMX.dat");
+                SMC.Max_Turbo_Power_Lim := Earu.IO.Read_Sensor_Real ("sensor_smc_mTPL.dat");
+                SMC.Max_User_Turbo_Lim  := Earu.IO.Read_Sensor_Real ("sensor_smc_mUTL.dat");
+                SMC.Pkg_Power_Tracking  := Earu.IO.Read_Sensor_Real ("sensor_smc_xPPT.dat");
+                SMC.Low_Power_Mode_Lim  := Earu.IO.Read_Sensor_Real ("sensor_smc_xLPM.dat");
+                SMC.Pkg_High_Pwr_Budget := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPB.dat");
+                SMC.Pkg_High_Pwr_Mode   := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPM.dat");
+                SMC.Pkg_High_Pwr_Curr   := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPC.dat");
+                SMC.Pkg_High_Pwr_Sensor := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPS.dat");
+                SMC.Pwr_Mgmt_Vrm_Curr   := Earu.IO.Read_Sensor_Real ("sensor_smc_PMVC.dat");
+                SMC.Pwr_Supply_Curr     := Earu.IO.Read_Sensor_Real ("sensor_smc_PPSC.dat");
+                SMC.Pwr_Supply_Vrm      := Earu.IO.Read_Sensor_Real ("sensor_smc_PSVR.dat");
+                SMC.Pwr_Device_Batt_Rate:= Earu.IO.Read_Sensor_Real ("sensor_smc_PDBR.dat");
+                SMC.Pwr_Device_Temp_Rate:= Earu.IO.Read_Sensor_Real ("sensor_smc_PDTR.dat");
                
                SMC.Will_Bat_Survive := SMC.Pulse_Wake = 0.0;
                if not SMC.Will_Bat_Survive then
@@ -833,6 +852,7 @@ begin
    Earu.IO.Configure_Realtime (2, 1, 2);
    Setup_Ramdisk;
    Earu.State_Store.State_Buffer.Initialize_State;
+   Weather_Fetcher_Task.Start;
 
    declare
       Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Machine_Life, Q_W, Q_X, Q_Y, Q_Z : Earu.Types.Real;

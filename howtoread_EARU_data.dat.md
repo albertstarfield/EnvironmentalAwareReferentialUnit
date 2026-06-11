@@ -161,6 +161,25 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `PulsingSuggestionMaintenanceWindowWake` | Seconds | Suggested background wake interval to stretch battery life. |
 | `PulsingSuggestionMaintenanceWindowWakeLength` | Seconds | Suggested duration for each background wake. |
 
+### 10a. `smc` Power Management Keys (SMC Direct Reads)
+These keys are read directly from macOS SMC sensor files and expose the SoC power management subsystem:
+| Variable | Unit | R/W | Description |
+| :--- | :--- | :--- | :--- |
+| `aPMX` | - | Write | Active Performance Mode — signals the SMC to enter high-performance state. |
+| `mTPL` | Watts | Write | Max Turbo Power Limit — removes the SoC power cap for burst workloads. |
+| `mUTL` | Watts | Read | Max User Turbo Limit — user-configured power ceiling (floor for turbo headroom). |
+| `xPPT` | Watts | Read | Max Package Power Tracking — SoC PPT limit. 255 = no limit. |
+| `xLPM` | Watts | Read | Max Low Power Mode — LPM power ceiling. |
+| `PHPB` | Watts | Read | Package High Power Budget — total SoC power budget (e.g. 200W). |
+| `PHPM` | Ratio | Read | Package High Power Mode — utilization target (0.89 = 89%). |
+| `PHPC` | Amps | Read | Package High Power Current — SoC current draw. |
+| `PHPS` | Watts | Read | Package High Power Sensor — secondary power reading. |
+| `PMVC` | Amps | Read | Power Management Voltage Current — VRM current. |
+| `PPSC` | Amps | Read | Power Supply Current — charger/battery current. |
+| `PSVR` | - | Read | Power Supply Voltage Regulator — VRM health indicator. |
+| `PDBR` | Watts | Read | Power Device Battery Rate — charge (positive) or discharge (negative) watts. |
+| `PDTR` | Celsius | Read | Power Device Temperature Rate — battery/VRM temperature. |
+
 ### 10.1. `fluid_dynamics` (Advanced Flow & Turbulence Parameters)
 Sub-object inside the `smc` segment detailing dimensionless numbers and boundary layer mechanics:
 | Variable | Unit | Description |

@@ -207,10 +207,25 @@ package Earu.Types is
       Turbulence_Int_Up   : aliased Real := 0.0;
       Reynolds_Number_Re0 : aliased Real := 0.0;
       Reynolds_Number     : aliased Real := 0.0;
-      Weber_Number        : aliased Real := 0.0;
-      Strouhal_Number     : aliased Real := 0.0;
-      Cauchy_Number       : aliased Real := 0.0;
-   end record;
+       Weber_Number        : aliased Real := 0.0;
+       Strouhal_Number     : aliased Real := 0.0;
+       Cauchy_Number       : aliased Real := 0.0;
+       --  SMC Power Management Keys
+       Active_Perf_Mode    : aliased Real := 0.0;   --  aPMX: Active Performance Mode (write to SMC)
+       Max_Turbo_Power_Lim : aliased Real := 0.0;   --  mTPL: Max Turbo Power Limit (write to SMC)
+       Max_User_Turbo_Lim  : aliased Real := 0.0;   --  mUTL: Max User Turbo Limit (read)
+       Pkg_Power_Tracking  : aliased Real := 255.0;  --  xPPT: Max Package Power Tracking (255=none)
+       Low_Power_Mode_Lim  : aliased Real := 0.0;   --  xLPM: Max Low Power Mode ceiling
+       Pkg_High_Pwr_Budget : aliased Real := 0.0;   --  PHPB: Package High Power Budget (W)
+       Pkg_High_Pwr_Mode   : aliased Real := 0.0;   --  PHPM: Package High Power Mode (util target)
+       Pkg_High_Pwr_Curr   : aliased Real := 0.0;   --  PHPC: Package High Power Current (A)
+       Pkg_High_Pwr_Sensor : aliased Real := 0.0;   --  PHPS: Package High Power Sensor (secondary)
+       Pwr_Mgmt_Vrm_Curr   : aliased Real := 0.0;   --  PMVC: Power Management Voltage Current
+       Pwr_Supply_Curr     : aliased Real := 0.0;   --  PPSC: Power Supply Current (charger/batt)
+       Pwr_Supply_Vrm      : aliased Real := 0.0;   --  PSVR: Power Supply Voltage Regulator
+       Pwr_Device_Batt_Rate: aliased Real := 0.0;   --  PDBR: Power Device Battery Rate (W)
+       Pwr_Device_Temp_Rate: aliased Real := 0.0;   --  PDTR: Power Device Temperature Rate
+    end record;
 
    type System_Stats_Type is record
       CPU_Usage               : aliased Real := 0.0;
