@@ -632,9 +632,9 @@ procedure Earu_Daemon is
                SMC.Accum_Power_Month_Wh := Real (Stats_SHM.Month_Power_Wh);
                SMC.Accum_Power_Meter_Wh := Real (Stats_SHM.Meter_Power_Wh);
                SMC.Thrust_N := Real (Stats_SHM.SMC_Thrust_N);
-               SMC.Massflow_Kg_S := Real (Stats_SHM.SMC_Massflow);
-               
-                SMC.Pulse_Wake := Real (Stats_SHM.SMC_Pulse_Wake);
+               SMC.Power_Survival_W := Real (Stats_SHM.Power_Survival_W);
+
+               SMC.Pulse_Wake := Real (Stats_SHM.SMC_Pulse_Wake);
                 SMC.Pulse_Length := Real (Stats_SHM.SMC_Pulse_Len);
                 SMC.Heatflux_J := Real (Stats_SHM.Heatflux_J);
                 SMC.Airflow_Inlet_K := Real (Stats_SHM.SMC_Inlet_K);

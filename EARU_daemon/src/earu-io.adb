@@ -586,6 +586,7 @@ package body Earu.IO is
       AP ("heatflux_j",      F (State.SMC.Heatflux_J));
       AP ("power",           F (State.SMC.Power));
       AP ("PowerRateUsage",  F (State.SMC.Power_Rate_Usage));
+      AP ("PowerSurvivalW",  F (State.SMC.Power_Survival_W));
       AP ("DayPowerUsage_Wh",               F (State.SMC.Day_Power_Usage_Wh));
       AP ("EstimatedTodayPowerUsage_Wh",    F (State.SMC.Est_Today_Power_Wh));
       AP ("AccumulativePowerUsageThisMonth_Wh", F (State.SMC.Accum_Power_Month_Wh));

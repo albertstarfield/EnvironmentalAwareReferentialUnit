@@ -141,7 +141,7 @@ package Earu.Shm is
       SMC_Humidity      : Interfaces.IEEE_Float_32;
       SMC_Fan1_RPM      : Interfaces.IEEE_Float_32;
       SMC_Fan2_RPM      : Interfaces.IEEE_Float_32;
-      SMC_Massflow      : Interfaces.IEEE_Float_32;
+      Power_Survival_W  : Interfaces.IEEE_Float_32;
       TS_ISO            : String (1 .. 32);
       PMSET_Info        : String (1 .. 1024);
    end record with Convention => C;
@@ -214,7 +214,7 @@ package Earu.Shm is
       SMC_Humidity    at 496 range 0 .. 31;
       SMC_Fan1_RPM    at 500 range 0 .. 31;
       SMC_Fan2_RPM    at 504 range 0 .. 31;
-      SMC_Massflow    at 508 range 0 .. 31;
+      Power_Survival_W at 508 range 0 .. 31;
       TS_ISO          at 512 range 0 .. 255;
       PMSET_Info      at 544 range 0 .. 8191;
    end record;

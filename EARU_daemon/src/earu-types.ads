@@ -225,6 +225,7 @@ package Earu.Types is
        Pwr_Supply_Vrm      : aliased Real := 0.0;   --  PSVR: Power Supply Voltage Regulator
        Pwr_Device_Batt_Rate: aliased Real := 0.0;   --  PDBR: Power Device Battery Rate (W)
        Pwr_Device_Temp_Rate: aliased Real := 0.0;   --  PDTR: Power Device Temperature Rate
+       Power_Survival_W    : aliased Real := 0.0;   --  Average power required to survive 24h
     end record;
 
    type System_Stats_Type is record

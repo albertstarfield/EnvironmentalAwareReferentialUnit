@@ -149,6 +149,7 @@ Metrics regarding the stability of the main 100Hz sensor loop.
 | `humidity_pct` | % | Estimated relative humidity. |
 | `power` | Watts | Power consumption (derived from `PSTR`). |
 | `PowerRateUsage` | Watts | Duplicate of `power`. |
+| `PowerSurvivalW` | Watts | Average power consumption required to survive until midnight with current battery. |
 | `cooling_efficiency_pct`| % | Convective thermal exhaust extraction efficiency. |
 | `work_efficiency_pct` | % | Derived computational work efficiency ($100 - \text{cooling\_efficiency\_pct}$). |
 | `thermal_inefficiency_w`| Watts | Power dissipated as heat losses in the cooling system. |
