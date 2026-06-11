@@ -367,6 +367,22 @@ class PrimaryFlightDisplay:
         self.pulse_wake: float = 0.0
         self.pulse_length: float = 0.0
 
+        # SMC SoC Power Management Variables
+        self.smc_aPMX: float = 0.0
+        self.smc_mTPL: float = 0.0
+        self.smc_mUTL: float = 0.0
+        self.smc_xPPT: float = 0.0
+        self.smc_xLPM: float = 0.0
+        self.smc_PHPB: float = 0.0
+        self.smc_PHPM: float = 0.0
+        self.smc_PHPC: float = 0.0
+        self.smc_PHPS: float = 0.0
+        self.smc_PMVC: float = 0.0
+        self.smc_PPSC: float = 0.0
+        self.smc_PSVR: float = 0.0
+        self.smc_PDBR: float = 0.0
+        self.smc_PDTR: float = 0.0
+
         # Smoothed rates and thermodynamics (1Hz filters)
         self.smooth_massflow: float = 0.0
         self.smooth_heatflux: float = 0.0
@@ -1044,6 +1060,22 @@ class PrimaryFlightDisplay:
                     self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
                     self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
                     self.turbo = int(float(smc.get('turbo', 0)))
+
+                    self.smc_aPMX = float(smc.get('aPMX', 0.0))
+                    self.smc_mTPL = float(smc.get('mTPL', 0.0))
+                    self.smc_mUTL = float(smc.get('mUTL', 0.0))
+                    self.smc_xPPT = float(smc.get('xPPT', 255.0))
+                    self.smc_xLPM = float(smc.get('xLPM', 0.0))
+                    self.smc_PHPB = float(smc.get('PHPB', 0.0))
+                    self.smc_PHPM = float(smc.get('PHPM', 0.0))
+                    self.smc_PHPC = float(smc.get('PHPC', 0.0))
+                    self.smc_PHPS = float(smc.get('PHPS', 0.0))
+                    self.smc_PMVC = float(smc.get('PMVC', 0.0))
+                    self.smc_PPSC = float(smc.get('PPSC', 0.0))
+                    self.smc_PSVR = float(smc.get('PSVR', 0.0))
+                    self.smc_PDBR = float(smc.get('PDBR', 0.0))
+                    self.smc_PDTR = float(smc.get('PDTR', 0.0))
+
                     self.fan_rpms = [
                         float(smc.get('PropellerEngine1Tach', 0.0)),
                         float(smc.get('PropellerEngine2Tach', 0.0))
@@ -1234,7 +1266,7 @@ class PrimaryFlightDisplay:
 
     def draw_energy_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ENERGY & POWER MANAGEMENT", fill="yellow", font=("Monaco", 20, "bold"))
-        
+
         # --- Column 1: Core Power Stats ---
         x1, y1 = 50, 100
         metrics1 = [

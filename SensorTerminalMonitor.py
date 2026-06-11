@@ -1438,7 +1438,7 @@ class PrimaryFlightDisplay:
 
     def draw_energy_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ENERGY & POWER MANAGEMENT", fill="yellow", font=("Monaco", 20, "bold"))
-        
+
         # --- Column 1: Core Power Stats ---
         x1, y1 = 50, 100
         metrics1 = [

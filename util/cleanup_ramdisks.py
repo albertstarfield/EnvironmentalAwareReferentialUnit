@@ -12,18 +12,18 @@ def cleanup():
     to_detach = []
 
     for block in blocks:
-        lines = [l.strip() for l in block.splitlines() if l.strip()]
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
         if not lines:
             continue
 
-        is_ram = any(l.startswith("image-path") and "ram://" in l for l in lines)
+        is_ram = any(line.startswith("image-path") and "ram://" in line for line in lines)
         if is_ram:
             # Find lines starting with /dev/disk
-            for l in lines:
-                if l.startswith("/dev/disk"):
+            for line in lines:
+                if line.startswith("/dev/disk"):
                     # Extract the disk node (e.g., /dev/disk123)
                     # We only need the base disk, not slices, but detaching slice usually detaches whole image
-                    disk = l.split()[0]
+                    disk = line.split()[0]
                     # We want the base disk (e.g. /dev/disk4, not /dev/disk4s1)
                     # Actually hdiutil detach works on any of them, but let's be clean.
                     if 's' not in disk[9:]: # Skip slices if base is present

@@ -56,7 +56,7 @@ def weather_worker(lat, lon):
                     "current": ["temperature_2m", "relative_humidity_2m", "surface_pressure", "weather_code"]
                 }
                 r = requests.get(url, params=params, timeout=10)
-                if r.status_code == 200:
+                if r.status_code == 200 and shm.buf is not None:
                     data = r.json()["current"]
                     # II f f f i d
                     # UpdateCount, Pad, Temp, Hum, Press, Code, Time
@@ -95,7 +95,8 @@ def stats_worker():
             payload = struct.pack("II f f f i f f",
                                 update_count, 0,
                                 cpu, mem, batt_pct, batt_state, 0.0, 0.0)
-            shm.buf[:len(payload)] = payload
+            if shm.buf is not None:
+                shm.buf[:len(payload)] = payload
             update_count += 1
             time.sleep(1)
     finally:
@@ -120,7 +121,8 @@ def ml_worker():
             # We'd need sensor data from other SHMs here
             # For now, just write dummy or "INOP"
             payload = struct.pack("II f f I", update_count, 0, 0.0, 0.0, 0)
-            shm.buf[:len(payload)] = payload
+            if shm.buf is not None:
+                shm.buf[:len(payload)] = payload
             update_count += 1
             time.sleep(0.5)
     finally:
@@ -151,5 +153,7 @@ if __name__ == "__main__":
 
     # Now run the original collector logic
     # I'll just import and run it
-    import earu_ml_bridge
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'EARU_daemon', 'python'))
+    import earu_ml_bridge # type: ignore
     earu_ml_bridge.main()

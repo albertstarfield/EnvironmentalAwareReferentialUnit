@@ -20,8 +20,8 @@ new_key_event = False
 
 def key_callback(proxy, type, event, refcon):
     global last_key_press, last_key_time, new_key_event
-    if type == CoreGraphics.kCGEventKeyDown:
-        keycode = CoreGraphics.CGEventGetIntegerValueField(event, CoreGraphics.kCGKeyboardEventKeycode)
+    if type == CoreGraphics.kCGEventKeyDown: # type: ignore
+        keycode = CoreGraphics.CGEventGetIntegerValueField(event, CoreGraphics.kCGKeyboardEventKeycode) # type: ignore
         with lock:
             last_key_press = keycode
             last_key_time = time.time()
@@ -30,11 +30,11 @@ def key_callback(proxy, type, event, refcon):
 
 def start_global_listener():
     # kCGEventMaskBit(eventType) is just (1 << eventType)
-    mask = (1 << CoreGraphics.kCGEventKeyDown)
+    mask = (1 << CoreGraphics.kCGEventKeyDown) # type: ignore
 
-    tap = CoreGraphics.CGEventTapCreate(
-        CoreGraphics.kCGSessionEventTap,
-        CoreGraphics.kCGHeadInsertEventTap,
+    tap = CoreGraphics.CGEventTapCreate( # type: ignore
+        CoreGraphics.kCGSessionEventTap, # type: ignore
+        CoreGraphics.kCGHeadInsertEventTap, # type: ignore
         0,
         mask,
         key_callback,
@@ -46,12 +46,12 @@ def start_global_listener():
         print("[!] Tip: You might need to remove and re-add your Terminal in Privacy settings.")
         return
 
-    CoreGraphics.CFRunLoopAddSource(
-        CoreGraphics.CFRunLoopGetCurrent(),
-        CoreGraphics.CGEventTapCreateRunLoopSource(None, tap, 0),
-        CoreGraphics.kCFRunLoopCommonModes
+    CoreGraphics.CFRunLoopAddSource( # type: ignore
+        CoreGraphics.CFRunLoopGetCurrent(), # type: ignore
+        CoreGraphics.CGEventTapCreateRunLoopSource(None, tap, 0), # type: ignore
+        CoreGraphics.kCFRunLoopCommonModes # type: ignore
     )
-    CoreGraphics.CFRunLoopRun()
+    CoreGraphics.CFRunLoopRun() # type: ignore
 
 # Start the global listener in a background thread
 listener_thread = threading.Thread(target=start_global_listener, daemon=True)
