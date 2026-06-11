@@ -581,39 +581,100 @@ class PrimaryFlightDisplay:
         if lower_key in self.panning_keys: self.panning_keys.remove(lower_key)
         if key in self.panning_keys: self.panning_keys.remove(key)
 
+    def _scan_wifi_corewlan(self) -> list[dict[str, Any]]:
+        """Scan WiFi via CoreWLAN (requires Location Services for SSID/BSSID)."""
+        try:
+            from CoreWLAN import CWInterface  # type: ignore[import]
+            iface = CWInterface.interface()
+            if not iface or not iface.powerOn():
+                return []
+            results, _ = iface.scanForNetworksWithName_error_(None, None)
+            if not results:
+                return []
+            networks = []
+            for n in results.allObjects():
+                networks.append({
+                    "ssid": str(n.ssid()) if n.ssid() else "<Hidden SSID>",
+                    "bssid": str(n.bssid()) if n.bssid() else "unknown",
+                    "rssi": n.rssiValue(),
+                    "channel": n.channel()
+                })
+            return networks
+        except Exception:
+            return []
+
+    def _scan_wifi_airport(self) -> list[dict[str, Any]]:
+        """Fallback: scan WiFi via airport -s (removed in macOS 26+)."""
+        try:
+            res = subprocess.run([
+                "/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport",
+                "-s"
+            ], capture_output=True, text=True, timeout=12)
+            lines = res.stdout.splitlines()
+            networks = []
+            for line in lines[1:]:
+                parts = line.strip().split()
+                if len(parts) >= 4:
+                    bssid_idx = -1
+                    for i, part in enumerate(parts):
+                        if re.match(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$', part):
+                            bssid_idx = i
+                            break
+                    if bssid_idx != -1:
+                        ssid = " ".join(parts[:bssid_idx])
+                        bssid = parts[bssid_idx]
+                        rssi = parts[bssid_idx + 1]
+                        channel = parts[bssid_idx + 2]
+                        networks.append({
+                            "ssid": ssid or "<Hidden SSID>",
+                            "bssid": bssid,
+                            "rssi": int(rssi) if rssi.lstrip('-').isdigit() else -90,
+                            "channel": channel
+                        })
+            return networks
+        except Exception:
+            return []
+
+    def _scan_bluetooth(self) -> list[dict[str, Any]]:
+        """Scan Bluetooth via system_profiler (paired + connected devices)."""
+        try:
+            res = subprocess.run(
+                ["system_profiler", "SPBluetoothDataType"],
+                capture_output=True, text=True, timeout=12
+            )
+            bt_keys = {"Address", "RSSI", "Firmware Version", "Minor Type",
+                       "Services", "Transport", "Vendor ID", "Product ID",
+                       "Chipset", "State", "Discoverable"}
+            bt_list = []
+            curr_device = None
+            for line in res.stdout.splitlines():
+                stripped = line.strip()
+                if stripped in ("Bluetooth:", "Connected:", "Not Connected:", ""):
+                    continue
+                if stripped.startswith("Bluetooth Controller"):
+                    continue
+                if stripped.endswith(":") and not any(stripped.startswith(k) for k in bt_keys):
+                    curr_device = stripped.rstrip(":")
+                elif "Address:" in stripped and curr_device:
+                    addr = stripped.split("Address:")[-1].strip()
+                    bt_list.append({
+                        "name": curr_device,
+                        "address": addr,
+                        "type": "Peripheral / Low-Energy",
+                        "rssi": -55 - (len(bt_list) % 3) * 8
+                    })
+                    curr_device = None
+            return bt_list
+        except Exception:
+            return []
+
     def _wireless_scan_loop(self) -> None:
         import random
         while not self.stop_wireless_scan.is_set():
-            # WiFi Scan (silently via airport -s)
-            wifi_list = []
-            try:
-                res = subprocess.run([
-                    "/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport",
-                    "-s"
-                ], capture_output=True, text=True, timeout=12)
-                lines = res.stdout.splitlines()
-                for line in lines[1:]:
-                    parts = line.strip().split()
-                    if len(parts) >= 4:
-                        bssid_idx = -1
-                        for i, part in enumerate(parts):
-                            if re.match(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$', part):
-                                bssid_idx = i
-                                break
-                        if bssid_idx != -1:
-                            ssid = " ".join(parts[:bssid_idx])
-                            bssid = parts[bssid_idx]
-                            rssi = parts[bssid_idx + 1]
-                            channel = parts[bssid_idx + 2]
-                            wifi_list.append({
-                                "ssid": ssid or "<Hidden SSID>",
-                                "bssid": bssid,
-                                "rssi": int(rssi) if rssi.lstrip('-').isdigit() else -90,
-                                "channel": channel
-                            })
-            except Exception:
-                pass
-
+            # WiFi: try CoreWLAN first, then airport fallback
+            wifi_list = self._scan_wifi_corewlan()
+            if not wifi_list:
+                wifi_list = self._scan_wifi_airport()
             if not wifi_list:
                 wifi_list = [
                     {"ssid": "EARU-Tactical-Mesh-01", "bssid": "ac:86:74:28:aa:11", "rssi": -40 - random.randint(0, 5), "channel": "36 (5 GHz)"},
@@ -624,28 +685,8 @@ class PrimaryFlightDisplay:
                 ]
             self.wifi_devices = sorted(wifi_list, key=lambda x: x["rssi"], reverse=True)
 
-            # Bluetooth Scan (silently via system_profiler)
-            bt_list = []
-            try:
-                res = subprocess.run(["system_profiler", "SPBluetoothDataType"], capture_output=True, text=True, timeout=12)
-                lines = res.stdout.splitlines()
-                curr_device = None
-                for line in lines:
-                    stripped = line.strip()
-                    if stripped.endswith(":") and not stripped.startswith("Bluetooth") and not stripped.startswith("Controller"):
-                        curr_device = stripped[:-1]
-                    elif "Address:" in stripped and curr_device:
-                        addr = stripped.split("Address:")[-1].strip()
-                        bt_list.append({
-                            "name": curr_device,
-                            "address": addr,
-                            "type": "Peripheral / Low-Energy",
-                            "rssi": -55 - (len(bt_list) % 3) * 8
-                        })
-                        curr_device = None
-            except Exception:
-                pass
-
+            # Bluetooth: real system_profiler parse
+            bt_list = self._scan_bluetooth()
             if not bt_list:
                 bt_list = [
                     {"name": "EARU-IMU-Beacon-A", "address": "aa-bb-cc-dd-ee-11", "type": "Seismic Sensor / BLE", "rssi": -45 - random.randint(0, 5)},
@@ -1158,6 +1199,22 @@ class PrimaryFlightDisplay:
                     self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
                     self.turbo = int(float(smc.get('turbo', 0)))
 
+                    # SMC Power Management Keys
+                    self.smc_aPMX = float(smc.get('aPMX', 0.0))
+                    self.smc_mTPL = float(smc.get('mTPL', 0.0))
+                    self.smc_mUTL = float(smc.get('mUTL', 0.0))
+                    self.smc_xPPT = float(smc.get('xPPT', 255.0))
+                    self.smc_xLPM = float(smc.get('xLPM', 0.0))
+                    self.smc_PHPB = float(smc.get('PHPB', 0.0))
+                    self.smc_PHPM = float(smc.get('PHPM', 0.0))
+                    self.smc_PHPC = float(smc.get('PHPC', 0.0))
+                    self.smc_PHPS = float(smc.get('PHPS', 0.0))
+                    self.smc_PMVC = float(smc.get('PMVC', 0.0))
+                    self.smc_PPSC = float(smc.get('PPSC', 0.0))
+                    self.smc_PSVR = float(smc.get('PSVR', 0.0))
+                    self.smc_PDBR = float(smc.get('PDBR', 0.0))
+                    self.smc_PDTR = float(smc.get('PDTR', 0.0))
+
                     # Parse fan RPMs correctly from the list
                     raw_fans = smc.get('fan_rpms', [0.0, 0.0])
                     self.fan_rpms = [float(f) for f in raw_fans] if isinstance(raw_fans, list) else [0.0, 0.0]
@@ -1208,6 +1265,12 @@ class PrimaryFlightDisplay:
                 self.targets['vel_z'] = 0.5 * math.sin(t * 0.1)
                 self.cpu, self.batt, self.hid_idle = 25+5*math.sin(t), 85, (t % 60)
                 self.turbo = 0
+                # SMC Power Management defaults for simulated mode
+                self.smc_aPMX = 0.0; self.smc_mTPL = 0.0; self.smc_mUTL = 0.0
+                self.smc_xPPT = 255.0; self.smc_xLPM = 0.0; self.smc_PHPB = 0.0
+                self.smc_PHPM = 0.0; self.smc_PHPC = 0.0; self.smc_PHPS = 0.0
+                self.smc_PMVC = 0.0; self.smc_PPSC = 0.0; self.smc_PSVR = 0.0
+                self.smc_PDBR = 0.0; self.smc_PDTR = 0.0
         except Exception as e:
             print(f"[{datetime.datetime.now()}] GENERAL UPDATE ERROR: {e}")
 
@@ -1935,8 +1998,8 @@ class PrimaryFlightDisplay:
             ("POWER RATE", f"{self.power_rate:.2f} W"),
             ("DAY USAGE", f"{self.day_usage_wh:.2f} Wh"),
             ("EST. TODAY", f"{self.est_today_wh:.2f} Wh"),
-            ("MONTH USE", f"{self.month_usage_wh:.2f} Wh"),
-            ("METER USE", f"{self.meter_usage_wh:.2f} Wh"),
+            ("MONTH USE", f"{self.month_usage_wh / 1000.0:.4f} kWh"),
+            ("METER USE", f"{self.meter_usage_wh / 1000.0:.4f} kWh"),
             ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
             ("BATT HEALTH", f"{self.battery_health:.1f} %"),
             ("FULL CAP", f"{self.battery_full_wh:.2f} Wh"),
@@ -1953,6 +2016,32 @@ class PrimaryFlightDisplay:
             col = "green" if (n == "SURVIVE" and v == "Yes") or (n == "HIBERNATE" and v == "No") else ("red" if (n == "SURVIVE" and v == "No") or (n == "HIBERNATE" and v == "Yes") else "white")
             if n == "BATT HEALTH": col = "green" if self.battery_health > 80 else "yellow"
             self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:12}: {v}", fill=col, font=("Monaco", 10))
+
+        # --- SMC Power Management Keys ---
+        x_smc, y_smc = 750, y_pwr + len(pwr_metrics) * 30 + 30
+        smc_metrics = [
+            ("aPMX", f"{self.smc_aPMX:.0f}", "Active Perf Mode"),
+            ("mTPL", f"{self.smc_mTPL:.0f} W", "Max Turbo Pwr Lim"),
+            ("mUTL", f"{self.smc_mUTL:.0f} W", "Max User Turbo Lim"),
+            ("xPPT", f"{self.smc_xPPT:.0f} W" if self.smc_xPPT < 255 else "NONE", "Pkg Pwr Tracking"),
+            ("xLPM", f"{self.smc_xLPM:.0f} W", "Low Power Mode Lim"),
+            ("PHPB", f"{self.smc_PHPB:.0f} W", "Pkg High Pwr Budget"),
+            ("PHPM", f"{self.smc_PHPM:.2f}", "Pkg High Pwr Mode"),
+            ("PHPC", f"{self.smc_PHPC:.2f} A", "Pkg High Pwr Curr"),
+            ("PHPS", f"{self.smc_PHPS:.2f} W", "Pkg High Pwr Sensor"),
+            ("PMVC", f"{self.smc_PMVC:.2f} A", "VRM Current"),
+            ("PPSC", f"{self.smc_PPSC:.2f} A", "Supply Current"),
+            ("PSVR", f"{self.smc_PSVR:.2f}", "Supply VRM Health"),
+            ("PDBR", f"{self.smc_PDBR:.2f} W", "Battery Rate"),
+            ("PDTR", f"{self.smc_PDTR:.1f} C", "Device Temp Rate"),
+        ]
+        self.canvas.create_text(x_smc, y_smc - 20, anchor="nw", text="SMC POWER MGMT", fill="#ff8800", font=("Monaco", 11, "bold"))
+        for i, (key, val, desc) in enumerate(smc_metrics):
+            # Color code: write keys (aPMX, mTPL) in cyan, read keys in white
+            col = "#00ccff" if key in ("aPMX", "mTPL") else "white"
+            if key == "xPPT" and self.smc_xPPT >= 255: col = "#666"
+            self.canvas.create_text(x_smc, y_smc + i * 18, anchor="nw",
+                                    text=f"{key:5s}: {val:16s} {desc}", fill=col, font=("Monaco", 9))
 
         # --- Vertical Battery Fuel Gauge ---
         bx = 945

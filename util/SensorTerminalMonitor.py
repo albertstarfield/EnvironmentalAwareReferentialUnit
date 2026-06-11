@@ -475,39 +475,100 @@ class PrimaryFlightDisplay:
         if lower_key in self.panning_keys: self.panning_keys.remove(lower_key)
         if key in self.panning_keys: self.panning_keys.remove(key)
 
+    def _scan_wifi_corewlan(self) -> list[dict[str, Any]]:
+        """Scan WiFi via CoreWLAN (requires Location Services for SSID/BSSID)."""
+        try:
+            from CoreWLAN import CWInterface  # type: ignore[import]
+            iface = CWInterface.interface()
+            if not iface or not iface.powerOn():
+                return []
+            results, _ = iface.scanForNetworksWithName_error_(None, None)
+            if not results:
+                return []
+            networks = []
+            for n in results.allObjects():
+                networks.append({
+                    "ssid": str(n.ssid()) if n.ssid() else "<Hidden SSID>",
+                    "bssid": str(n.bssid()) if n.bssid() else "unknown",
+                    "rssi": n.rssiValue(),
+                    "channel": n.channel()
+                })
+            return networks
+        except Exception:
+            return []
+
+    def _scan_wifi_airport(self) -> list[dict[str, Any]]:
+        """Fallback: scan WiFi via airport -s (removed in macOS 26+)."""
+        try:
+            res = subprocess.run([
+                "/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport",
+                "-s"
+            ], capture_output=True, text=True, timeout=12)
+            lines = res.stdout.splitlines()
+            networks = []
+            for line in lines[1:]:
+                parts = line.strip().split()
+                if len(parts) >= 4:
+                    bssid_idx = -1
+                    for i, part in enumerate(parts):
+                        if re.match(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$', part):
+                            bssid_idx = i
+                            break
+                    if bssid_idx != -1:
+                        ssid = " ".join(parts[:bssid_idx])
+                        bssid = parts[bssid_idx]
+                        rssi = parts[bssid_idx + 1]
+                        channel = parts[bssid_idx + 2]
+                        networks.append({
+                            "ssid": ssid or "<Hidden SSID>",
+                            "bssid": bssid,
+                            "rssi": int(rssi) if rssi.lstrip('-').isdigit() else -90,
+                            "channel": channel
+                        })
+            return networks
+        except Exception:
+            return []
+
+    def _scan_bluetooth(self) -> list[dict[str, Any]]:
+        """Scan Bluetooth via system_profiler (paired + connected devices)."""
+        try:
+            res = subprocess.run(
+                ["system_profiler", "SPBluetoothDataType"],
+                capture_output=True, text=True, timeout=12
+            )
+            bt_keys = {"Address", "RSSI", "Firmware Version", "Minor Type",
+                       "Services", "Transport", "Vendor ID", "Product ID",
+                       "Chipset", "State", "Discoverable"}
+            bt_list = []
+            curr_device = None
+            for line in res.stdout.splitlines():
+                stripped = line.strip()
+                if stripped in ("Bluetooth:", "Connected:", "Not Connected:", ""):
+                    continue
+                if stripped.startswith("Bluetooth Controller"):
+                    continue
+                if stripped.endswith(":") and not any(stripped.startswith(k) for k in bt_keys):
+                    curr_device = stripped.rstrip(":")
+                elif "Address:" in stripped and curr_device:
+                    addr = stripped.split("Address:")[-1].strip()
+                    bt_list.append({
+                        "name": curr_device,
+                        "address": addr,
+                        "type": "Peripheral / Low-Energy",
+                        "rssi": -55 - (len(bt_list) % 3) * 8
+                    })
+                    curr_device = None
+            return bt_list
+        except Exception:
+            return []
+
     def _wireless_scan_loop(self) -> None:
         import random
         while not self.stop_wireless_scan.is_set():
-            # WiFi Scan (silently via airport -s)
-            wifi_list = []
-            try:
-                res = subprocess.run([
-                    "/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport",
-                    "-s"
-                ], capture_output=True, text=True, timeout=12)
-                lines = res.stdout.splitlines()
-                for line in lines[1:]:
-                    parts = line.strip().split()
-                    if len(parts) >= 4:
-                        bssid_idx = -1
-                        for i, part in enumerate(parts):
-                            if re.match(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$', part):
-                                bssid_idx = i
-                                break
-                        if bssid_idx != -1:
-                            ssid = " ".join(parts[:bssid_idx])
-                            bssid = parts[bssid_idx]
-                            rssi = parts[bssid_idx + 1]
-                            channel = parts[bssid_idx + 2]
-                            wifi_list.append({
-                                "ssid": ssid or "<Hidden SSID>",
-                                "bssid": bssid,
-                                "rssi": int(rssi) if rssi.lstrip('-').isdigit() else -90,
-                                "channel": channel
-                            })
-            except Exception:
-                pass
-
+            # WiFi: try CoreWLAN first, then airport fallback
+            wifi_list = self._scan_wifi_corewlan()
+            if not wifi_list:
+                wifi_list = self._scan_wifi_airport()
             if not wifi_list:
                 wifi_list = [
                     {"ssid": "EARU-Tactical-Mesh-01", "bssid": "ac:86:74:28:aa:11", "rssi": -40 - random.randint(0, 5), "channel": "36 (5 GHz)"},
@@ -518,28 +579,8 @@ class PrimaryFlightDisplay:
                 ]
             self.wifi_devices = sorted(wifi_list, key=lambda x: x["rssi"], reverse=True)
 
-            # Bluetooth Scan (silently via system_profiler)
-            bt_list = []
-            try:
-                res = subprocess.run(["system_profiler", "SPBluetoothDataType"], capture_output=True, text=True, timeout=12)
-                lines = res.stdout.splitlines()
-                curr_device = None
-                for line in lines:
-                    stripped = line.strip()
-                    if stripped.endswith(":") and not stripped.startswith("Bluetooth") and not stripped.startswith("Controller"):
-                        curr_device = stripped[:-1]
-                    elif "Address:" in stripped and curr_device:
-                        addr = stripped.split("Address:")[-1].strip()
-                        bt_list.append({
-                            "name": curr_device,
-                            "address": addr,
-                            "type": "Peripheral / Low-Energy",
-                            "rssi": -55 - (len(bt_list) % 3) * 8
-                        })
-                        curr_device = None
-            except Exception:
-                pass
-
+            # Bluetooth: real system_profiler parse
+            bt_list = self._scan_bluetooth()
             if not bt_list:
                 bt_list = [
                     {"name": "EARU-IMU-Beacon-A", "address": "aa-bb-cc-dd-ee-11", "type": "Seismic Sensor / BLE", "rssi": -45 - random.randint(0, 5)},
@@ -1736,8 +1777,8 @@ class PrimaryFlightDisplay:
             ("POWER RATE", f"{self.power_rate:.2f} W"),
             ("DAY USAGE", f"{self.day_usage_wh:.2f} Wh"),
             ("EST. TODAY", f"{self.est_today_wh:.2f} Wh"),
-            ("MONTH USE", f"{self.month_usage_wh:.2f} Wh"),
-            ("METER USE", f"{self.meter_usage_wh:.2f} Wh"),
+            ("MONTH USE", f"{self.month_usage_wh / 1000.0:.4f} kWh"),
+            ("METER USE", f"{self.meter_usage_wh / 1000.0:.4f} kWh"),
             ("BATT BANK", f"{self.battery_bank_wh:.2f} Wh"),
             ("BATT HEALTH", f"{self.battery_health:.1f} %"),
             ("FULL CAP", f"{self.battery_full_wh:.2f} Wh"),
