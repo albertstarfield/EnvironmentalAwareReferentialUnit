@@ -788,9 +788,20 @@ def main() -> None:
     ]
     for p in processes:
         p.start()
+
+    print("[*] ML Bridge is active. Auto-restart scheduled for 1 hour.")
+    start_time = time.time()
     try:
         while True:
-            time.sleep(1)
+            time.sleep(10)
+            if time.time() - start_time > 3600:
+                print("\033[33m[*] 1 hour elapsed. Self-restarting ML Bridge to reclaim memory...\033[0m")
+                for p in processes:
+                    p.terminate()
+                
+                # Re-execute the script
+                python = sys.executable
+                os.execv(python, [python] + sys.argv)
     except KeyboardInterrupt:
         print("[*] Shutting down.")
 

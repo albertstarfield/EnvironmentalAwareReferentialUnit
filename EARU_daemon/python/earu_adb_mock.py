@@ -4,6 +4,7 @@ import os
 import json
 import subprocess
 import time
+import sys
 
 DATA_PATH = "/usr/local/EnvironmentalAwareReferentialUnit/EARU_data.dat"
 
@@ -77,8 +78,14 @@ def send_mock_location(device, lat, lon, alt):
 
 def main():
     print("[*] EARU ADB Mock Sidecar started", flush=True)
+    start_time = time.time()
 
     while True:
+        if time.time() - start_time > 3600:
+            print("[*] 1 hour elapsed. Self-restarting ADB Mock sidecar...", flush=True)
+            python = sys.executable
+            os.execv(python, [python] + sys.argv)
+
         loc = get_location()
         if loc is not None:
             lat, lon, alt = loc
