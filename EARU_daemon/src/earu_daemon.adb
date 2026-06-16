@@ -749,7 +749,7 @@ procedure Earu_Daemon is
       Elapsed : Ada.Real_Time.Time_Span;
       Duration_Ms : Real;
    begin
-      Earu.IO.Configure_Realtime (100, 10, 100);
+      Earu.IO.Configure_Realtime (200, 10, 200);
       delay 5.0;
       loop
          Earu.IO.Start_Realtime_Loop_Cycle;
@@ -788,7 +788,7 @@ procedure Earu_Daemon is
                Ada.Text_IO.Put_Line ("[!] Telemetry_Task error: " & Ada.Exceptions.Exception_Information (E));
          end;
          Earu.IO.End_Realtime_Loop_Cycle;
-         delay 0.1;
+         delay 0.2;
       end loop;
    end Telemetry_Task;
 

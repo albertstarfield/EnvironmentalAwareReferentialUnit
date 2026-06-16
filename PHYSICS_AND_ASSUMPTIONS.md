@@ -919,6 +919,7 @@ To optimize CPU utilization, maintain system responsiveness, and extend battery 
 | Sensor/Telemetry Metric | Update Frequency | Update Interval | Primary Purpose / Notes |
 | :--- | :---: | :---: | :--- |
 | **High-Res IMU (Accel & Gyro)** | $800.0\text{ Hz}$ | $1.25\text{ ms}$ | High-fidelity pedometer and physical seismic vibration sampling. |
+| **Telemetry Task Persistence** | $5.0\text{ Hz}$   | $200.0\text{ ms}$ | Periodic state serialization to disk (`EARU_data.dat`). |
 | **Mahony Orientation Filter** | $100.0\text{ Hz}$ | $10.0\text{ ms}$ | Real-time world rotation quaternion ($\mathbf{q}$) attitude calculation. |
 | **Seismic Event Detectors** | $100.0\text{ Hz}$ | $10.0\text{ ms}$ | Real-time CUSUM / STA-LTA structural anomaly threat tracking. |
 | **HID Keystroke/Mouse Idle Scan** | $10.0\text{ Hz}$ | $100.0\text{ ms}$ | Human inactivity detection (`nonHumanInputHIDIdle`). |
