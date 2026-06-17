@@ -136,11 +136,16 @@ except ImportError:
     def decimal_to_osm(*args: Any) -> tuple[float, float]: return (0.0, 0.0)
 
 try:
+    from PIL import Image, ImageTk, ImageDraw # pyrefly: ignore
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+try:
     from OpenGL.GL import *
     from OpenGL.GLU import *
     import pyopengltk # pyrefly: ignore
-    from PIL import Image, ImageTk, ImageDraw # pyrefly: ignore
-    HAS_OPENGL = True
+    HAS_OPENGL = HAS_PIL # TileManager needs PIL
 except ImportError:
     HAS_OPENGL = False
 
@@ -370,6 +375,7 @@ class PrimaryFlightDisplay:
         self.pan_accel: float = 1.0
         self.aura_images: dict[str, ImageTk.PhotoImage] = {}
         self.create_gradient_auras()
+        self.hovered_anchor: Optional[int] = None
 
         # Layout: Content Frame (Top) + Nav Canvas (Bottom)
         self.content_frame = tk.Frame(self.root, bg='black')
@@ -396,6 +402,7 @@ class PrimaryFlightDisplay:
             self.root.bind("<KeyPress>", self.on_key_press)
             self.root.bind("<KeyRelease>", self.on_key_release)
             self.map_widget.canvas.bind("<Button-1>", self.on_map_click, add="+")
+            self.map_widget.canvas.bind("<Motion>", self.on_map_mouse_motion, add="+")
 
         # State Variables
         self.pitch: float = 0.0
@@ -1647,8 +1654,29 @@ class PrimaryFlightDisplay:
         canvas.create_line([x-10, y+8, x-5, y-2, x+5, y-6, x+10, y-10], fill=color, width=2, tags=tags)
         canvas.create_text(x, y+2, text="PROF", fill="white", font=("Monaco", 7, "bold"), tags=tags)
 
+    def on_map_mouse_motion(self, event: tk.Event) -> None:
+        if not self.map_widget: return
+
+        # Check if mouse is over an anchor marker
+        # We use a small buffer around the mouse position
+        items = self.map_widget.canvas.find_overlapping(event.x-5, event.y-5, event.x+5, event.y+5)
+
+        new_hover = None
+        for item in items:
+            tags = self.map_widget.canvas.gettags(item)
+            for t in tags:
+                if t.startswith("sig_loc_idx_"):
+                    try:
+                        new_hover = int(t.split("_")[-1])
+                        break
+                    except Exception: pass
+            if new_hover is not None: break
+
+        if new_hover != self.hovered_anchor:
+            self.hovered_anchor = new_hover
+
     def on_map_click(self, event: tk.Event) -> None:
-        # Check if clicked Master Warning/Caution buttons
+        if not self.map_widget: return
         w, h = self.map_widget.width, self.map_widget.height
 
         # Master Warning click acknowledgement (w-240 to w-130, y: 10 to 40)
@@ -1668,7 +1696,7 @@ class PrimaryFlightDisplay:
             return
 
         # Check if clicked profile button (above search)
-        if w-70 <= event.x <= w-20 and h-120 <= event.y <= h-70:
+        if 20 <= event.x <= 60 and h - 180 <= event.y <= h - 140:
             self.show_profile = not self.show_profile
             return
 
@@ -1702,6 +1730,7 @@ class PrimaryFlightDisplay:
         canvas.create_oval(x-5, y-5, x+5, y+5, fill="#00ff00", outline="black", tags=tags)
 
     def create_gradient_auras(self) -> None:
+        if not HAS_PIL: return
         # Pre-generate 128x128 radial gradient images for orange and green anchors
         size = 128
         center = size // 2
@@ -1760,13 +1789,50 @@ class PrimaryFlightDisplay:
 
                     # Draw professional gradient aura
                     aura_type = "green" if is_near else "orange"
-                    if aura_type in self.aura_images:
-                        self.map_widget.canvas.create_image(spos_x, spos_y, image=self.aura_images[aura_type], tags="user_nav")
+                    tag = f"sig_loc_idx_{idx}"
+                    if HAS_PIL and aura_type in self.aura_images:
+                        self.map_widget.canvas.create_image(spos_x, spos_y, image=self.aura_images[aura_type], tags=("user_nav", tag))
+                    else:
+                        # Fallback to stippled circle if PIL is missing
+                        aura_fill = "#00ff00" if is_near else "#ff8800"
+                        aura_out = "#00ff00" if is_near else "#ffaa00"
 
+                        # Estimate a decent visual radius for fallback
+                        try:
+                            zoom = self.map_widget.zoom
+                            m_per_px = 156543.03392 * math.cos(math.radians(slat)) / (2**zoom)
+                            px_radius = max(20, 100.0 / m_per_px)
+                        except Exception:
+                            px_radius = 40
+
+                        self.map_widget.canvas.create_oval(spos_x - px_radius, spos_y - px_radius,
+                                                           spos_x + px_radius, spos_y + px_radius,
+                                                           fill=aura_fill, outline=aura_out, width=1,
+                                                           stipple="gray25", tags=("user_nav", tag))
                     # Draw a distinctive anchor icon
                     anchor_fill = "#00ff00" if is_near else "#ff8800"
-                    self.map_widget.canvas.create_oval(spos_x-8, spos_y-8, spos_x+8, spos_y+8, fill=anchor_fill, outline="white", width=1, tags="user_nav")
-                    self.map_widget.canvas.create_text(spos_x, spos_y, text=f"{idx+1}", fill="white", font=("Monaco", 7, "bold"), tags="user_nav")
+                    tag = f"sig_loc_idx_{idx}"
+                    self.map_widget.canvas.create_oval(spos_x-8, spos_y-8, spos_x+8, spos_y+8, fill=anchor_fill, outline="white", width=1, tags=("user_nav", tag))
+                    self.map_widget.canvas.create_text(spos_x, spos_y, text=f"{idx+1}", fill="white", font=("Monaco", 7, "bold"), tags=("user_nav", tag))
+
+            # Draw Hover Hint for Significant Location
+            if self.hovered_anchor is not None:
+                sig_locs = getattr(self, 'sig_locs', [])
+                if self.hovered_anchor < len(sig_locs):
+                    sloc = sig_locs[self.hovered_anchor]
+                    slat, slon = sloc.get('lat', 0.0), sloc.get('lon', 0.0)
+                    salt = sloc.get('alt', 0.0)
+                    stime = sloc.get('time', 0.0)
+                    t_str = time.strftime("%H:%M:%S UTC", time.gmtime(stime)) if stime > 0 else "N/A"
+
+                    spos_x, spos_y = self.get_canvas_pos(slat, slon)
+                    if spos_x > -50 and spos_y > -50:
+                        hint_text = f"ANCHOR #{self.hovered_anchor+1}\nLAT: {slat:.6f}\nLON: {slon:.6f}\nALT: {salt:.1f}m\nTIME: {t_str}"
+
+                        # Draw glass box hint
+                        hx, hy = spos_x + 15, spos_y - 60
+                        self.map_widget.canvas.create_rectangle(hx, hy, hx+140, hy+75, fill="#050505", outline="white", stipple="gray75", tags="user_nav")
+                        self.map_widget.canvas.create_text(hx+5, hy+5, anchor="nw", text=hint_text, fill="cyan", font=("Monaco", 8, "bold"), tags="user_nav")
 
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 105, f"TRIANG_ALT_OFF: {self.cf_altitude:+.1f}m", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 120, f"TRIANG_VSI_GAIN: {self.cf_vertical_rate:.2f}x", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
