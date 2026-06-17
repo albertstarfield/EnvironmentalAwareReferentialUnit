@@ -139,7 +139,7 @@ try:
     from OpenGL.GL import *
     from OpenGL.GLU import *
     import pyopengltk # pyrefly: ignore
-    from PIL import Image # pyrefly: ignore
+    from PIL import Image, ImageTk, ImageDraw # pyrefly: ignore
     HAS_OPENGL = True
 except ImportError:
     HAS_OPENGL = False
@@ -368,6 +368,8 @@ class PrimaryFlightDisplay:
         self.pan_lon: float = 0.0
         self.panning_keys: set[str] = set()
         self.pan_accel: float = 1.0
+        self.aura_images: dict[str, ImageTk.PhotoImage] = {}
+        self.create_gradient_auras()
 
         # Layout: Content Frame (Top) + Nav Canvas (Bottom)
         self.content_frame = tk.Frame(self.root, bg='black')
@@ -1143,6 +1145,8 @@ class PrimaryFlightDisplay:
                     self.lockin_miss = float(loc.get('lockin_miss', 0.0))
                     self.warning_reason = str(loc.get('warning_reason', "")).strip()
                     self.caution_reason = str(loc.get('caution_reason', "")).strip()
+                    self.sig_locs = loc.get('significant_locations', [])
+                    self.inside_sig_loc = bool(loc.get('inside_significant_location', False))
 
                     sys_d = data.get('system', {})
                     self.cpu = float(sys_d.get('cpu_usage', 0.0))
@@ -1245,18 +1249,6 @@ class PrimaryFlightDisplay:
 
                     self.simulated = False
 
-                if os.path.exists(self.weather_history_path):
-                    with open(self.weather_history_path, 'r') as f:
-                        try:
-                            content = f.read()
-                            if content:
-                                w_data = json.loads(content)
-                                if 'ecosystem_weather' not in self.full_data:
-                                    self.full_data['ecosystem_weather'] = {}
-                                self.full_data['ecosystem_weather']['3rdparty_meteo'] = w_data.get('meteo', {})
-                        except Exception as e:
-                            print(f"[{datetime.datetime.now()}] WEATHER DATA ERROR: Failed to parse JSON from {self.weather_history_path}")
-                            print(f"  Error: {e}")
             else:
                 self.simulated = True
                 t = time.time()
@@ -1586,6 +1578,8 @@ class PrimaryFlightDisplay:
 
     def get_canvas_pos(self, lat: float, lon: float) -> tuple[float, float]:
         if not self.map_widget: return 0.0, 0.0
+        # Safety: Clamp latitude to valid OSM range (-85.05 to 85.05) to prevent math domain error
+        lat = max(-85.05, min(85.05, lat))
         # Use the actual widget zoom to stay in sync during animations
         current_zoom = self.map_widget.zoom
         tile_position = decimal_to_osm(lat, lon, current_zoom)
@@ -1707,6 +1701,24 @@ class PrimaryFlightDisplay:
         canvas.create_line(x, y-r-5, x, y+r+5, fill="#00ccff", width=2, tags=tags)
         canvas.create_oval(x-5, y-5, x+5, y+5, fill="#00ff00", outline="black", tags=tags)
 
+    def create_gradient_auras(self) -> None:
+        # Pre-generate 128x128 radial gradient images for orange and green anchors
+        size = 128
+        center = size // 2
+
+        for name, color_rgb in [("orange", (255, 136, 0)), ("green", (0, 255, 0))]:
+            # Create a transparent RGBA image
+            img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+
+            # Draw concentric circles with decreasing alpha
+            for r in range(center, 0, -1):
+                # Alpha falls off non-linearly for a smoother glow effect
+                alpha = int(60 * (math.pow(1.0 - (r / center), 1.5)))
+                draw.ellipse([center-r, center-r, center+r, center+r],
+                             fill=(color_rgb[0], color_rgb[1], color_rgb[2], alpha))
+            self.aura_images[name] = ImageTk.PhotoImage(img)
+
     def draw_map_overlay(self, w: float, h: float) -> None:
         if self.map_widget:
             if self.user_marker:
@@ -1732,6 +1744,30 @@ class PrimaryFlightDisplay:
 
             # Left Overlays: Vertical Domain
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 80, f"ALT: {int(self.alt*3.28084)} FT / {int(self.alt)}M MSL", "#00ff00", ("Monaco", 16, "bold"), "sw", "overlay_info")
+
+            # Significant Locations Markers (NAV View)
+            for idx, sloc in enumerate(getattr(self, 'sig_locs', [])):
+                slat, slon = sloc.get('lat', 0.0), sloc.get('lon', 0.0)
+                spos_x, spos_y = self.get_canvas_pos(slat, slon)
+                if spos_x > -50 and spos_y > -50:
+                    is_near = False
+                    if getattr(self, 'inside_sig_loc', False):
+                        d_lat = slat - self.lat
+                        d_lon = (slon - self.lon) * math.cos(math.radians(self.lat))
+                        dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+                        if dist_m <= 110.0:
+                            is_near = True
+
+                    # Draw professional gradient aura
+                    aura_type = "green" if is_near else "orange"
+                    if aura_type in self.aura_images:
+                        self.map_widget.canvas.create_image(spos_x, spos_y, image=self.aura_images[aura_type], tags="user_nav")
+
+                    # Draw a distinctive anchor icon
+                    anchor_fill = "#00ff00" if is_near else "#ff8800"
+                    self.map_widget.canvas.create_oval(spos_x-8, spos_y-8, spos_x+8, spos_y+8, fill=anchor_fill, outline="white", width=1, tags="user_nav")
+                    self.map_widget.canvas.create_text(spos_x, spos_y, text=f"{idx+1}", fill="white", font=("Monaco", 7, "bold"), tags="user_nav")
+
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 105, f"TRIANG_ALT_OFF: {self.cf_altitude:+.1f}m", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 120, f"TRIANG_VSI_GAIN: {self.cf_vertical_rate:.2f}x", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
             self.draw_text_with_halo(self.map_widget.canvas, 20, h - 135, f"LOC_TIME: {self.loc_time:.1f}s", "#00ccff", ("Monaco", 9), "sw", "overlay_info")
@@ -2626,85 +2662,19 @@ class PrimaryFlightDisplay:
         self.root.after(67, self.animate)
 
     def update_significant_locations(self) -> None:
-        if not hasattr(self, 'dwell_history'):
-            self.dwell_history = []
-            self.last_dwell_check = 0.0
+        # Centralized detection from EARU_daemon / ML Bridge.
+        if not hasattr(self, 'prev_sig_loc_count'):
+            self.prev_sig_loc_count = 0
             self.sig_loc_message = ""
             self.sig_loc_message_time = 0.0
 
-        now = time.time()
-        # Add entry every 5 seconds
-        if now - self.last_dwell_check >= 5.0:
-            self.last_dwell_check = now
-            self.dwell_history.append((now, self.lat, self.lon, self.speed, len(self.wifi_devices), len(self.bt_devices)))
+        current_count = len(getattr(self, 'sig_locs', []))
+        if current_count > self.prev_sig_loc_count and self.prev_sig_loc_count > 0:
+            new_loc = self.sig_locs[0]
+            self.sig_loc_message = f"NEW SIGNIFICANT LOCATION ANCHORED: ({new_loc.get('lat', 0.0):.4f}, {new_loc.get('lon', 0.0):.4f})"
+            self.sig_loc_message_time = time.time()
 
-            # Filter to keep last 5 minutes (300 seconds)
-            self.dwell_history = [item for item in self.dwell_history if now - item[0] <= 300]
-
-            # Verify if we have at least 5 minutes of continuous data
-            if len(self.dwell_history) >= 55: # close to 5 minutes of 5-sec entries
-                t_start = self.dwell_history[0][0]
-                t_end = self.dwell_history[-1][0]
-                if t_end - t_start >= 280:
-                    # Check conditions: LE present, quite wifi (>= 3), speed <= 30 knots
-                    has_le = any(item[5] > 0 for item in self.dwell_history)
-                    has_wifi = any(item[4] >= 3 for item in self.dwell_history)
-                    low_speed = all(item[3] <= 30.0 for item in self.dwell_history)
-
-                    # Calculate distance span in meters to verify staying within 5m radius
-                    lats = [item[1] for item in self.dwell_history]
-                    lons = [item[2] for item in self.dwell_history]
-
-                    lat_min, lat_max = min(lats), max(lats)
-                    lon_min, lon_max = min(lons), max(lons)
-
-                    lat_avg = (lat_min + lat_max) / 2.0
-                    dx = (lon_max - lon_min) * 111320.0 * math.cos(lat_avg * math.pi / 180.0)
-                    dy = (lat_max - lat_min) * 111320.0
-                    dist_span = math.sqrt(dx*dx + dy*dy)
-
-                    if has_le and has_wifi and low_speed and dist_span <= 5.0:
-                        sig_path = "/usr/local/EnvironmentalAwareReferentialUnit/save_state/significant_locations.json"
-                        locs = []
-                        if os.path.exists(sig_path):
-                            try:
-                                with open(sig_path, "r") as f:
-                                    locs = json.load(f)
-                            except Exception:
-                                pass
-
-                        # Check duplicate (within 10m of existing)
-                        is_dup = False
-                        for loc in locs:
-                            plat = loc.get("latitude", 0.0)
-                            plon = loc.get("longitude", 0.0)
-                            p_lat_avg = (self.lat + plat) / 2.0
-                            pdx = (self.lon - plon) * 111320.0 * math.cos(p_lat_avg * math.pi / 180.0)
-                            pdy = (self.lat - plat) * 111320.0
-                            pdist = math.sqrt(pdx*pdx + pdy*pdy)
-                            if pdist <= 10.0:
-                                is_dup = True
-                                break
-
-                        if not is_dup:
-                            new_loc = {
-                                "timestamp": datetime.datetime.now().isoformat(),
-                                "latitude": self.lat,
-                                "longitude": self.lon,
-                                "avg_wifi_density": int(sum(item[4] for item in self.dwell_history) / len(self.dwell_history)),
-                                "avg_ble_density": int(sum(item[5] for item in self.dwell_history) / len(self.dwell_history)),
-                                "type": "User Anchor Base / Home Hub",
-                                "description": "Dwell time > 5 min, low velocity (< 30 kts), strong local WiFi and BLE beacon anchors."
-                            }
-                            locs.append(new_loc)
-                            try:
-                                with open(sig_path, "w") as f:
-                                    json.dump(locs, f, indent=4)
-                                self.sig_loc_message = f"BASE STATION DETECTED & LOCKED: ({self.lat:.4f}, {self.lon:.4f})"
-                                self.sig_loc_message_time = now
-                                print(f"[ok] SIGNIFICANT LOCATION RECORDED: {new_loc}")
-                            except Exception as e:
-                                print(f"[!] Failed to save significant location: {e}")
+        self.prev_sig_loc_count = current_count
 
     def draw_seismic_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="SEISMIC & DAMAGE PROGNOSIS (PROGNOS)", fill="yellow", font=("Monaco", 20, "bold"))
@@ -3007,6 +2977,38 @@ class PrimaryFlightDisplay:
                 self.canvas.create_text(70, dy, anchor="nw", text=f"OTHER ENTITIES: {other_count}", fill="white", font=("Monaco", 10))
                 dy += 25
 
+            # Significant Locations Table
+            self.canvas.create_text(500, 100, anchor="nw", text="LATEST SIGNIFICANT LOCATIONS (MACRO ANCHORS)", fill="#ff8800", font=("Monaco", 12, "bold"))
+            sdy = 130
+            self.canvas.create_text(510, sdy, anchor="nw", text=" #   LATITUDE    LONGITUDE    ALTITUDE    TIMESTAMP (UTC)", fill="gray", font=("Monaco", 9, "bold"))
+            sdy += 20
+            self.canvas.create_line(500, sdy, 950, sdy, fill="#333")
+            sdy += 10
+
+            sig_locs = getattr(self, 'sig_locs', [])
+            if not sig_locs:
+                self.canvas.create_text(520, sdy, anchor="nw", text="NO ANCHORS RECORDED IN CURRENT SESSION", fill="gray", font=("Monaco", 9, "italic"))
+            else:
+                for idx, sloc in enumerate(sig_locs):
+                    ts_epoch = sloc.get('time', 0.0)
+                    ts_str = time.strftime("%H:%M:%S", time.gmtime(ts_epoch)) if ts_epoch > 0 else "N/A"
+                    lat = sloc.get('lat', 0.0)
+                    lon = sloc.get('lon', 0.0)
+                    alt = sloc.get('alt', 0.0)
+
+                    is_near = False
+                    if getattr(self, 'inside_sig_loc', False):
+                        d_lat = lat - self.lat
+                        d_lon = (lon - self.lon) * math.cos(math.radians(self.lat))
+                        dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+                        if dist_m <= 110.0:
+                            is_near = True
+
+                    row_col = "#00ff00" if is_near else "#ffcc00"
+                    self.canvas.create_text(510, sdy, anchor="nw", text=f"{idx+1:2d}  {lat:10.6f}  {lon:11.6f}  {alt:7.1f}m  {ts_str}", fill=row_col, font=("Monaco", 9))
+                    sdy += 18
+
+            # (Rest of mood and other sections ...)
             mood = user.get('inferred_mood', {})
             my = dy + 10
             self.canvas.create_text(50, my, anchor="nw", text="INFERRED MOOD:", fill="cyan", font=("Monaco", 12, "bold"))

@@ -410,12 +410,12 @@ def weather_worker() -> None:
                             dense_wifi = any(item[3] >= 3 for item in history)
                             low_speed = all(item[2] <= 30.0 for item in history)
                             start_lat, start_lon = history[0][5], history[0][6]
-                            stationary_5m = all(
-                                geodetic_distance(start_lat, start_lon, item[5], item[6]) <= 5.0
+                            stationary_100m = all(
+                                geodetic_distance(start_lat, start_lon, item[5], item[6]) <= 100.0
                                 for item in history
                             )
 
-                            if has_le and dense_wifi and low_speed and stationary_5m:
+                            if has_le and dense_wifi and low_speed and stationary_100m:
                                 weather_code = 7
                                 try:
                                     sig_loc_dir = os.path.join(BASE_PATH, "save_state")
@@ -440,7 +440,7 @@ def weather_worker() -> None:
                                             pass
 
                                     is_duplicate = any(
-                                        geodetic_distance(start_lat, start_lon, item.get("lat", 0.0), item.get("lon", 0.0)) <= 10.0
+                                        geodetic_distance(start_lat, start_lon, item.get("lat", 0.0), item.get("lon", 0.0)) <= 100.0
                                         for item in sig_data
                                     )
 
@@ -539,7 +539,7 @@ def ml_worker() -> None:
     try:
         shm = shared_memory.SharedMemory(name=ML_SHM_NAME)
     except Exception:
-        shm = shared_memory.SharedMemory(name=ML_SHM_NAME, create=True, size=512)
+        shm = shared_memory.SharedMemory(name=ML_SHM_NAME, create=True, size=1024)
 
     stats_shm: shared_memory.SharedMemory | None = None
     try:
@@ -671,8 +671,39 @@ def ml_worker() -> None:
 
             battery_data = struct.pack("<5f", batt_life_y, drain_act, drain_slp, drain_hib, drain_dhib)
 
+            # Significant Locations (Latest 10)
+            sig_loc_data = bytearray()
+            sig_count = 0
+            try:
+                sig_loc_file = os.path.join(BASE_PATH, "save_state", "significant_locations.json")
+                if not os.path.exists(sig_loc_file):
+                    sig_loc_file = "/tmp/save_state/significant_locations.json"
+
+                if os.path.exists(sig_loc_file):
+                    with open(sig_loc_file, "r") as sf:
+                        all_sig = json.load(sf)
+                    # Sort by timestamp descending
+                    all_sig.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+                    latest_10 = all_sig[:10]
+                    sig_count = len(latest_10)
+                    for loc in latest_10:
+                        # Convert ISO timestamp to epoch
+                        ts_str = loc.get("timestamp", "")
+                        try:
+                            ts_epoch = time.mktime(time.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ"))
+                        except Exception:
+                            ts_epoch = time.time()
+
+                        sig_loc_data += struct.pack("<fffI d", loc.get("lat", 0.0), loc.get("lon", 0.0), loc.get("alt", 0.0), 0, ts_epoch)
+
+                # Pad to 10 entries (240 bytes)
+                sig_loc_data = sig_loc_data.ljust(240, b"\0")
+            except Exception as e:
+                print(f"[!] Error packing sig locations: {e}")
+                sig_loc_data = b"\0" * 240
+
             if shm is not None and shm.buf is not None:
-                payload = header + mood + detected + battery_data
+                payload = header + mood + detected + battery_data + struct.pack("<II", 0, sig_count) + sig_loc_data
                 shm.buf[: len(payload)] = payload
 
             update_count += 1
@@ -798,7 +829,7 @@ def main() -> None:
                 print("\033[33m[*] 1 hour elapsed. Self-restarting ML Bridge to reclaim memory...\033[0m")
                 for p in processes:
                     p.terminate()
-                
+
                 # Re-execute the script
                 python = sys.executable
                 os.execv(python, [python] + sys.argv)

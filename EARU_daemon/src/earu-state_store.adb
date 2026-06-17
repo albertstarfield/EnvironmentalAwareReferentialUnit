@@ -62,9 +62,12 @@ package body Earu.State_Store is
          State.P_Internal (1 .. Int_Hash'Length) := Int_Hash;
       end Update_Parity;
 
-      procedure Update_ML (User : User_Detection_Type) is
+      procedure Update_ML (User : User_Detection_Type; Sig_Count : Integer; Sig_Locs : Significant_Location_Array; Inside : Boolean) is
       begin
          State.User_Entity := User;
+         State.Sig_Loc_Count := Sig_Count;
+         State.Sig_Locations := Sig_Locs;
+         State.Location.Inside_Significant_Location := Inside;
       end Update_ML;
 
       procedure Update_Pedometer (P : Pedometer_State_Type) is

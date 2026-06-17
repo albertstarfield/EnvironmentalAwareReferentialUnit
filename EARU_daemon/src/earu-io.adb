@@ -516,7 +516,21 @@ package body Earu.IO is
       AP ("CorrectionFactor_Reckoning_Velocity",     F (State.Location.Corr_Velocity));
       AP ("CorrectionFactor_Reckoning_VerticalRate", F (State.Location.Corr_VRate));
       AP ("master_warning", S (Trim_Null (State.Location.Warning_Reason)));
-      AP ("master_caution", S (Trim_Null (State.Location.Caution_Reason)), False);
+      AP ("master_caution", S (Trim_Null (State.Location.Caution_Reason)));
+      AP ("inside_significant_location", B (State.Location.Inside_Significant_Location));
+      Append (Buf, """significant_locations"": [");
+      for I in 1 .. State.Sig_Loc_Count loop
+         Append (Buf, "{");
+         Append (Buf, """lat"": " & F (State.Sig_Locations(I).Lat) & ", ");
+         Append (Buf, """lon"": " & F (State.Sig_Locations(I).Lon) & ", ");
+         Append (Buf, """alt"": " & F (State.Sig_Locations(I).Alt) & ", ");
+         Append (Buf, """time"": " & F (State.Sig_Locations(I).Time));
+         Append (Buf, "}");
+         if I < State.Sig_Loc_Count then
+            Append (Buf, ", ");
+         end if;
+      end loop;
+      Append (Buf, "]");
       Append (Buf, "}, ");
 
       --  ── seismic_activity ─────────────────────────────────────────────────

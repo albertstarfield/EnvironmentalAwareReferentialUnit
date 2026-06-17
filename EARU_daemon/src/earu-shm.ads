@@ -253,6 +253,25 @@ package Earu.Shm is
    type Weather_SHM_Ptr is access all Weather_SHM;
 
    -- ML Results SHM
+   type Significant_Location_C is record
+      Lat : Interfaces.IEEE_Float_32;
+      Lon : Interfaces.IEEE_Float_32;
+      Alt : Interfaces.IEEE_Float_32;
+      Padding : Interfaces.Unsigned_32;
+      TS  : Interfaces.IEEE_Float_64;
+   end record with Convention => C;
+
+   for Significant_Location_C use record
+      Lat     at 0  range 0 .. 31;
+      Lon     at 4  range 0 .. 31;
+      Alt     at 8  range 0 .. 31;
+      Padding at 12 range 0 .. 31;
+      TS      at 16 range 0 .. 63;
+   end record;
+
+   type Significant_Location_Array_C is array (1 .. 10) of Significant_Location_C
+     with Component_Size => 24 * 8; -- 24 bytes
+
    type Entity_Detection_C is record
       BPM        : Interfaces.IEEE_Float_32;
       Confidence : Interfaces.IEEE_Float_32;
@@ -274,6 +293,9 @@ package Earu.Shm is
       Drain_Time_Slp  : Interfaces.IEEE_Float_32;
       Drain_Time_Hib  : Interfaces.IEEE_Float_32;
       Drain_Time_DHib : Interfaces.IEEE_Float_32;
+      Padding_ML      : Interfaces.Unsigned_32; -- Alignment for Sig_Locations (starts at 272)
+      Sig_Loc_Count   : Interfaces.Unsigned_32;
+      Sig_Locations   : Significant_Location_Array_C;
    end record with Convention => C;
    type ML_SHM_Ptr is access all ML_SHM;
 

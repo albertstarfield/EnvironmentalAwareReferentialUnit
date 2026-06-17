@@ -93,8 +93,10 @@ package Earu.Types is
       Caution_Reason : aliased String (1 .. 256) := (others => ' ');
       Alt_Inop      : aliased Boolean := False;
       Alt_Inop_Until: aliased Real := 0.0;
+      Inside_Significant_Location : aliased Boolean := False;
 
       Vel           : aliased Vector3 := (others => <>);
+
       Raw_Vel       : aliased Vector3 := (others => <>);
       CL_History    : aliased CL_History_Array := (others => (T => 0.0, Lat => 0.0, Lon => 0.0, Alt => 0.0, Pos => (others => 0.0)));
       CL_Count      : aliased Integer := 0;
@@ -343,6 +345,14 @@ package Earu.Types is
       Last_Third_Night_Segment        : aliased Long_Long_Integer := 0;
    end record;
 
+   type Significant_Location is record
+      Lat : aliased Real := 0.0;
+      Lon : aliased Real := 0.0;
+      Alt : aliased Real := 0.0;
+      Time : aliased Real := 0.0;
+   end record;
+   type Significant_Location_Array is array (1 .. 10) of aliased Significant_Location;
+
    type Earu_State is record
       Time                : aliased Real := 0.0;
       Loop_Consistency    : aliased Loop_Consistency_Type := (others => <>);
@@ -369,6 +379,8 @@ package Earu.Types is
       Events              : aliased Event_Array := (others => (others => <>));
       Event_Count         : aliased Integer := 0;
       Sol_BlueMarble      : aliased Sol_BlueMarble_Type := (others => <>);
+      Sig_Loc_Count       : aliased Integer := 0;
+      Sig_Locations       : aliased Significant_Location_Array := (others => (others => <>));
    end record;
 
 end Earu.Types;

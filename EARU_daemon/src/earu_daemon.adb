@@ -736,7 +736,28 @@ procedure Earu_Daemon is
             end if;
             
             -- Store updated ML and mood state
-            Earu.State_Store.State_Buffer.Update_ML (U);
+            declare
+               Sig_Locs : Significant_Location_Array := (others => (others => <>));
+               Sig_Count : Integer := 0;
+               Inside : Boolean := False;
+            begin
+               if ML_Results /= null then
+                  Sig_Count := Integer'Min (10, Integer (ML_Results.Sig_Loc_Count));
+                  for I in 1 .. Sig_Count loop
+                     Sig_Locs(I).Lat := Real (ML_Results.Sig_Locations(I).Lat);
+                     Sig_Locs(I).Lon := Real (ML_Results.Sig_Locations(I).Lon);
+                     Sig_Locs(I).Alt := Real (ML_Results.Sig_Locations(I).Alt);
+                     Sig_Locs(I).Time := Real (ML_Results.Sig_Locations(I).TS);
+
+                     -- Proximity Check (100m)
+                     if Earu.Math.Haversine (Full.Location.Lat, Full.Location.Lon, Sig_Locs(I).Lat, Sig_Locs(I).Lon) <= 100.0 then
+                        Inside := True;
+                     end if;
+                  end loop;
+               end if;
+               Earu.State_Store.State_Buffer.Update_ML (U, Sig_Count, Sig_Locs, Inside);
+            end;
+
          end;
 
          delay 0.1;
