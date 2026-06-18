@@ -71,6 +71,14 @@ procedure Earu_Daemon is
       Ret := C_System (Interfaces.C.To_C ("/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &"));
    end Start_ADB_Mock;
 
+   procedure Start_System_Bridge is
+      Ret : Interfaces.C.int;
+      pragma Unreferenced (Ret);
+   begin
+      Ada.Text_IO.Put_Line ("[*] Automatically invoking Python System Bridge (Stats SHM writer)...");
+      Ret := C_System (Interfaces.C.To_C ("/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &"));
+   end Start_System_Bridge;
+
    procedure Save_All_To_NVRAM (State : Earu_State) is
       use Earu.IO;
    begin
@@ -916,6 +924,7 @@ begin
 
     Start_ML_Bridge;
     Start_ADB_Mock;
+    Start_System_Bridge;
    Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
    Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
    Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");

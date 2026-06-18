@@ -551,6 +551,7 @@ class PrimaryFlightDisplay:
         self.show_profile: bool = False
 
         self.adv_subpage: int = 0
+        self.adv_detail_page: int = 0
         self.wifi_devices: list[dict[str, Any]] = []
         self.bt_devices: list[dict[str, Any]] = []
 
@@ -568,9 +569,16 @@ class PrimaryFlightDisplay:
         if self.page == 3:
             if key in ('Left', 'a'):
                 self.adv_subpage = 0
+                self.adv_detail_page = 0
                 return
             elif key in ('Right', 'd'):
                 self.adv_subpage = 1
+                return
+            elif key in ('Up', 'w') and self.adv_subpage == 0:
+                self.adv_detail_page = max(0, self.adv_detail_page - 1)
+                return
+            elif key in ('Down', 's') and self.adv_subpage == 0:
+                self.adv_detail_page = min(2, self.adv_detail_page + 1)
                 return
         if self.page != 4: return
 
@@ -1420,6 +1428,18 @@ class PrimaryFlightDisplay:
             if 470 <= event.x <= 720 and 70 <= event.y <= 95:
                 self.adv_subpage = 1
                 return
+            # Sub-subpage tabs (only on subpage 0)
+            if self.adv_subpage == 0:
+                tab_y_top, tab_y_bot = 105, 128
+                if 200 <= event.x <= 330 and tab_y_top <= event.y <= tab_y_bot:
+                    self.adv_detail_page = 0
+                    return
+                if 340 <= event.x <= 470 and tab_y_top <= event.y <= tab_y_bot:
+                    self.adv_detail_page = 1
+                    return
+                if 480 <= event.x <= 610 and tab_y_top <= event.y <= tab_y_bot:
+                    self.adv_detail_page = 2
+                    return
 
         if self.page == 8:
             # Check if clicked on a search result
@@ -3015,209 +3035,234 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(595, 82, text="2: WIRELESS SCANS", fill=t2_col, font=("Monaco", 9, "bold"))
 
         if self.adv_subpage == 0:
-            user = self.full_data.get('user_entity_detection', {})
-            total_count = user.get('count', 0)
-            self.canvas.create_text(50, 100, anchor="nw", text=f"USER ENTITY COUNT: {total_count}", fill="cyan", font=("Monaco", 12, "bold"))
+            # Sub-subpage tabs
+            dp = self.adv_detail_page
+            dp_labels = ["DETECTION & LOC", "SENSORS & FLUID", "WORK & STRESS"]
+            dp_colors = ["#00ff7f", "#ff8800", "#ff5555"]
+            for i, (lbl, col) in enumerate(zip(dp_labels, dp_colors)):
+                tx1 = 200 + i * 140
+                tx2 = tx1 + 130
+                bg = "#1a3a1a" if dp == i else "#111111"
+                fg = col if dp == i else "gray"
+                self.canvas.create_rectangle(tx1, 105, tx2, 128, fill=bg, outline=fg, width=2)
+                self.canvas.create_text((tx1 + tx2) / 2, 116, text=f"{i+1}: {lbl}", fill=fg, font=("Monaco", 8, "bold"))
 
-            detected = user.get('detected', [])
-            dy = 130.0
-            if not detected:
-                self.canvas.create_text(70, dy, anchor="nw", text="NO ENTITIES DETECTED", fill="gray", font=("Monaco", 10, "italic"))
-                dy += 20
-            else:
-                # Focus on exactly one primary entity heartbeat
-                bpm, conf = detected[0]
-                self.canvas.create_text(70, dy, anchor="nw", text=f"PRIMARY: {bpm:5.1f} BPM (CONF: {conf*100:3.0f}%)", fill="#00ff00", font=("Monaco", 10, "bold"))
+            y_start = 140
 
-                # Pulsing heart icon based on time and BPM for primary entity
-                pulse = 1.0 + 0.2 * math.sin(time.time() * (bpm / 60.0) * 2 * math.pi)
-                hx, hy = 320, dy + 7
-                # Simple heart shape
-                self.canvas.create_oval(hx-5*pulse, hy-5*pulse, hx+5*pulse, hy+5*pulse, fill="red", outline="")
-                self.canvas.create_oval(hx+0*pulse, hy-5*pulse, hx+10*pulse, hy+5*pulse, fill="red", outline="")
-                self.canvas.create_polygon([hx-5*pulse, hy+2*pulse, hx+10*pulse, hy+2*pulse, hx+2.5*pulse, hy+12*pulse], fill="red", outline="")
-                dy += 30
+            if dp == 0:
+                # Page 0: Entity Detection, Significant Locations, Mood, Loop Consistency
+                user = self.full_data.get('user_entity_detection', {})
+                total_count = user.get('count', 0)
+                self.canvas.create_text(50, y_start, anchor="nw", text=f"USER ENTITY COUNT: {total_count}", fill="cyan", font=("Monaco", 12, "bold"))
 
-                # State the number of other detected entities
-                other_count = max(0, total_count - 1)
-                self.canvas.create_text(70, dy, anchor="nw", text=f"OTHER ENTITIES: {other_count}", fill="white", font=("Monaco", 10))
-                dy += 25
+                detected = user.get('detected', [])
+                dy = y_start + 25
+                if not detected:
+                    self.canvas.create_text(70, dy, anchor="nw", text="NO ENTITIES DETECTED", fill="gray", font=("Monaco", 10, "italic"))
+                    dy += 20
+                else:
+                    bpm, conf = detected[0]
+                    self.canvas.create_text(70, dy, anchor="nw", text=f"PRIMARY: {bpm:5.1f} BPM (CONF: {conf*100:3.0f}%)", fill="#00ff00", font=("Monaco", 10, "bold"))
 
-            # Significant Locations Table
-            self.canvas.create_text(500, 100, anchor="nw", text="LATEST SIGNIFICANT LOCATIONS (MACRO ANCHORS)", fill="#ff8800", font=("Monaco", 12, "bold"))
-            sdy = 130
-            self.canvas.create_text(510, sdy, anchor="nw", text=" #   LATITUDE    LONGITUDE    ALTITUDE    TIMESTAMP (UTC)", fill="gray", font=("Monaco", 9, "bold"))
-            sdy += 20
-            self.canvas.create_line(500, sdy, 950, sdy, fill="#333")
-            sdy += 10
+                    pulse = 1.0 + 0.2 * math.sin(time.time() * (bpm / 60.0) * 2 * math.pi)
+                    hx, hy = 320, dy + 7
+                    self.canvas.create_oval(hx-5*pulse, hy-5*pulse, hx+5*pulse, hy+5*pulse, fill="red", outline="")
+                    self.canvas.create_oval(hx+0*pulse, hy-5*pulse, hx+10*pulse, hy+5*pulse, fill="red", outline="")
+                    self.canvas.create_polygon([hx-5*pulse, hy+2*pulse, hx+10*pulse, hy+2*pulse, hx+2.5*pulse, hy+12*pulse], fill="red", outline="")
+                    dy += 30
 
-            sig_locs = getattr(self, 'sig_locs', [])
-            if not sig_locs:
-                self.canvas.create_text(520, sdy, anchor="nw", text="NO ANCHORS RECORDED IN CURRENT SESSION", fill="gray", font=("Monaco", 9, "italic"))
-            else:
-                for idx, sloc in enumerate(sig_locs):
-                    ts_epoch = sloc.get('time', 0.0)
-                    ts_str = time.strftime("%H:%M:%S", time.gmtime(ts_epoch)) if ts_epoch > 0 else "N/A"
-                    lat = sloc.get('lat', 0.0)
-                    lon = sloc.get('lon', 0.0)
-                    alt = sloc.get('alt', 0.0)
+                    other_count = max(0, total_count - 1)
+                    self.canvas.create_text(70, dy, anchor="nw", text=f"OTHER ENTITIES: {other_count}", fill="white", font=("Monaco", 10))
+                    dy += 25
 
-                    is_near = False
-                    if getattr(self, 'inside_sig_loc', False):
-                        d_lat = lat - self.lat
-                        d_lon = (lon - self.lon) * math.cos(math.radians(self.lat))
-                        dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
-                        if dist_m <= 110.0:
-                            is_near = True
+                # Mood
+                mood = user.get('inferred_mood', {})
+                my = dy + 10
+                self.canvas.create_text(50, my, anchor="nw", text="INFERRED MOOD:", fill="cyan", font=("Monaco", 12, "bold"))
+                my += 25
+                for m, val in mood.items():
+                    self.canvas.create_text(70, my, anchor="nw", text=f"{m:18}: {float(val)*100:5.1f}%", fill="yellow", font=("Monaco", 9))
+                    my += 18
 
-                    row_col = "#00ff00" if is_near else "#ffcc00"
-                    self.canvas.create_text(510, sdy, anchor="nw", text=f"{idx+1:2d}  {lat:10.6f}  {lon:11.6f}  {alt:7.1f}m  {ts_str}", fill=row_col, font=("Monaco", 9))
-                    sdy += 18
+                # Significant Locations (right column)
+                self.canvas.create_text(450, y_start, anchor="nw", text="SIGNIFICANT LOCATIONS (MACRO ANCHORS)", fill="#ff8800", font=("Monaco", 11, "bold"))
+                sdy = y_start + 22
+                self.canvas.create_text(460, sdy, anchor="nw", text=" #   LATITUDE    LONGITUDE    ALTITUDE    TIMESTAMP", fill="gray", font=("Monaco", 9, "bold"))
+                sdy += 18
+                self.canvas.create_line(450, sdy, 950, sdy, fill="#333")
+                sdy += 8
 
-            # (Rest of mood and other sections ...)
-            mood = user.get('inferred_mood', {})
-            my = dy + 10
-            self.canvas.create_text(50, my, anchor="nw", text="INFERRED MOOD:", fill="cyan", font=("Monaco", 12, "bold"))
-            my += 30
-            for m, val in mood.items():
-                self.canvas.create_text(70, my, anchor="nw", text=f"{m:18}: {float(val)*100:5.1f}%", fill="yellow", font=("Monaco", 9)); my += 20
+                sig_locs = getattr(self, 'sig_locs', [])
+                if not sig_locs:
+                    self.canvas.create_text(470, sdy, anchor="nw", text="NO ANCHORS RECORDED IN CURRENT SESSION", fill="gray", font=("Monaco", 9, "italic"))
+                else:
+                    for idx, sloc in enumerate(sig_locs):
+                        ts_epoch = sloc.get('time', 0.0)
+                        ts_str = time.strftime("%H:%M:%S", time.gmtime(ts_epoch)) if ts_epoch > 0 else "N/A"
+                        lat = sloc.get('lat', 0.0)
+                        lon = sloc.get('lon', 0.0)
+                        alt = sloc.get('alt', 0.0)
 
-            loop = self.full_data.get('loop_consistency', {})
-            wcef = loop.get('wcef_latency', 0.0)
-            self.canvas.create_text(450, 100, anchor="nw", text=f"LOOP AVG: {loop.get('avg_ms',0):.2f}ms\nWCEF: {wcef:,.0f} ps\nSTUTTERS: {loop.get('stutters',0)}", fill="white", font=("Monaco", 10))
+                        is_near = False
+                        if getattr(self, 'inside_sig_loc', False):
+                            d_lat = lat - self.lat
+                            d_lon = (lon - self.lon) * math.cos(math.radians(self.lat))
+                            dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+                            if dist_m <= 110.0:
+                                is_near = True
 
-            # Pedometer Steps
-            ped = self.full_data.get('pedometer', {})
-            steps = ped.get('steps', 0)
-            self.canvas.create_text(450, 150, anchor="nw", text="PEDOMETER", fill="cyan", font=("Monaco", 12, "bold"))
-            self.canvas.create_text(450, 180, anchor="nw", text=f"STEPS COMPLETED: {steps}", fill="#00ff00", font=("Monaco", 10, "bold"))
+                        row_col = "#00ff00" if is_near else "#ffcc00"
+                        self.canvas.create_text(460, sdy, anchor="nw", text=f"{idx+1:2d}  {lat:10.6f}  {lon:11.6f}  {alt:7.1f}m  {ts_str}", fill=row_col, font=("Monaco", 9))
+                        sdy += 18
 
-            self.canvas.create_text(450, 220, anchor="nw", text="LID SENSOR", fill="cyan", font=("Monaco", 12, "bold"))
-            self.canvas.create_text(450, 250, anchor="nw", text=f"ANGLE: {self.lid_angle:.1f}\u00b0", fill="white", font=("Monaco", 10, "bold"))
-            self.canvas.create_text(450, 270, anchor="nw", text=f"SPEED: {self.lid_speed:.1f} deg/s", fill="#00ff00", font=("Monaco", 10, "bold"))
+                # Loop Consistency (bottom left)
+                loop = self.full_data.get('loop_consistency', {})
+                wcef = loop.get('wcef_latency', 0.0)
+                self.canvas.create_text(50, 480, anchor="nw", text=f"LOOP AVG: {loop.get('avg_ms',0):.2f}ms | WCEF: {wcef:,.0f} ps | STUTTERS: {loop.get('stutters',0)}", fill="white", font=("Monaco", 10))
 
-            # ALS Detail
-            als = self.full_data.get('als', {})
-            if als:
-                lx, ly = 50, 320
-                lux = als.get('lux_factor', 0.0)
-                self.canvas.create_text(lx, ly, anchor="nw", text=f"ALS INTENSITY (LUX FACTOR): {lux:.4f}", fill="white", font=("Monaco", 10, "bold"))
-                self.canvas.create_rectangle(lx, ly+20, lx+300, ly+35, fill="#111", outline="white")
-                self.canvas.create_rectangle(lx, ly+20, lx + lux*300, ly+35, fill="yellow", outline="")
+            elif dp == 1:
+                # Page 1: Pedometer, Lid Sensor, ALS, Fluid Dynamics
+                # Pedometer
+                ped = self.full_data.get('pedometer', {})
+                steps = ped.get('steps', 0)
+                self.canvas.create_text(50, y_start, anchor="nw", text="PEDOMETER", fill="cyan", font=("Monaco", 12, "bold"))
+                self.canvas.create_text(50, y_start + 25, anchor="nw", text=f"STEPS COMPLETED: {steps}", fill="#00ff00", font=("Monaco", 10, "bold"))
 
-                spec = als.get('spectral', [0,0,0,0])
-                self.canvas.create_text(lx, ly+50, anchor="nw", text="SPECTRAL CHANNELS:", fill="white", font=("Monaco", 10, "bold"))
-                s_max = max(spec) if max(spec) > 0 else 1
-                colors = ["#ff4444", "#44ff44", "#4444ff", "#ffffff"]
-                for i, val in enumerate(spec):
-                    bh = (val / s_max) * 100
-                    self.canvas.create_rectangle(lx + i*40, ly+170, lx + i*40 + 30, ly+170-bh, fill=colors[i], outline="white")
-                    self.canvas.create_text(lx + i*40 + 15, ly+180, text=str(val), fill="white", font=("Monaco", 7), anchor="n")
+                # Lid Sensor
+                self.canvas.create_text(50, y_start + 65, anchor="nw", text="LID SENSOR", fill="cyan", font=("Monaco", 12, "bold"))
+                self.canvas.create_text(50, y_start + 90, anchor="nw", text=f"ANGLE: {self.lid_angle:.1f}\u00b0 | SPEED: {self.lid_speed:.1f} deg/s", fill="white", font=("Monaco", 10, "bold"))
 
-            smc = self.full_data.get('smc', {}); gas = smc.get('gas_constants', {})
-            massflow = getattr(self, 'smooth_massflow', float(smc.get('massflow_kg_s', 0.0)))
-            heatflux = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
-            p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))
-            p_heat = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
+                # ALS Detail
+                als = self.full_data.get('als', {})
+                if als:
+                    lx, ly = 50, y_start + 130
+                    lux = als.get('lux_factor', 0.0)
+                    self.canvas.create_text(lx, ly, anchor="nw", text=f"ALS INTENSITY (LUX FACTOR): {lux:.4f}", fill="white", font=("Monaco", 10, "bold"))
+                    self.canvas.create_rectangle(lx, ly + 20, lx + 300, ly + 35, fill="#111", outline="white")
+                    self.canvas.create_rectangle(lx, ly + 20, lx + lux * 300, ly + 35, fill="yellow", outline="")
 
-            fluid = smc.get('fluid_dynamics', {})
-            flow_l = float(fluid.get('flow_scale_l', 0.01))
-            u0 = float(fluid.get('char_velocity_u0', 0.0))
-            re0 = float(fluid.get('reynolds_number_re0', 0.0))
-            re = float(fluid.get('reynolds_number', 0.0))
-            we = float(fluid.get('weber_number', 0.0))
-            st = float(fluid.get('strouhal_number', 0.0))
-            cy = float(fluid.get('cauchy_number', 0.0))
-            eff_pct = getattr(self, 'smooth_efficiency', float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0)))
-            work_pct = getattr(self, 'smooth_work_efficiency', float(smc.get('work_efficiency_pct', 100.0 - eff_pct)))
+                    spec = als.get('spectral', [0, 0, 0, 0])
+                    self.canvas.create_text(lx, ly + 50, anchor="nw", text="SPECTRAL CHANNELS:", fill="white", font=("Monaco", 10, "bold"))
+                    s_max = max(spec) if max(spec) > 0 else 1
+                    colors = ["#ff4444", "#44ff44", "#4444ff", "#ffffff"]
+                    for i, val in enumerate(spec):
+                        bh = (val / s_max) * 80
+                        self.canvas.create_rectangle(lx + i * 40, ly + 170, lx + i * 40 + 30, ly + 170 - bh, fill=colors[i], outline="white")
+                        self.canvas.create_text(lx + i * 40 + 15, ly + 180, text=str(val), fill="white", font=("Monaco", 7), anchor="n")
 
-            fluid_text = (
-                f"COOLING DYNAMICS & CONVECTIVE EFF:\n"
-                f"COOLING EFFICIENCY: {eff_pct:.2f}%\n"
-                f"THRUST:      {smc.get('thrust_n',0):.4f} N | MASSFLOW: {massflow:.4f} kg/s\n"
-                f"HEAT FLUX:   {heatflux:.2f} J/s | FLOW GAP L: {flow_l:.3f} m\n"
-                f"CHAR VEL u0: {u0:.3f} m/s | Cp: {gas.get('Cp',0):.1f} | GAMMA: {gas.get('gamma',0):.4f}\n"
-                f"REYNOLDS (MAIN): Re  = {re:.1f}\n"
-                f"REYNOLDS (EDDY): Re0 = {re0:.1f}\n"
-                f"WEBER: We = {we:.3f} | STROUHAL: St = {st:.4f} | CAUCHY: Cy = {cy:.6f}"
-            )
-            self.canvas.create_text(450, 195, anchor="nw", text=fluid_text, fill="cyan", font=("Monaco", 8))
+                # Fluid Dynamics (right column)
+                smc = self.full_data.get('smc', {})
+                gas = smc.get('gas_constants', {})
+                massflow = getattr(self, 'smooth_massflow', float(smc.get('massflow_kg_s', 0.0)))
+                heatflux = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
+                p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))
+                p_heat = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
 
-            # Processor Work & Computational Efficiency
-            p_loss = getattr(self, 'smooth_inefficiency', float(smc.get('thermal_inefficiency_w', 0.0)))
-            history = getattr(self, 'work_efficiency_history', [])
-            avg_work_1h = sum(history) / len(history) if history else work_pct
+                fluid = smc.get('fluid_dynamics', {})
+                flow_l = float(fluid.get('flow_scale_l', 0.01))
+                u0 = float(fluid.get('char_velocity_u0', 0.0))
+                re0 = float(fluid.get('reynolds_number_re0', 0.0))
+                re = float(fluid.get('reynolds_number', 0.0))
+                we = float(fluid.get('weber_number', 0.0))
+                st = float(fluid.get('strouhal_number', 0.0))
+                cy = float(fluid.get('cauchy_number', 0.0))
+                eff_pct = getattr(self, 'smooth_efficiency', float(smc.get('cooling_efficiency_pct', (p_heat / p_in * 100.0) if p_in > 0.0 else 0.0)))
 
-            work_text = (
-                f"PROCESSOR WORK & COMPUTATIONAL EFF:\n"
-                f"POWER INPUT (PSTR): {p_in:.2f} W\n"
-                f"HEAT EXHAUST LOSS:  {p_heat:.2f} J/s\n"
-                f"USEFUL PROC WORK:   {p_loss:.2f} W\n"
-                f"WORK EFFICIENCY:    {work_pct:.2f}%\n"
-                f"WORK EFF (1H AVG):  {avg_work_1h:.2f}%"
-            )
-            self.canvas.create_text(450, 300, anchor="nw", text=work_text, fill="orange", font=("Monaco", 8))
+                fluid_text = (
+                    f"COOLING DYNAMICS & CONVECTIVE EFF:\n"
+                    f"COOLING EFFICIENCY: {eff_pct:.2f}%\n"
+                    f"THRUST:      {smc.get('thrust_n',0):.4f} N | MASSFLOW: {massflow:.4f} kg/s\n"
+                    f"HEAT FLUX:   {heatflux:.2f} J/s | FLOW GAP L: {flow_l:.3f} m\n"
+                    f"CHAR VEL u0: {u0:.3f} m/s | Cp: {gas.get('Cp',0):.1f} | GAMMA: {gas.get('gamma',0):.4f}\n"
+                    f"REYNOLDS (MAIN): Re  = {re:.1f}\n"
+                    f"REYNOLDS (EDDY): Re0 = {re0:.1f}\n"
+                    f"WEBER: We = {we:.3f} | STROUHAL: St = {st:.4f} | CAUCHY: Cy = {cy:.6f}"
+                )
+                self.canvas.create_text(450, y_start, anchor="nw", text=fluid_text, fill="cyan", font=("Monaco", 9))
 
-            # 1. DR Calibration & Drift Corrections
-            loc = self.full_data.get('location', {})
-            c_alt = loc.get('CorrectionFactor_Reckoning_Altitude', 1.0)
-            c_hdg = loc.get('CorrectionFactor_Reckoning_Heading', 1.0)
-            c_vel = loc.get('CorrectionFactor_Reckoning_Velocity', 1.0)
-            c_vrt = loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0)
-            cal_g = loc.get('calibrated_g', 9.80665)
+            elif dp == 2:
+                # Page 2: Processor Work, DR Calibration, Geometry, Structural Fatigue, System Uptime, SPU Clock
+                smc = self.full_data.get('smc', {})
+                p_in = getattr(self, 'smooth_power', float(smc.get('power', 0.0)))
+                p_heat = getattr(self, 'smooth_heatflux', float(smc.get('heatflux_j', 0.0)))
+                eff_pct = getattr(self, 'smooth_efficiency', float(smc.get('cooling_efficiency_pct', 0.0)))
+                work_pct = getattr(self, 'smooth_work_efficiency', float(smc.get('work_efficiency_pct', 100.0 - eff_pct)))
 
-            self.canvas.create_text(450, 420, anchor="nw", text=f"DR CALIBRATION:\nALT CF:  {c_alt:.4f} | HDG CF: {c_hdg:.4f}\nVEL CF:  {c_vel:.4f} | VRT CF: {c_vrt:.4f}\nCALIB G: {cal_g:.6f} m/s²", fill="#44ff44", font=("Monaco", 9))
+                # Processor Work
+                p_loss = getattr(self, 'smooth_inefficiency', float(smc.get('thermal_inefficiency_w', 0.0)))
+                history = getattr(self, 'work_efficiency_history', [])
+                avg_work_1h = sum(history) / len(history) if history else work_pct
 
-            self.canvas.create_text(450, 472, anchor="nw", text=f"ACTIVE CATEGORY: {self.transportation_category.upper()}", fill="#ffff00", font=("Monaco", 9, "bold"))
+                work_text = (
+                    f"PROCESSOR WORK & COMPUTATIONAL EFF:\n"
+                    f"POWER INPUT (PSTR): {p_in:.2f} W\n"
+                    f"HEAT EXHAUST LOSS:  {p_heat:.2f} J/s\n"
+                    f"USEFUL PROC WORK:   {p_loss:.2f} W\n"
+                    f"WORK EFFICIENCY:    {work_pct:.2f}%\n"
+                    f"WORK EFF (1H AVG):  {avg_work_1h:.2f}%"
+                )
+                self.canvas.create_text(50, y_start, anchor="nw", text=work_text, fill="orange", font=("Monaco", 9))
 
-            # 2. Geometry & Position Vectors
-            pos = loc.get('pos', [0.0, 0.0, 0.0])
-            orient = self.full_data.get('orientation', {})
-            q = orient.get('q', [1.0, 0.0, 0.0, 0.0])
-            mach = loc.get('mach', 0.0)
-            odo = loc.get('odometer_30m', 0.0)
-            cardinal = loc.get('compass_dir', 'N')
+                # DR Calibration
+                loc = self.full_data.get('location', {})
+                c_alt = loc.get('CorrectionFactor_Reckoning_Altitude', 1.0)
+                c_hdg = loc.get('CorrectionFactor_Reckoning_Heading', 1.0)
+                c_vel = loc.get('CorrectionFactor_Reckoning_Velocity', 1.0)
+                c_vrt = loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0)
+                cal_g = loc.get('calibrated_g', 9.80665)
 
-            self.canvas.create_text(450, 490, anchor="nw", text=f"GEOMETRY & POSITION:\nLOCAL POS: X:{pos[0]:.2f} Y:{pos[1]:.2f} Z:{pos[2]:.2f}\nQUATERN:   W:{q[0]:.3f} X:{q[1]:.3f} Y:{q[2]:.3f} Z:{q[3]:.3f}\nMACH:      {mach:.5f} | CARDINAL: {cardinal}\nMICRO-ODO: {odo:.2f} m", fill="#a8a8ff", font=("Monaco", 9))
+                self.canvas.create_text(50, y_start + 140, anchor="nw", text=f"DR CALIBRATION:\nALT CF:  {c_alt:.4f} | HDG CF: {c_hdg:.4f}\nVEL CF:  {c_vel:.4f} | VRT CF: {c_vrt:.4f}\nCALIB G: {cal_g:.6f} m/s\u00b2", fill="#44ff44", font=("Monaco", 9))
 
-            # 3. Structural Fatigue & Seismic Stress
-            seis = self.full_data.get('seismic_activity', {})
-            dmg = seis.get('damage_fatigue', {})
-            em_fatigue = dmg.get('electromech_fatigue_prob', 0.0)
-            sd_fatigue = dmg.get('solder_fatigue_prob', 0.0)
-            seu_mul = dmg.get('seu_risk_multiplier', 1.0)
-            alt_mul = dmg.get('alt_stress_multiplier', 1.0)
-            upset_count = dmg.get('anomaly_event_upset', 0)
-            motion = seis.get('motion_type', 'Stationary')
-            spec_bal = seis.get('spectral_balance', 0.0)
+                self.canvas.create_text(50, y_start + 220, anchor="nw", text=f"ACTIVE CATEGORY: {self.transportation_category.upper()}", fill="#ffff00", font=("Monaco", 9, "bold"))
 
-            sd_val = sd_fatigue * 100.0
-            sd_str = f"{sd_val:.6f}%" if sd_val >= 1.0e-5 else f"{sd_val:.4e}%"
+                # Geometry & Position (right column)
+                pos = loc.get('pos', [0.0, 0.0, 0.0])
+                orient = self.full_data.get('orientation', {})
+                q = orient.get('q', [1.0, 0.0, 0.0, 0.0])
+                mach = loc.get('mach', 0.0)
+                odo = loc.get('odometer_30m', 0.0)
+                cardinal = loc.get('compass_dir', 'N')
 
-            self.canvas.create_text(450, 580, anchor="nw", text=f"STRUCTURAL FATIGUE & STRESS:\nMOTION REGIME: {motion} | SPEC BAL: {spec_bal:.4f}\nEM FATIGUE:    {em_fatigue*100:.6f}%\nSOLDER FTG:    {sd_str}\nSEU RISK MULT: {seu_mul:.4f}x\nALT COOL MULT: {alt_mul:.4f}x\nSEU UPSETS:    {upset_count}", fill="#ff5555", font=("Monaco", 9))
+                self.canvas.create_text(450, y_start, anchor="nw", text=f"GEOMETRY & POSITION:\nLOCAL POS: X:{pos[0]:.2f} Y:{pos[1]:.2f} Z:{pos[2]:.2f}\nQUATERN:   W:{q[0]:.3f} X:{q[1]:.3f} Y:{q[2]:.3f} Z:{q[3]:.3f}\nMACH:      {mach:.5f} | CARDINAL: {cardinal}\nMICRO-ODO: {odo:.2f} m", fill="#a8a8ff", font=("Monaco", 9))
 
-            # 4. System Uptime & Capacities
-            sys_info = self.full_data.get('system', {})
-            uptime_earu = sys_info.get('uptime_earu', 0.0)
-            uptime_sys = sys_info.get('uptime_system', 0.0)
-            b_design = sys_info.get('BatteryDesignCapacityWh', 0.0)
-            b_full = sys_info.get('BatteryFullChargeCapacityWh', 0.0)
-            b_bank = sys_info.get('BatteryEnergyBankWh', 0.0)
-            hid_idle = sys_info.get('nonHumanInputHIDIdle', 0.0)
+                # Structural Fatigue (right column, below geometry)
+                seis = self.full_data.get('seismic_activity', {})
+                dmg = seis.get('damage_fatigue', {})
+                em_fatigue = dmg.get('electromech_fatigue_prob', 0.0)
+                sd_fatigue = dmg.get('solder_fatigue_prob', 0.0)
+                seu_mul = dmg.get('seu_risk_multiplier', 1.0)
+                alt_mul = dmg.get('alt_stress_multiplier', 1.0)
+                upset_count = dmg.get('anomaly_event_upset', 0)
+                motion = seis.get('motion_type', 'Stationary')
+                spec_bal = seis.get('spectral_balance', 0.0)
 
-            self.canvas.create_text(50, 540, anchor="nw", text=f"SYSTEM RUNTIME & ENERGY:\nEARU RUNTIME:  {uptime_earu:.1f} s\nSYSTEM UPTIME: {uptime_sys:.1f} s ({uptime_sys/3600.0:.1f} hrs)\nDESIGN CAP:    {b_design:.2f} Wh\nFULL CAP:      {b_full:.2f} Wh | BANK: {b_bank:.2f} Wh\nHID IDLE SCAN: {hid_idle:.3f} s", fill="#ffff55", font=("Monaco", 9))
+                sd_val = sd_fatigue * 100.0
+                sd_str = f"{sd_val:.6f}%" if sd_val >= 1.0e-5 else f"{sd_val:.4e}%"
 
-            # 5. SPU Clock & Hardware Timings
-            drift = self.full_data.get('high_res_drift', {})
-            spu_lat = drift.get('spu_lat_ms', 0.0)
-            gpu_lat = drift.get('gpu_lat_ms', 0.0)
-            rtc_jit = drift.get('rtc_jitter_ms', 0.0)
-            t_cpu = drift.get('t_cpu_ns', 0)
-            t_rtc = drift.get('t_rtc_ns', 0)
-            t_spu = drift.get('t_spu_ns', 0)
-            interfere = drift.get('interference', 'No')
+                self.canvas.create_text(450, y_start + 110, anchor="nw", text=f"STRUCTURAL FATIGUE & STRESS:\nMOTION REGIME: {motion} | SPEC BAL: {spec_bal:.4f}\nEM FATIGUE:    {em_fatigue*100:.6f}%\nSOLDER FTG:    {sd_str}\nSEU RISK MULT: {seu_mul:.4f}x\nALT COOL MULT: {alt_mul:.4f}x\nSEU UPSETS:    {upset_count}", fill="#ff5555", font=("Monaco", 9))
 
-            self.canvas.create_text(50, 630, anchor="nw", text=f"SPU CLOCK & HARDWARE TIMINGS:\nSPU LATENCY:  {spu_lat:.3f} ms | GPU: {gpu_lat:.3f} ms\nRTC JITTER:   {rtc_jit:.6f} ms\nT_CPU NS:     {t_cpu} ns\nT_RTC NS:     {t_rtc} ns\nT_SPU NS:     {t_spu} ns\nINTERFERENCE: {interfere}", fill="#ffaa55", font=("Monaco", 9))
+                # System Uptime & Energy (bottom left)
+                sys_info = self.full_data.get('system', {})
+                uptime_earu = sys_info.get('uptime_earu', 0.0)
+                uptime_sys = sys_info.get('uptime_system', 0.0)
+                b_design = sys_info.get('BatteryDesignCapacityWh', 0.0)
+                b_full = sys_info.get('BatteryFullChargeCapacityWh', 0.0)
+                b_bank = sys_info.get('BatteryEnergyBankWh', 0.0)
+                hid_idle = sys_info.get('nonHumanInputHIDIdle', 0.0)
+
+                self.canvas.create_text(50, y_start + 260, anchor="nw", text=f"SYSTEM RUNTIME & ENERGY:\nEARU RUNTIME:  {uptime_earu:.1f} s\nSYSTEM UPTIME: {uptime_sys:.1f} s ({uptime_sys/3600.0:.1f} hrs)\nDESIGN CAP:    {b_design:.2f} Wh\nFULL CAP:      {b_full:.2f} Wh | BANK: {b_bank:.2f} Wh\nHID IDLE SCAN: {hid_idle:.3f} s", fill="#ffff55", font=("Monaco", 9))
+
+                # SPU Clock (bottom right)
+                drift = self.full_data.get('high_res_drift', {})
+                spu_lat = drift.get('spu_lat_ms', 0.0)
+                gpu_lat = drift.get('gpu_lat_ms', 0.0)
+                rtc_jit = drift.get('rtc_jitter_ms', 0.0)
+                t_cpu = drift.get('t_cpu_ns', 0)
+                t_rtc = drift.get('t_rtc_ns', 0)
+                t_spu = drift.get('t_spu_ns', 0)
+                interfere = drift.get('interference', 'No')
+
+                self.canvas.create_text(450, y_start + 280, anchor="nw", text=f"SPU CLOCK & HARDWARE TIMINGS:\nSPU LATENCY:  {spu_lat:.3f} ms | GPU: {gpu_lat:.3f} ms\nRTC JITTER:   {rtc_jit:.6f} ms\nT_CPU NS:     {t_cpu} ns\nT_RTC NS:     {t_rtc} ns\nT_SPU NS:     {t_spu} ns\nINTERFERENCE: {interfere}", fill="#ffaa55", font=("Monaco", 9))
 
         elif self.adv_subpage == 1:
             self.canvas.create_text(50, 120, anchor="nw", text="ACTIVE SOIL SIGNALS & WIRELESS GEOLOCATION SCANNER", fill="#00ffcc", font=("Monaco", 12, "bold"))
