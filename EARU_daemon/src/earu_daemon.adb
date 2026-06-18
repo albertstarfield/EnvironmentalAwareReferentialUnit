@@ -587,53 +587,29 @@ procedure Earu_Daemon is
                   D_Fan1_Tg : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F1Tg.dat");
                   D_Turbo : constant Integer := Earu.IO.Read_Sensor_Integer ("sensor_TURBO_MODE.dat");
                begin
-                  if D_Ts1P /= 0.0 then
-                     SMC.Ambient_Temp_K := D_Ts1P + 273.15;
-                  else
-                     SMC.Ambient_Temp_K := Real (Stats_SHM.SMC_Ambient_K);
-                  end if;
-                  
-                  SMC.Humidity_Pct := Real (Stats_SHM.SMC_Humidity);
-                  
-                  if D_TaLP /= 0.0 then
-                     SMC.TaLP_K := D_TaLP + 273.15;
-                  else
-                     SMC.TaLP_K := Real (Stats_SHM.TaLP_K);
-                  end if;
-                  
-                  if D_TaRF /= 0.0 then
-                     SMC.TaRF_K := D_TaRF + 273.15;
-                  else
-                     SMC.TaRF_K := Real (Stats_SHM.TaRF_K);
-                  end if;
-                  
-                  if D_Fan0 /= 0.0 or D_Fan1 /= 0.0 then
-                     SMC.Fan_RPMs := (D_Fan0, D_Fan1);
-                  else
-                     SMC.Fan_RPMs := (Real (Stats_SHM.SMC_Fan1_RPM), Real (Stats_SHM.SMC_Fan2_RPM));
-                  end if;
-                  SMC.Fan_Targets := (D_Fan0_Tg, D_Fan1_Tg);
-                  
-                  if D_TCMz /= 0.0 then SMC.Temps.TCMz := D_TCMz; else SMC.Temps.TCMz := Real (Stats_SHM.SMC_TCMz); end if;
-                  if D_Tg0X /= 0.0 then SMC.Temps.Tg0X := D_Tg0X; else SMC.Temps.Tg0X := Real (Stats_SHM.SMC_Tg0X); end if;
-                  if D_TaLP /= 0.0 then SMC.Temps.TaLP := D_TaLP; else SMC.Temps.TaLP := Real (Stats_SHM.SMC_TaLP); end if;
-                  if D_TaLT /= 0.0 then SMC.Temps.TaLT := D_TaLT; else SMC.Temps.TaLT := Real (Stats_SHM.SMC_TaLT); end if;
-                  if D_TaLW /= 0.0 then SMC.Temps.TaLW := D_TaLW; else SMC.Temps.TaLW := Real (Stats_SHM.SMC_TaLW); end if;
-                  if D_TaRF /= 0.0 then SMC.Temps.TaRF := D_TaRF; else SMC.Temps.TaRF := Real (Stats_SHM.SMC_TaRF); end if;
-                  if D_TaRT /= 0.0 then SMC.Temps.TaRT := D_TaRT; else SMC.Temps.TaRT := Real (Stats_SHM.SMC_TaRT); end if;
-                  if D_TaRW /= 0.0 then SMC.Temps.TaRW := D_TaRW; else SMC.Temps.TaRW := Real (Stats_SHM.SMC_TaRW); end if;
-                  if D_Ts0P /= 0.0 then SMC.Temps.Ts0P := D_Ts0P; else SMC.Temps.Ts0P := Real (Stats_SHM.SMC_Ts0P); end if;
-                  if D_Ts1P /= 0.0 then SMC.Temps.Ts1P := D_Ts1P; else SMC.Temps.Ts1P := Real (Stats_SHM.SMC_Ts1P); end if;
-                  
-                  if D_PSTR /= 0.0 then
-                     SMC.Temps.PSTR := D_PSTR;
-                     SMC.Power := D_PSTR;
-                     SMC.Power_Rate_Usage := D_PSTR;
-                  else
-                     SMC.Temps.PSTR := Real (Stats_SHM.SMC_PSTR);
-                     SMC.Power := Real (Stats_SHM.Power_W);
-                     SMC.Power_Rate_Usage := Real (Stats_SHM.Power_W);
-                  end if;
+                   -- SMC temps: always read direct from disk, no Python fallback
+                   SMC.Ambient_Temp_K := D_Ts1P + 273.15;
+                   SMC.Humidity_Pct := Real (Stats_SHM.SMC_Humidity);
+                   SMC.TaLP_K := D_TaLP + 273.15;
+                   SMC.TaRF_K := D_TaRF + 273.15;
+
+                   SMC.Fan_RPMs := (D_Fan0, D_Fan1);
+                   SMC.Fan_Targets := (D_Fan0_Tg, D_Fan1_Tg);
+
+                   SMC.Temps.TCMz := D_TCMz;
+                   SMC.Temps.Tg0X := D_Tg0X;
+                   SMC.Temps.TaLP := D_TaLP;
+                   SMC.Temps.TaLT := D_TaLT;
+                   SMC.Temps.TaLW := D_TaLW;
+                   SMC.Temps.TaRF := D_TaRF;
+                   SMC.Temps.TaRT := D_TaRT;
+                   SMC.Temps.TaRW := D_TaRW;
+                   SMC.Temps.Ts0P := D_Ts0P;
+                   SMC.Temps.Ts1P := D_Ts1P;
+
+                   SMC.Temps.PSTR := D_PSTR;
+                   SMC.Power := D_PSTR;
+                   SMC.Power_Rate_Usage := D_PSTR;
                   
                   SMC.Turbo := D_Turbo;
                end;
@@ -924,6 +900,7 @@ begin
 
     Start_ML_Bridge;
     Start_ADB_Mock;
+    Start_System_Bridge;
    Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
    Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
    Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");

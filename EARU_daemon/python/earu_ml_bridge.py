@@ -228,6 +228,8 @@ def weather_worker() -> None:
             if now - last_cl_check >= scan_interval and not global_location.cl_running:
                 last_cl_check = now
                 if v_mag_val > 0.5:
+                    # Anchor: nuke locationd to force CoreLocation to re-triangulate.
+                    # Nuclear is the only way to make it conform to us.
                     try:
                         subprocess.run(["killall", "-9", "locationd"], capture_output=True)
                     except Exception:

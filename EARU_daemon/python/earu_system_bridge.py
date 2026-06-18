@@ -47,19 +47,8 @@ _smc_cache: dict[str, float] = {}
 
 
 def get_hid_idle_nanoseconds() -> int:
-    """Read HID idle time from IOHIDSystem (nanoseconds)."""
-    try:
-        res = subprocess.run(
-            ["ioreg", "-c", "IOHIDSystem"],
-            capture_output=True, text=True, timeout=2,
-        )
-        for line in res.stdout.splitlines():
-            if "HIDIdleTime" in line:
-                parts = line.split("=")
-                if len(parts) > 1:
-                    return int(parts[1].strip())
-    except Exception:
-        pass
+    """HID idle time — now read natively by Ada via C (get_hid_idle_time_ns).
+    Kept as stub to maintain shared memory struct layout."""
     return 0
 
 
