@@ -924,7 +924,6 @@ begin
 
     Start_ML_Bridge;
     Start_ADB_Mock;
-    Start_System_Bridge;
    Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
    Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
    Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");
