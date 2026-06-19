@@ -31,5 +31,6 @@ typedef struct {
 
 void start_iokit_sensors(IMU_SHM *accel, IMU_SHM *gyro, Lid_SHM *lid, ALS_SHM_Record *als);
 uint64_t get_hid_idle_time_ns(void);
+void get_battery_state(int *percent, int *state);
 
 #endif

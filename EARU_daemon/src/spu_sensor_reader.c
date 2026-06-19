@@ -52,6 +52,30 @@ uint64_t get_hid_idle_time_ns(void) {
     return idleTime;
 }
 
+/* Battery state read directly from pmset -g batt.
+   percent: 0-100, state: 0=unknown, 1=discharging, 2=charging, 3=charged/full */
+void get_battery_state(int *percent, int *state) {
+    *percent = 0;
+    *state = 0;
+    FILE *fp = popen("pmset -g batt", "r");
+    if (!fp) return;
+    char buf[512];
+    while (fgets(buf, sizeof(buf), fp)) {
+        char *pct = strstr(buf, "%");
+        if (pct) {
+            /* walk backwards to find the number */
+            char *end = pct - 1;
+            while (end > buf && (*(end - 1) >= '0' && *(end - 1) <= '9')) end--;
+            *percent = atoi(end);
+        }
+        if (strstr(buf, "discharging")) *state = 1;
+        else if (strstr(buf, "charging")) *state = 2;
+        else if (strstr(buf, "finishing charge")) *state = 2;
+        else if (strstr(buf, "charged") || strstr(buf, "full")) *state = 3;
+    }
+    pclose(fp);
+}
+
 void on_accel_report(void *context, IOReturn result, void *sender, IOHIDReportType type, uint32_t reportID, uint8_t *report, CFIndex reportLength, uint64_t timeStamp) {
     static int count = 0;
     if (count++ % 800 == 0) {

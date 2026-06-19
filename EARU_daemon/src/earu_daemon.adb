@@ -40,6 +40,9 @@ procedure Earu_Daemon is
    function Get_HID_Idle_Time_NS return Interfaces.Unsigned_64;
    pragma Import (C, Get_HID_Idle_Time_NS, "get_hid_idle_time_ns");
 
+   procedure Get_Battery_State (Percent : access Interfaces.C.int; State : access Interfaces.C.int);
+   pragma Import (C, Get_Battery_State, "get_battery_state");
+
    procedure Setup_Ramdisk is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -538,8 +541,17 @@ procedure Earu_Daemon is
             begin
                S.CPU_Usage := Real (Stats_SHM.CPU_Usage);
                S.Mem_Usage := Real (Stats_SHM.Mem_Usage);
-               S.Battery_Percent := Integer (Stats_SHM.Battery_Percent);
-               S.Battery_Charging := Stats_SHM.Battery_State /= 1.0;
+
+               -- Battery: read direct from pmset, not from Python sidecar
+               declare
+                  Batt_Percent : aliased Interfaces.C.int;
+                  Batt_State   : aliased Interfaces.C.int;
+               begin
+                  Get_Battery_State (Batt_Percent'Access, Batt_State'Access);
+                  S.Battery_Percent  := Integer (Batt_Percent);
+                  S.Battery_Charging := Batt_State = 2 or Batt_State = 3;
+               end;
+
                S.Battery_Design_Wh := Real (Stats_SHM.Bat_Design_Wh);
                S.Battery_Energy_Wh := Real (Stats_SHM.Bat_Energy_Wh);
                S.Battery_Full_Wh := Real (Stats_SHM.Bat_Full_Wh);
