@@ -18,6 +18,7 @@ with GNAT.Sockets;
 with Earu.Network_Status;
 with Ada.Strings.Fixed;
 with Earu.Weather_Fetcher;
+with Earu.Stale_Detector;
 
 procedure Earu_Daemon is
    use Earu.Types;
@@ -370,6 +371,7 @@ procedure Earu_Daemon is
     task System_Log_Watcher_Task;
 
     Weather_Fetcher_Task : Earu.Weather_Fetcher.Fetcher;
+    Stale_Watchdog_Task  : Earu.Stale_Detector.Watchdog;
 
     task body System_Log_Watcher_Task is
        Ret : Interfaces.C.int;
@@ -968,5 +970,9 @@ begin
    else
       Ada.Text_IO.Put_Line ("EARU Daemon Concurrent Core Active.");
    end if;
+
+   -- Start stale detection watchdog
+   Stale_Watchdog_Task.Start;
+
    loop delay 1.0; end loop;
 end Earu_Daemon;
