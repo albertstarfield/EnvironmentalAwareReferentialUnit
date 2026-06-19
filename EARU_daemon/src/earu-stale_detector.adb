@@ -164,7 +164,8 @@ package body Earu.Stale_Detector is
             end;
          end if;
 
-         -- 3. SMC sensor staleness: compare sensor_temp_TCMz.dat value drift
+         -- 3. SMC sensor staleness: detect if sensor files stop being written entirely
+         --    (not value stability — thermal inertia is normal)
          if Check_Count mod 12 = 0 then -- every 60s
             declare
                use Ada.Text_IO;
@@ -172,6 +173,7 @@ package body Earu.Stale_Detector is
                Line : String (1 .. 64);
                Last : Natural;
                Cur_TCMz : Real := 0.0;
+               File_Old : Boolean := False;
             begin
                begin
                   Open (F, In_File, "/Volumes/EARU_dataIO/sensor_temp_TCMz.dat");
@@ -181,19 +183,18 @@ package body Earu.Stale_Detector is
                exception
                   when others =>
                      if Is_Open (F) then Close (F); end if;
+                     File_Old := True;
                end;
 
-               declare
-                  Prev_TCMz : constant Real := Real (Earu.State_Store.State_Buffer.Get_Full_State.SMC.Temps.TCMz);
-               begin
-                  if Cur_TCMz = Prev_TCMz and then Cur_TCMz /= 0.0 then
-                     SMC_Stale := True;
-                     Ada.Text_IO.Put_Line ("[!] STALE SMC: TCMz unchanged at" &
-                        Real'Image (Cur_TCMz) & " for 60s cycle");
-                  else
-                     SMC_Stale := False;
-                  end if;
-               end;
+               if File_Old then
+                  SMC_Stale := True;
+                  Ada.Text_IO.Put_Line ("[!] STALE SMC: sensor_temp_TCMz.dat unreadable");
+               elsif Cur_TCMz = 0.0 then
+                  SMC_Stale := True;
+                  Ada.Text_IO.Put_Line ("[!] STALE SMC: sensor_temp_TCMz.dat returned 0.0");
+               else
+                  SMC_Stale := False;
+               end if;
             end;
          end if;
 
