@@ -40,7 +40,7 @@ procedure Earu_Daemon is
    function Get_HID_Idle_Time_NS return Interfaces.Unsigned_64;
    pragma Import (C, Get_HID_Idle_Time_NS, "get_hid_idle_time_ns");
 
-   procedure Get_Battery_State (Percent : access Interfaces.C.int; State : access Interfaces.C.int);
+   procedure Get_Battery_State (Percent : access Interfaces.C.int; State : access Interfaces.C.int; Buf : Interfaces.C.char_array; Max_Len : Interfaces.C.int);
    pragma Import (C, Get_Battery_State, "get_battery_state");
 
    procedure Setup_Ramdisk is
@@ -546,10 +546,26 @@ procedure Earu_Daemon is
                declare
                   Batt_Percent : aliased Interfaces.C.int;
                   Batt_State   : aliased Interfaces.C.int;
+                  Pmset_Buf    : aliased Interfaces.C.char_array (0 .. 1023);
+                  use type Interfaces.C.char;
                begin
-                  Get_Battery_State (Batt_Percent'Access, Batt_State'Access);
+                  Get_Battery_State (Batt_Percent'Access, Batt_State'Access, Pmset_Buf, 1024);
                   S.Battery_Percent  := Integer (Batt_Percent);
                   S.Battery_Charging := Batt_State = 2 or Batt_State = 3;
+                  declare
+                     Last : Natural := 0;
+                  begin
+                     for I in Pmset_Buf'Range loop
+                        exit when Pmset_Buf (I) = Interfaces.C.nul;
+                        Last := Last + 1;
+                     end loop;
+                     if Last > 0 then
+                        S.PMSet_Info := (others => ' ');
+                        for I in 1 .. Last loop
+                           S.PMSet_Info (I) := Interfaces.C.To_Ada (Pmset_Buf (Interfaces.C.size_t (I - 1)));
+                        end loop;
+                     end if;
+                  end;
                end;
 
                S.Battery_Design_Wh := Real (Stats_SHM.Bat_Design_Wh);
@@ -558,7 +574,6 @@ procedure Earu_Daemon is
                S.Battery_Health_Pct := Real (Stats_SHM.Bat_Health_Pct);
                S.Load_Avg := (Real (Stats_SHM.Load_Avg_1), Real (Stats_SHM.Load_Avg_5), Real (Stats_SHM.Load_Avg_15));
                S.Non_Human_HID_Idle_ns := Real (Get_HID_Idle_Time_NS);
-               S.PMSet_Info := Stats_SHM.PMSET_Info;
                S.Uptime_System := Real (Stats_SHM.Uptime_System);
                S.Uptime_Earu := Real (Stats_SHM.Uptime_Earu);
                
