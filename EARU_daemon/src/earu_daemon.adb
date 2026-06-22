@@ -83,6 +83,25 @@ procedure Earu_Daemon is
       Ret := C_System (Interfaces.C.To_C ("/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &"));
    end Start_System_Bridge;
 
+   procedure Ensure_Sidecars_Running is
+      Ret : Interfaces.C.int;
+      pragma Unreferenced (Ret);
+   begin
+      -- Check if earu_ml_bridge.py is alive via pgrep
+      -- (stats_worker runs as a child of ml_bridge, no separate system_bridge)
+      Ret := C_System (Interfaces.C.To_C (
+         "pgrep -f earu_ml_bridge.py > /dev/null 2>&1 || " &
+         "(echo '[!] ml_bridge.py dead, relaunching' && " &
+         "REAL_SENSOR=1 /opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &)"
+      ));
+      -- Check if earu_adb_mock.py is alive via pgrep
+      Ret := C_System (Interfaces.C.To_C (
+         "pgrep -f earu_adb_mock.py > /dev/null 2>&1 || " &
+         "(echo '[!] adb_mock.py dead, relaunching' && " &
+         "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &)"
+      ));
+   end Ensure_Sidecars_Running;
+
    procedure Save_All_To_NVRAM (State : Earu_State) is
       use Earu.IO;
    begin
@@ -396,9 +415,16 @@ procedure Earu_Daemon is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
       Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 301.0);
       Last_NVRAM_Sync_Hour     : Integer := -1;
+      Last_Sidecar_Check       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 31.0);
    begin
       while Weather_SHM = null or Stats_SHM = null loop delay 0.1; end loop;
       loop
+          -- 0. Sidecar watchdog (every 30 seconds)
+          if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Sidecar_Check) > 30.0 then
+             Ensure_Sidecars_Running;
+             Last_Sidecar_Check := Ada.Calendar.Clock;
+          end if;
+
           -- 1. Periodic Machine Life Update (every 5 minutes)
           if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Machine_Life_Update) > 300.0 then
              declare
@@ -456,6 +482,7 @@ procedure Earu_Daemon is
                 Earu.State_Store.State_Buffer.Update_Weather (W, L);
                 Earu.State_Store.State_Buffer.Update_Ecosystem (Eco);
                 Earu.State_Store.State_Buffer.Update_SMC (SMC);
+                Earu.State_Store.State_Buffer.Update_Parity (L.Pressure_HPa, L.Pressure_HPa, 0.0);
                 Last_W := Weather_SHM.Header.Update_Count;
              end;
           else
@@ -534,41 +561,46 @@ procedure Earu_Daemon is
              end;
           end if;
 
-         if Stats_SHM.Header.Update_Count /= Last_S then
-            Ada.Text_IO.Put_Line ("[*] Stats_SHM update detected! Count=" & Stats_SHM.Header.Update_Count'Img & " Last_S=" & Last_S'Img);
+         -- Battery: read direct from pmset EVERY tick, independent of Stats_SHM
+         declare
+            Batt_Percent : aliased Interfaces.C.int;
+            Batt_State   : aliased Interfaces.C.int;
+            Pmset_Buf    : aliased Interfaces.C.char_array (0 .. 1023);
+            use type Interfaces.C.char;
+         begin
+            Get_Battery_State (Batt_Percent'Access, Batt_State'Access, Pmset_Buf, 1024);
             declare
-               Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
-               S    : System_Stats_Type := Full.System;
-               SMC  : SMC_Type := Full.SMC;
+               Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
             begin
-               S.CPU_Usage := Real (Stats_SHM.CPU_Usage);
-               S.Mem_Usage := Real (Stats_SHM.Mem_Usage);
-
-               -- Battery: read direct from pmset, not from Python sidecar
+               Full.System.Battery_Percent  := Integer (Batt_Percent);
+               Full.System.Battery_Charging := Batt_State = 2 or Batt_State = 3;
                declare
-                  Batt_Percent : aliased Interfaces.C.int;
-                  Batt_State   : aliased Interfaces.C.int;
-                  Pmset_Buf    : aliased Interfaces.C.char_array (0 .. 1023);
-                  use type Interfaces.C.char;
+                  Last : Natural := 0;
                begin
-                  Get_Battery_State (Batt_Percent'Access, Batt_State'Access, Pmset_Buf, 1024);
-                  S.Battery_Percent  := Integer (Batt_Percent);
-                  S.Battery_Charging := Batt_State = 2 or Batt_State = 3;
-                  declare
-                     Last : Natural := 0;
-                  begin
-                     for I in Pmset_Buf'Range loop
-                        exit when Pmset_Buf (I) = Interfaces.C.nul;
-                        Last := Last + 1;
+                  for I in Pmset_Buf'Range loop
+                     exit when Pmset_Buf (I) = Interfaces.C.nul;
+                     Last := Last + 1;
+                  end loop;
+                  if Last > 0 then
+                     Full.System.PMSet_Info := (others => ' ');
+                     for I in 1 .. Last loop
+                        Full.System.PMSet_Info (I) := Interfaces.C.To_Ada (Pmset_Buf (Interfaces.C.size_t (I - 1)));
                      end loop;
-                     if Last > 0 then
-                        S.PMSet_Info := (others => ' ');
-                        for I in 1 .. Last loop
-                           S.PMSet_Info (I) := Interfaces.C.To_Ada (Pmset_Buf (Interfaces.C.size_t (I - 1)));
-                        end loop;
-                     end if;
-                  end;
+                  end if;
                end;
+               Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+            end;
+         end;
+
+         if Stats_SHM.Header.Update_Count /= Last_S then
+             Ada.Text_IO.Put_Line ("[*] Stats_SHM update detected! Count=" & Stats_SHM.Header.Update_Count'Img & " Last_S=" & Last_S'Img);
+             declare
+                Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+                S    : System_Stats_Type := Full.System;
+                SMC  : SMC_Type := Full.SMC;
+             begin
+                S.CPU_Usage := Real (Stats_SHM.CPU_Usage);
+                S.Mem_Usage := Real (Stats_SHM.Mem_Usage);
 
                S.Battery_Design_Wh := Real (Stats_SHM.Bat_Design_Wh);
                S.Battery_Energy_Wh := Real (Stats_SHM.Bat_Energy_Wh);
@@ -691,8 +723,17 @@ procedure Earu_Daemon is
                   SMC.Must_Hibernate := False;
                end if;
                
-               Earu.State_Store.State_Buffer.Update_System (S, (T_CPU_ns => Long_Long_Integer (Stats_SHM.T_CPU_ns), T_RTC_ns => Long_Long_Integer (Stats_SHM.T_RTC_ns), T_GPU_ns => Long_Long_Integer (Stats_SHM.T_GPU_ns), T_ANE_ns => Long_Long_Integer (Stats_SHM.T_ANE_ns), T_DAT_ns => Long_Long_Integer (Stats_SHM.T_DAT_ns), T_SPU_ns => Long_Long_Integer (Stats_SHM.T_SPU_ns), SPU_Lat_ms => Real (Stats_SHM.SPU_Lat_ms), GPU_Lat_ms => Real (Stats_SHM.GPU_Lat_ms), ANE_Lat_ms => Real (Stats_SHM.ANE_Lat_ms), RTC_Jitter_ms => Real (Stats_SHM.RTC_Jitter_ms), Interference => Stats_SHM.Header.Padding /= 0, Log_Error => False, TS_ISO => Stats_SHM.TS_ISO));
-               Earu.State_Store.State_Buffer.Update_SMC (SMC);
+                -- Recompute cooling/work efficiency from final Power and Heatflux_J
+                if SMC.Power > 0.0 then
+                   SMC.Cooling_Efficiency_Pct := Real'Min (100.0, (SMC.Heatflux_J / SMC.Power) * 100.0);
+                else
+                   SMC.Cooling_Efficiency_Pct := 0.0;
+                end if;
+                SMC.Work_Efficiency_Pct    := Real'Max (0.0, 100.0 - SMC.Cooling_Efficiency_Pct);
+                SMC.Thermal_Inefficiency_W := Real'Max (0.0, SMC.Power - SMC.Heatflux_J);
+
+                Earu.State_Store.State_Buffer.Update_System (S, (T_CPU_ns => Long_Long_Integer (Stats_SHM.T_CPU_ns), T_RTC_ns => Long_Long_Integer (Stats_SHM.T_RTC_ns), T_GPU_ns => Long_Long_Integer (Stats_SHM.T_GPU_ns), T_ANE_ns => Long_Long_Integer (Stats_SHM.T_ANE_ns), T_DAT_ns => Long_Long_Integer (Stats_SHM.T_DAT_ns), T_SPU_ns => Long_Long_Integer (Stats_SHM.T_SPU_ns), SPU_Lat_ms => Real (Stats_SHM.SPU_Lat_ms), GPU_Lat_ms => Real (Stats_SHM.GPU_Lat_ms), ANE_Lat_ms => Real (Stats_SHM.ANE_Lat_ms), RTC_Jitter_ms => Real (Stats_SHM.RTC_Jitter_ms), Interference => Stats_SHM.Header.Padding /= 0, Log_Error => False, TS_ISO => Stats_SHM.TS_ISO));
+                Earu.State_Store.State_Buffer.Update_SMC (SMC);
                         Earu.State_Store.State_Buffer.Update_Damage (Real (Stats_SHM.Fatigue_Cum), Real (Stats_SHM.Seu_Risk), Full.Seismic_Activity.Peak_G);
                Last_S := Stats_SHM.Header.Update_Count;
             end;
@@ -927,9 +968,8 @@ begin
       end;
    end;
 
-    Start_ML_Bridge;
-    Start_ADB_Mock;
-    Start_System_Bridge;
+     Start_ML_Bridge;
+     Start_ADB_Mock;
    Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
    Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
    Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");

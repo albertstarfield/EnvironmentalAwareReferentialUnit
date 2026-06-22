@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime
+import gc
 import json
 import math
 import os
@@ -788,6 +789,7 @@ def mock_sensor_worker() -> None:
 # ---------------------------------------------------------------------------
 def main() -> None:
     """Entry point: bootstrap, start all workers."""
+    gc.disable()
     request_wireless_permissions()
     start_wireless_scanning()
     print("[*] Starting EARU Production Bridge...")
@@ -822,19 +824,15 @@ def main() -> None:
     for p in processes:
         p.start()
 
-    print("[*] ML Bridge is active. Auto-restart scheduled for 1 hour.")
-    start_time = time.time()
+    print("[*] ML Bridge is active. GC disabled; explicit gc.collect() every hour.")
+    next_gc = time.time() + 3600
     try:
         while True:
             time.sleep(10)
-            if time.time() - start_time > 3600:
-                print("\033[33m[*] 1 hour elapsed. Self-restarting ML Bridge to reclaim memory...\033[0m")
-                for p in processes:
-                    p.terminate()
-
-                # Re-execute the script
-                python = sys.executable
-                os.execv(python, [python] + sys.argv)
+            if time.time() >= next_gc:
+                gc.collect()
+                print(f"\033[36m[*] gc.collect() done at {time.strftime('%H:%M:%S')}\033[0m")
+                next_gc = time.time() + 3600
     except KeyboardInterrupt:
         print("[*] Shutting down.")
 

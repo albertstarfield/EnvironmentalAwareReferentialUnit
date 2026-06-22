@@ -467,7 +467,8 @@ package body Earu.IO is
       AP    ("low_1_ms",        F (State.Loop_Consistency.Low_1_Ms));
       AP    ("pct_90_ms",       F (State.Loop_Consistency.Pct_90_Ms));
       AI    ("stutters",        State.Loop_Consistency.Stutters);
-      ABool ("stutter_warning", State.Loop_Consistency.Stutter_Warning, False);
+      ABool ("stutter_warning", State.Loop_Consistency.Stutter_Warning);
+      AP    ("wcef_latency",    F (State.Loop_Consistency.Wcef_Latency), False);
       Append (Buf, "}, ");
 
       --  ── high_res_drift ───────────────────────────────────────────────────
@@ -568,6 +569,9 @@ package body Earu.IO is
       AP    ("BatteryEnergyBankWh",       F (State.System.Battery_Energy_Wh));
       AP    ("BatteryFullChargeCapacityWh",F (State.System.Battery_Full_Wh));
       AP    ("BatteryHealthPct",          F (State.System.Battery_Health_Pct));
+      AP    ("p_augmented",               F (State.System.P_Augmented));
+      AP    ("p_external",                F (State.System.P_External));
+      AP    ("p_internal",                F (State.System.P_Internal));
       AP    ("Batt_Life_Y",               F (State.System.Batt_Life_Y));
       AP    ("Drain_Time_Active",         F (State.System.Drain_Time_Active));
       AP    ("Drain_Time_Sleep",          F (State.System.Drain_Time_Sleep));
@@ -598,6 +602,9 @@ package body Earu.IO is
       AP ("thrust_n",        F (State.SMC.Thrust_N));
       AP ("massflow_kg_s",   F (State.SMC.Massflow_Kg_S));
       AP ("heatflux_j",      F (State.SMC.Heatflux_J));
+      AP ("cooling_efficiency_pct", F (State.SMC.Cooling_Efficiency_Pct));
+      AP ("work_efficiency_pct",    F (State.SMC.Work_Efficiency_Pct));
+      AP ("thermal_inefficiency_w", F (State.SMC.Thermal_Inefficiency_W));
       AP ("power",           F (State.SMC.Power));
       AP ("PowerRateUsage",  F (State.SMC.Power_Rate_Usage));
       AP ("PowerSurvivalW",  F (State.SMC.Power_Survival_W));
@@ -755,9 +762,9 @@ package body Earu.IO is
       Append (Buf, "], ");
 
       --  ── parity hashes (written by ML bridge into SHM header → State) ─────
-      AP ("p_augmented", S (Trim64 (State.P_Augmented)));
-      AP ("p_external",  S (Trim64 (State.P_External)));
-      AP ("p_internal",  S (Trim64 (State.P_Internal)), False);
+      AP ("p_augmented", F (State.System.P_Augmented));
+      AP ("p_external",  F (State.System.P_External));
+      AP ("p_internal",  F (State.System.P_Internal), False);
 
       --  ── close root & compute self-parity hash ─────────────────────────────
       declare

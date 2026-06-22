@@ -201,8 +201,11 @@ package Earu.Types is
       TaRF_K              : aliased Real := 293.15;
       Turbo               : aliased Integer := 0;
       Gas_Constants       : aliased Gas_Constants_Type := (1005.0, 287.05, 1.4);
-      Heatflux_J          : aliased Real := 0.0;
-      Pulse_Wake          : aliased Real := 0.0;
+       Heatflux_J          : aliased Real := 0.0;
+       Cooling_Efficiency_Pct : aliased Real := 0.0;
+       Work_Efficiency_Pct    : aliased Real := 0.0;
+       Thermal_Inefficiency_W : aliased Real := 0.0;
+       Pulse_Wake          : aliased Real := 0.0;
       Pulse_Length        : aliased Real := 0.0;
       Flow_Scale_L        : aliased Real := 0.01;
       Char_Velocity_U0    : aliased Real := 0.0;
@@ -255,9 +258,12 @@ package Earu.Types is
       SSD_Data_Write_Units    : aliased Real := 0.0;
       SSD_Life_Left_Years     : aliased Real := 0.0;
       SSD_Life_Left_Months    : aliased Real := 0.0;
-      SSD_Life_Left_Days      : aliased Real := 0.0;
-      PMSet_Info              : aliased String (1 .. 1024) := (others => ' ');
-   end record;
+       SSD_Life_Left_Days      : aliased Real := 0.0;
+       P_Augmented             : aliased Real := 0.0;
+       P_External              : aliased Real := 0.0;
+       P_Internal              : aliased Real := 0.0;
+       PMSet_Info              : aliased String (1 .. 1024) := (others => ' ');
+    end record;
 
    type Electron_Travel_Type is record
       T_CPU_ns               : aliased Long_Long_Integer := 0;
@@ -371,11 +377,8 @@ package Earu.Types is
       User_Entity         : aliased User_Detection_Type := (others => <>);
       Pedometer           : aliased Pedometer_State_Type := (others => <>);
       Lid_Angle           : aliased Real := 0.0;
-      Lid_Speed           : aliased Real := 0.0;
-      P_Augmented         : aliased String (1 .. 64) := (others => ' ');
-      P_External          : aliased String (1 .. 64) := (others => ' ');
-      P_Internal          : aliased String (1 .. 64) := (others => ' ');
-      Vib_State           : aliased Vibration_State_Type := (others => <>);
+       Lid_Speed           : aliased Real := 0.0;
+       Vib_State           : aliased Vibration_State_Type := (others => <>);
       Events              : aliased Event_Array := (others => (others => <>));
       Event_Count         : aliased Integer := 0;
       Sol_BlueMarble      : aliased Sol_BlueMarble_Type := (others => <>);

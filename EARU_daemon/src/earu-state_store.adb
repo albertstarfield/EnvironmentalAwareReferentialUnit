@@ -55,11 +55,11 @@ package body Earu.State_Store is
          State.SMC := SMC;
       end Update_SMC;
 
-      procedure Update_Parity (Aug, Ext, Int_Hash : String) is
+      procedure Update_Parity (Aug, Ext, Int_Val : Real) is
       begin
-         State.P_Augmented (1 .. Aug'Length) := Aug;
-         State.P_External (1 .. Ext'Length) := Ext;
-         State.P_Internal (1 .. Int_Hash'Length) := Int_Hash;
+         State.System.P_Augmented := Aug;
+         State.System.P_External  := Ext;
+         State.System.P_Internal  := Int_Val;
       end Update_Parity;
 
       procedure Update_ML (User : User_Detection_Type; Sig_Count : Integer; Sig_Locs : Significant_Location_Array; Inside : Boolean) is
@@ -205,9 +205,9 @@ package body Earu.State_Store is
          State.Ecosystem_Weather.Category := (others => ' ');
          State.Electron_Travel.TS_ISO := (others => ' ');
          State.Location.Compass_Dir := (others => ' ');
-         State.P_Augmented := (others => ' ');
-         State.P_External := (others => ' ');
-         State.P_Internal := (others => ' ');
+         State.System.P_Augmented := 0.0;
+         State.System.P_External  := 0.0;
+         State.System.P_Internal  := 0.0;
          State.Seismic_Activity.Motion_Type := (others => ' ');
          State.SMC.Will_Bat_Survive := False;
          State.SMC.Must_Hibernate := False;

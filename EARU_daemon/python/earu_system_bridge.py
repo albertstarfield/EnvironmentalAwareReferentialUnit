@@ -192,7 +192,17 @@ def stats_worker(
     try:
         shm = shared_memory.SharedMemory(name=STATS_SHM_NAME)
     except Exception:
-        shm = shared_memory.SharedMemory(name=STATS_SHM_NAME, create=True, size=12480)
+        # If create fails (e.g. zombie SHM from previous process), unlink and retry
+        try:
+            shm = shared_memory.SharedMemory(name=STATS_SHM_NAME, create=True, size=12480)
+        except FileExistsError:
+            try:
+                stale = shared_memory.SharedMemory(name=STATS_SHM_NAME)
+                stale.close()
+                stale.unlink()
+            except Exception:
+                pass
+            shm = shared_memory.SharedMemory(name=STATS_SHM_NAME, create=True, size=12480)
     try:
         imu_shm = shared_memory.SharedMemory(name=IMU_SHM_NAME)
     except Exception:

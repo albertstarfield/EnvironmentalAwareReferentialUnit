@@ -173,9 +173,9 @@ package body Earu.Math is
       SMC.Massflow_Kg_S := Eco.Air_Fluid_Density * V_Dot;
       
       Delta_T := SMC.Airflow_Outlet_K - SMC.Airflow_Inlet_K;
-      SMC.Heatflux_J := Real'Max (0.0, Eco.Air_Fluid_Density * V_Dot * SMC.Gas_Constants.Cp * Delta_T);
-      
-      if V_Dot > 0.0 then
+       SMC.Heatflux_J := Real'Max (0.0, Eco.Air_Fluid_Density * V_Dot * SMC.Gas_Constants.Cp * Delta_T);
+
+       if V_Dot > 0.0 then
          SMC.Thrust_N := SMC.Massflow_Kg_S * (V_Dot / 0.001);
       else
          SMC.Thrust_N := 0.0;
