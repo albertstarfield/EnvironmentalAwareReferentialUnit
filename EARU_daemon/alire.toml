@@ -4,7 +4,7 @@ version = "0.1.0-dev"
 
 authors = ["Albert Starfield"]
 maintainers = ["Albert Starfield <albertstarfield2001@gmail.com>"]
-licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
+licenses = "custom-hippocratic-3.0"
 website = ""
 tags = []
 
