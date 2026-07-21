@@ -173,6 +173,20 @@ This program reads raw hardware registers and MEMS sensors directly via Apple's 
 
 ---
 
+## License
+
+This project is licensed under the **Hippocratic License 3.0 (Core)** — a license that ensures software is used in ways that respect human rights, labor rights, and the environment.
+
+> **TL;DR:** You're free to use, modify, and distribute this software, but you **cannot** use it for:
+> - Human rights abuses
+> - Forced labor or slavery
+> - Environmental destruction
+> - Surveillance or oppression
+> 
+> Full terms: <https://firstdonoharm.dev/version/3/0/core.md>
+
+---
+
 ## Frequently Asked Questions (FAQ)
 
 ### Q: What is this?
