@@ -173,6 +173,12 @@ This program reads raw hardware registers and MEMS sensors directly via Apple's 
 
 ---
 
+## License
+
+Licensed under the [Hippocratic License 3.0 (Core)](LICENSE.md) — use this software, but don't be evil with it.
+
+---
+
 ## Frequently Asked Questions (FAQ)
 
 ### Q: What is this?
