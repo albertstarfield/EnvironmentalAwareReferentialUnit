@@ -7,12 +7,12 @@ __pycache__/
 *$py.class
 .helm-diag/
 **helm-diag**
-**venv**
-pages_83_100.txt
 
-# Environment
+# Environment and Virtual Environments
 .venv/
 .venv_pfd/
+**venv**
+**opencode**
 .env
 
 # EARU Data and State
