@@ -299,6 +299,21 @@ package Earu.Shm is
    end record with Convention => C;
    type ML_SHM_Ptr is access all ML_SHM;
 
+   -- Neural Dead Reckoning Adapter SHM (covariance from Python sidecar)
+   type DR_SHM is record
+      Cov_Lat       : Interfaces.IEEE_Float_32;  -- Zero-velocity lateral covariance
+      Cov_Up        : Interfaces.IEEE_Float_32;  -- Zero-velocity vertical covariance
+      Update_Count  : Interfaces.Unsigned_32;    -- Monotonic counter
+      Padding       : Interfaces.Unsigned_32;    -- Alignment
+   end record with Convention => C;
+   for DR_SHM use record
+      Cov_Lat      at 0  range 0 .. 31;
+      Cov_Up       at 4  range 0 .. 31;
+      Update_Count at 8  range 0 .. 31;
+      Padding      at 12 range 0 .. 31;
+   end record;
+   type DR_SHM_Ptr is access all DR_SHM;
+
    -- Shared Memory Management
    function Open_IMU_SHM (Name : String) return IMU_SHM_Ptr;
    function Open_Stats_SHM (Name : String) return Stats_SHM_Ptr;
@@ -310,5 +325,6 @@ package Earu.Shm is
    function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr;
    function Create_Lid_SHM (Name : String) return Lid_SHM_Ptr;
    function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
+   function Create_DR_SHM (Name : String) return DR_SHM_Ptr;
 
 end Earu.Shm;

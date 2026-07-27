@@ -100,6 +100,15 @@ package Earu.Types is
       Raw_Vel       : aliased Vector3 := (others => <>);
       CL_History    : aliased CL_History_Array := (others => (T => 0.0, Lat => 0.0, Lon => 0.0, Alt => 0.0, Pos => (others => 0.0)));
       CL_Count      : aliased Integer := 0;
+      
+      -- IMU Bias Estimation (AI-IMU-DR enhancement)
+      Gyro_Bias     : aliased Vector3 := (others => <>);
+      Accel_Bias    : aliased Vector3 := (others => <>);
+      
+      -- Covariance Tracking
+      Cov_Trace     : aliased Real := 0.0;  -- Sum of diagonal covariance elements
+      Is_Stationary : aliased Boolean := True;
+      Stationary_Cnt: aliased Integer := 0;
    end record;
 
    type Weather_Type is record

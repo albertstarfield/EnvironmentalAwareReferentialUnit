@@ -129,4 +129,13 @@ package body Earu.Shm is
       return ALS_SHM_Record_Ptr (ALS_Data_Conv.To_Pointer (Addr + Storage_Offset (28)));
    end Create_ALS_SHM;
 
+   package DR_Conv is new System.Address_To_Access_Conversions (DR_SHM);
+
+   function Create_DR_SHM (Name : String) return DR_SHM_Ptr is
+      Addr : System.Address := Create_And_Map_Generic (Name, size_t (DR_SHM'Max_Size_In_Storage_Elements));
+   begin
+      if Addr = System.Null_Address then return null; end if;
+      return DR_SHM_Ptr (DR_Conv.To_Pointer (Addr));
+   end Create_DR_SHM;
+
 end Earu.Shm;

@@ -79,6 +79,7 @@ package body Earu.Math.BlueMarble is
       
       Alt_Clamped, Alt_Sqrt, Alpha, X_Val, Angle_Asr_Deg : Real;
       Dawn_Tomorrow_Epoch, Tahajjud_Epoch : Real;
+      Altitude_Dip : Real;
       
       Lat_Deg : constant Real := Lat;
       Lon_Deg : constant Real := Lon;
@@ -127,13 +128,18 @@ package body Earu.Math.BlueMarble is
          Theta_Dusk := -17.0;
       end if;
 
+      -- Geometric horizon displacement
+      Alt_Clamped := (if Alt < 0.0 then 0.0 else Alt);
+      Alt_Sqrt := Alt_Clamped ** 0.5;
+      Altitude_Dip := 0.0347 * Alt_Sqrt;
+      Theta_Dawn := Theta_Dawn - Altitude_Dip;
+      Theta_Dusk := Theta_Dusk - Altitude_Dip;
+
       HA_Dawn := Hour_Angle (Theta_Dawn, Lat_Rad, Delta_Rad);
       Dawn_Epoch := Dhuhr_Epoch - HA_Dawn * 3600.0;
       
       -- Horizon clearance (Dusk)
-      Alt_Clamped := (if Alt < 0.0 then 0.0 else Alt);
-      Alt_Sqrt := Alt_Clamped ** 0.5;
-      Alpha := -0.8333 - 0.0347 * Alt_Sqrt;
+      Alpha := -0.8333 - Altitude_Dip;
       HA_Maghrib := Hour_Angle (Alpha, Lat_Rad, Delta_Rad);
       Maghrib_Epoch := Dhuhr_Epoch + HA_Maghrib * 3600.0;
 

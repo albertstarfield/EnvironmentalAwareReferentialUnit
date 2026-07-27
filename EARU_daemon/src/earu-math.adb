@@ -360,6 +360,28 @@ package body Earu.Math is
       Sound_Product : Real;
       Speed_Of_Sound : Real;
    begin
+      -- Stationary Detection and Bias Estimation (AI-IMU-DR enhancement)
+      -- When stationary, estimate gyro/accel biases and apply zero-velocity constraints
+      if Gyro_Mag < 0.5 and then not Is_Moving_Type then
+         Loc.Stationary_Cnt := Loc.Stationary_Cnt + 1;
+         Loc.Is_Stationary := Loc.Stationary_Cnt > 10;  -- Confirm after 10 samples
+         
+         if Loc.Is_Stationary then
+            -- Estimate gyro bias (EMA with 5-second time constant)
+            Loc.Gyro_Bias.X := Loc.Gyro_Bias.X * 0.998 + Accel.X * 0.002;
+            Loc.Gyro_Bias.Y := Loc.Gyro_Bias.Y * 0.998 + Accel.Y * 0.002;
+            Loc.Gyro_Bias.Z := Loc.Gyro_Bias.Z * 0.998 + Accel.Z * 0.002;
+            
+            -- Zero-velocity constraint: aggressively damp velocity
+            Loc.Raw_Vel.X := Loc.Raw_Vel.X * 0.01;  -- 99% decay per sample
+            Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * 0.01;
+            Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * 0.001;  -- 99.9% decay per sample
+         end if;
+      else
+         Loc.Stationary_Cnt := 0;
+         Loc.Is_Stationary := False;
+      end if;
+      
       -- Dynamic Gravity Calibration (EMA IIR Filter)
       -- If the device is extremely still (Gyro magnitude < 0.5 deg/s),
       -- we slowly adapt Calibrated_G to the observed raw accelerometer magnitude.
@@ -478,6 +500,15 @@ package body Earu.Math is
          Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Damping;
          Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Damping_V;
       end;
+      
+      -- Covariance Tracking (simplified uncertainty estimate)
+      -- Grows during motion, shrinks during stationary
+      if Loc.Is_Stationary then
+         Loc.Cov_Trace := Loc.Cov_Trace * 0.9;  -- 10% decay per sample when stationary
+      else
+         Loc.Cov_Trace := Loc.Cov_Trace + (A_Dyn_Mag * DT * 0.01);  -- Grow with acceleration
+      end if;
+      Loc.Cov_Trace := Real'Max (0.001, Real'Min (10.0, Loc.Cov_Trace));  -- Clamp to [0.001, 10.0]
       
       -- 6. Apply gains and integrate position
       declare
