@@ -571,9 +571,37 @@ procedure Earu_Daemon is
             Get_Battery_State (Batt_Percent'Access, Batt_State'Access, Pmset_Buf, 1024);
             declare
                Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+               Now_T : constant Real := Real (C_Time (null));
             begin
                Full.System.Battery_Percent  := Integer (Batt_Percent);
-               Full.System.Battery_Charging := Batt_State = 2 or Batt_State = 3;
+               
+               -- Battery Gradient Calculation (%/min)
+               -- Positive = charging, Negative = discharging
+               if Full.System.Battery_Last_Time > 0.0 then
+                  declare
+                     Dt_Min : constant Real := (Now_T - Full.System.Battery_Last_Time) / 60.0;
+                  begin
+                     if Dt_Min > 0.0 then
+                        Full.System.Battery_Gradient := (Real (Integer (Batt_Percent)) - Full.System.Battery_Last_Pct) / Dt_Min;
+                     end if;
+                  end;
+               end if;
+               Full.System.Battery_Last_Pct := Real (Integer (Batt_Percent));
+               Full.System.Battery_Last_Time := Now_T;
+               
+               -- Gradient-based charging detection
+               -- gradient < 0  → Not charging (discharging)
+               -- gradient = 0  → Use OS state
+               -- gradient >= 1 → Use OS state (charging confirmed)
+               if Full.System.Battery_Gradient < 0.0 then
+                  Full.System.Battery_Charging := False;
+               elsif Full.System.Battery_Gradient >= 1.0 then
+                  Full.System.Battery_Charging := Batt_State = 2 or Batt_State = 3;
+               else
+                  -- gradient in [0, 1): ambiguous, use OS state
+                  Full.System.Battery_Charging := Batt_State = 2 or Batt_State = 3;
+               end if;
+               
                -- Abandoned Playback Time Recommendation (logarithmic curve)
                -- 100% → 4800s (80 min), 15% → 60s (1 min), <15% → 60s (clamped)
                declare

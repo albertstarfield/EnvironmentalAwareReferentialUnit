@@ -245,8 +245,11 @@ package Earu.Types is
    type System_Stats_Type is record
       CPU_Usage               : aliased Real := 0.0;
       Mem_Usage               : aliased Real := 0.0;
-      Battery_Percent         : aliased Integer := 100;
-      Battery_Charging        : aliased Boolean := False;
+       Battery_Percent         : aliased Integer := 100;
+       Battery_Charging        : aliased Boolean := False;
+       Battery_Gradient        : aliased Real := 0.0;  -- %/min (positive = charging)
+       Battery_Last_Pct        : aliased Real := 100.0; -- Previous sample for gradient
+       Battery_Last_Time       : aliased Real := 0.0;   -- Timestamp of last sample
       Battery_Design_Wh       : aliased Real := 0.0;
       Battery_Energy_Wh       : aliased Real := 0.0;
       Battery_Full_Wh         : aliased Real := 0.0;
