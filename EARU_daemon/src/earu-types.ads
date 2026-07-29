@@ -265,14 +265,17 @@ package Earu.Types is
       SSD_Used_Pct            : aliased Real := 0.0;
       SSD_Data_Read_Units     : aliased Real := 0.0;
       SSD_Data_Write_Units    : aliased Real := 0.0;
-      SSD_Life_Left_Years     : aliased Real := 0.0;
-      SSD_Life_Left_Months    : aliased Real := 0.0;
-       SSD_Life_Left_Days      : aliased Real := 0.0;
-       P_Augmented             : aliased Real := 0.0;
-       P_External              : aliased Real := 0.0;
-       P_Internal              : aliased Real := 0.0;
-       PMSet_Info              : aliased String (1 .. 1024) := (others => ' ');
-    end record;
+       SSD_Life_Left_Years     : aliased Real := 0.0;
+       SSD_Life_Left_Months    : aliased Real := 0.0;
+        SSD_Life_Left_Days      : aliased Real := 0.0;
+        P_Augmented             : aliased Real := 0.0;
+        P_External              : aliased Real := 0.0;
+        P_Internal              : aliased Real := 0.0;
+        PMSet_Info              : aliased String (1 .. 1024) := (others => ' ');
+        -- Energy Saving: Abandoned Playback Time Recommendation (seconds)
+        -- Logarithmic curve: 4800s at 100%, 60s minimum at 15%
+        Abandoned_Playback_Recommendation_S : aliased Real := 4800.0;
+     end record;
 
    type Electron_Travel_Type is record
       T_CPU_ns               : aliased Long_Long_Integer := 0;

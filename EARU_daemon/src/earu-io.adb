@@ -577,6 +577,7 @@ package body Earu.IO is
       AP    ("Drain_Time_Sleep",          F (State.System.Drain_Time_Sleep));
       AP    ("Drain_Time_Hib",            F (State.System.Drain_Time_Hib));
       AP    ("Drain_Time_DeepHib",        F (State.System.Drain_Time_DeepHib));
+      AP    ("abandoned_playback_recommendation_s", F (State.System.Abandoned_Playback_Recommendation_S));
       Append (Buf, """load_avg"": [" &
          F (State.System.Load_Avg (1)) & ", " &
          F (State.System.Load_Avg (2)) & ", " &

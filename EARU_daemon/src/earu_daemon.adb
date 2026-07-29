@@ -574,6 +574,18 @@ procedure Earu_Daemon is
             begin
                Full.System.Battery_Percent  := Integer (Batt_Percent);
                Full.System.Battery_Charging := Batt_State = 2 or Batt_State = 3;
+               -- Abandoned Playback Time Recommendation (logarithmic curve)
+               -- 100% → 4800s (80 min), 15% → 60s (1 min), <15% → 60s (clamped)
+               declare
+                  Batt_Pct : constant Real := Real (Integer (Batt_Percent));
+                  Batt_Clamped : constant Real := Real'Max (15.0, Real'Min (100.0, Batt_Pct));
+                  -- T = A * ln(Batt%) + C, fitted to (100%, 4800s) and (15%, 60s)
+                  -- A = 4740 / ln(100/15) ≈ 2498.3
+                  -- C = 60 - A * ln(15) ≈ -6706.5
+                  Rec_Seconds : constant Real := 2498.3 * Log (Batt_Clamped) - 6706.5;
+               begin
+                  Full.System.Abandoned_Playback_Recommendation_S := Real'Max (60.0, Real'Min (4800.0, Rec_Seconds));
+               end;
                declare
                   Last : Natural := 0;
                begin
