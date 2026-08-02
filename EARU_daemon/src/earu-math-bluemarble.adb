@@ -169,7 +169,7 @@ package body Earu.Math.BlueMarble is
           4.0 * 0.0167086 * y * Real_Funcs.Sin (g_rad) * Real_Funcs.Cos (2.0 * q_rad) -
           0.5 * y ** 2 * Real_Funcs.Sin (4.0 * q_rad));
 
-      -- Dhuhr
+      -- Solar_Noon_Transit
       Dhuhr_UTC_Hr : constant Real := 12.0 - (Lon / 15.0) - (EoT_Mins / 60.0);
       Dhuhr_Epoch  : constant Real := Start_Of_Day + Dhuhr_UTC_Hr * 3600.0;
 
@@ -181,6 +181,7 @@ package body Earu.Math.BlueMarble is
       Theta_Dusk : Real := -17.0;
       SF : Real := 1.0;
       Is_Desert_Sands : Boolean := False;
+      Buffer_Sec : Real := 0.0;  -- Regional safety buffer (seconds)
 
       HA_Dawn, HA_Dusk, HA_Maghrib, HA_Asr : Real;
       Dawn_Epoch, Dusk_Epoch, Maghrib_Epoch, Asr_Epoch : Real;
@@ -197,14 +198,17 @@ package body Earu.Math.BlueMarble is
          -- The Lion City Covenant
          Theta_Dawn := -20.0;
          Theta_Dusk := -18.0;
+         Buffer_Sec := 120.0;  -- +2 min buffer safety confirmation
       elsif Lat_Deg >= 1.0 and then Lat_Deg <= 7.5 and then Lon_Deg >= 99.5 and then Lon_Deg <= 119.5 then
          -- The Malayan Order
          Theta_Dawn := -20.0;
          Theta_Dusk := -18.0;
+         Buffer_Sec := 120.0;  -- +2 min buffer safety confirmation
       elsif Lat_Deg >= -11.0 and then Lat_Deg <= 6.0 and then Lon_Deg >= 95.0 and then Lon_Deg <= 141.0 then
          -- The Nusantara Guild
          Theta_Dawn := -20.0;
          Theta_Dusk := -18.0;
+         Buffer_Sec := 120.0;  -- +2 min buffer safety confirmation
       elsif Lat_Deg >= 8.0 and then Lat_Deg <= 37.0 and then Lon_Deg >= 61.0 and then Lon_Deg <= 97.0 then
          -- The Indus Valley Syndicate
          Theta_Dawn := -18.0;
@@ -244,7 +248,7 @@ package body Earu.Math.BlueMarble is
       HA_Dawn := Hour_Angle (Theta_Dawn, Lat_Rad, Delta_Rad);
       Dawn_Epoch := Dhuhr_Epoch - HA_Dawn * 3600.0;
 
-      -- Horizon clearance (Dusk)
+      -- Horizon clearance (Evening_Civil_Horizon_Clearance)
       -- Alpha = -0.8333° (standard refraction at horizon) - Bouguer dip
       -- Bouguer already includes atmospheric refraction, so no extra subtraction
       Alpha := -0.8333 - Altitude_Dip;
@@ -264,15 +268,21 @@ package body Earu.Math.BlueMarble is
       HA_Asr := Hour_Angle (Angle_Asr_Deg, Lat_Rad, Delta_Rad);
       Asr_Epoch := Dhuhr_Epoch + HA_Asr * 3600.0;
 
-      -- Tahajjud
+      -- Buffer safety confirmation: apply regional time offset to all prayers
+      Dawn_Epoch    := Dawn_Epoch    + Buffer_Sec;
+      Asr_Epoch     := Asr_Epoch     + Buffer_Sec;
+      Maghrib_Epoch := Maghrib_Epoch + Buffer_Sec;
+      Dusk_Epoch    := Dusk_Epoch    + Buffer_Sec;
+
+      -- Last_Third_Night_Segment
       Dawn_Tomorrow_Epoch := Dawn_Epoch + 86400.0;
       Tahajjud_Epoch := Maghrib_Epoch + (2.0 / 3.0) * (Dawn_Tomorrow_Epoch - Maghrib_Epoch);
 
-      Result.Morning_Astronomical_Twilight   := Long_Long_Integer(Dawn_Epoch * 1_000_000_000.0);
-      Result.Solar_Noon_Transit              := Long_Long_Integer(Dhuhr_Epoch * 1_000_000_000.0);
-      Result.Dynamic_Shadow_Ratio_Match      := Long_Long_Integer(Asr_Epoch * 1_000_000_000.0);
-      Result.Evening_Civil_Horizon_Clearance := Long_Long_Integer(Maghrib_Epoch * 1_000_000_000.0);
-      Result.Evening_Astronomical_Twilight   := Long_Long_Integer(Dusk_Epoch * 1_000_000_000.0);
+      Result.Morning_Astronomical_Twilight   := Long_Long_Integer((Dawn_Epoch) * 1_000_000_000.0);
+      Result.Solar_Noon_Transit              := Long_Long_Integer((Dhuhr_Epoch + Buffer_Sec) * 1_000_000_000.0);
+      Result.Dynamic_Shadow_Ratio_Match      := Long_Long_Integer((Asr_Epoch) * 1_000_000_000.0);
+      Result.Evening_Civil_Horizon_Clearance := Long_Long_Integer((Maghrib_Epoch) * 1_000_000_000.0);
+      Result.Evening_Astronomical_Twilight   := Long_Long_Integer((Dusk_Epoch) * 1_000_000_000.0);
       Result.Last_Third_Night_Segment        := Long_Long_Integer(Tahajjud_Epoch * 1_000_000_000.0);
 
       return Result;
