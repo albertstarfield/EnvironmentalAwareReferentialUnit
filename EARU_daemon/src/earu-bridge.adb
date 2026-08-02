@@ -111,8 +111,8 @@ package body Earu.Bridge is
          Battery_Degradation : constant Real := Real'Max (0.0, 100.0 - State.System.Battery_Health_Pct) / 100.0;
          Battery_Risk : constant Real := Battery_Degradation * 0.1;
          
-         -- NVRAM wear estimate (assuming 50k hrs typical MTBF)
-         NVRAM_Degradation : constant Real := Real'Min (1.0, State.System.Machine_Life_Runtime / 50000.0);
+         -- NVRAM wear estimate (based on actual write cycles vs rated endurance)
+         NVRAM_Degradation : constant Real := Real'Min (1.0, State.System.NVRAM_Write_Cycles / State.System.NVRAM_Rated_Endurance);
          NVRAM_Risk : constant Real := NVRAM_Degradation * 0.1;
          
          Total_Hardware_Risk : constant Real := SSD_Base_Risk + SSD_Spare_Risk + Battery_Risk + NVRAM_Risk;

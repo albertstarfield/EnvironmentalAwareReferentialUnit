@@ -20,6 +20,9 @@ with Ada.Strings.Fixed;
 with Earu.Weather_Fetcher;
 with Earu.Stale_Detector;
 
+-- Main entry point for the EARU daemon.
+-- Sets up RAM disk, loads persistent state, spawns Python sidecars,
+-- creates shared memory segments, starts all Ada tasks, then loops forever.
 procedure Earu_Daemon is
    use Earu.Types;
    use Earu.Shm;
@@ -32,18 +35,28 @@ procedure Earu_Daemon is
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
    use Real_Funcs;
 
+   -- C import: returns Unix epoch time in seconds (time(NULL)).
    function C_Time (T : access Interfaces.C.long) return Interfaces.C.long;
    pragma Import (C, C_Time, "time");
 
+   -- C import: shell system() call. Runs a shell command string from Ada.
    function C_System (Command : Interfaces.C.char_array) return Interfaces.C.int;
    pragma Import (C, C_System, "system");
 
+   -- C import: returns HID (Human Interface Device) idle time in nanoseconds.
+   -- Used to detect when the user hasn't touched keyboard/mouse/trackpad.
    function Get_HID_Idle_Time_NS return Interfaces.Unsigned_64;
    pragma Import (C, Get_HID_Idle_Time_NS, "get_hid_idle_time_ns");
 
+   -- C import: reads battery state from pmset. Returns percent (0-100),
+   -- state (0=discharging, 1=charging, 2=charged, 3=on AC but charging),
+   -- and pmset info string (e.g. "Now drawing from 'AC Power'...").
    procedure Get_Battery_State (Percent : access Interfaces.C.int; State : access Interfaces.C.int; Buf : Interfaces.C.char_array; Max_Len : Interfaces.C.int);
    pragma Import (C, Get_Battery_State, "get_battery_state");
 
+   -- Creates/cleans the EARU RAM disk at /Volumes/EARU_dataIO.
+   -- Backs up existing EARU_data.dat, unmounts stale volumes, creates a fresh
+   -- 64MB APFS RAM disk, restores the backup, and symlinks into the working dir.
    procedure Setup_Ramdisk is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -59,6 +72,8 @@ procedure Earu_Daemon is
       Ret := C_System (Interfaces.C.To_C ("ln -sf /Volumes/EARU_dataIO/EARU_data.dat EARU_data.dat"));
    end Setup_Ramdisk;
 
+   -- Launches the Python ML Bridge sidecar (earu_ml_bridge.py) in background.
+   -- Handles ML inference, mood detection, and battery life prediction.
    procedure Start_ML_Bridge is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -67,6 +82,8 @@ procedure Earu_Daemon is
       Ret := C_System (Interfaces.C.To_C ("REAL_SENSOR=1 /opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &"));
    end Start_ML_Bridge;
 
+   -- Launches the Python ADB Mock sidecar (earu_adb_mock.py) in background.
+   -- Simulates ADB device detection for development/testing.
    procedure Start_ADB_Mock is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -75,6 +92,8 @@ procedure Earu_Daemon is
       Ret := C_System (Interfaces.C.To_C ("/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &"));
    end Start_ADB_Mock;
 
+   -- Launches the Python System Bridge sidecar (earu_system_bridge.py) in background.
+   -- Writes Stats_SHM with CPU, memory, load average, and system metrics.
    procedure Start_System_Bridge is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -83,6 +102,8 @@ procedure Earu_Daemon is
       Ret := C_System (Interfaces.C.To_C ("/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &"));
    end Start_System_Bridge;
 
+   -- Health check watchdog for Python sidecars. Uses pgrep to check if
+   -- earu_ml_bridge.py and earu_adb_mock.py are alive; relaunches dead ones.
    procedure Ensure_Sidecars_Running is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -102,10 +123,17 @@ procedure Earu_Daemon is
       ));
    end Ensure_Sidecars_Running;
 
-   procedure Save_All_To_NVRAM (State : Earu_State) is
+   -- Persists critical state to NVRAM (lat, lon, alt, heading, total distance,
+   -- cumulative fatigue, machine life, NVRAM write cycles).
+   -- Increments the NVRAM write cycle counter on every call.
+   -- Called periodically by the daemon to survive data file corruption/loss.
+   procedure Save_All_To_NVRAM (State : in out Earu_State) is
       use Earu.IO;
+      Current_Cycles : constant Real := Read_NVRAM_Real ("earu_nvram_cycles", 0.0);
    begin
       Ada.Text_IO.Put_Line ("[*] Syncing critical state to NVRAM...");
+      -- Increment write cycle counter (this write counts toward endurance)
+      State.System.NVRAM_Write_Cycles := Current_Cycles + 1.0;
       Write_NVRAM_Real ("earu_lat", State.Location.Lat);
       Write_NVRAM_Real ("earu_lon", State.Location.Lon);
       Write_NVRAM_Real ("earu_alt", State.Location.Alt);
@@ -113,8 +141,12 @@ procedure Earu_Daemon is
       Write_NVRAM_Real ("earu_total_dist", State.Location.Total_Dist);
       Write_NVRAM_Real ("earu_fatigue", State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue);
       Write_NVRAM_Real ("earu_machine_life", State.System.Machine_Life_Runtime);
+      Write_NVRAM_Real ("earu_nvram_cycles", State.System.NVRAM_Write_Cycles);
    end Save_All_To_NVRAM;
 
+   -- Loads critical state from NVRAM fallback when data file is unavailable.
+   -- Restores lat, lon, alt, heading, total distance, cumulative fatigue,
+   -- machine life, and NVRAM write cycles.
    procedure Load_All_From_NVRAM (State : in out Earu_State) is
       use Earu.IO;
    begin
@@ -126,11 +158,22 @@ procedure Earu_Daemon is
       State.Location.Total_Dist := Read_NVRAM_Real ("earu_total_dist", State.Location.Total_Dist);
       State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue := Read_NVRAM_Real ("earu_fatigue", State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue);
       State.System.Machine_Life_Runtime := Read_NVRAM_Real ("earu_machine_life", State.System.Machine_Life_Runtime);
+      State.System.NVRAM_Write_Cycles := Read_NVRAM_Real ("earu_nvram_cycles", State.System.NVRAM_Write_Cycles);
    end Load_All_From_NVRAM;
 
+   -- Reads battery TotalOperatingTime (HOURS, not seconds) and SSD SMART data.
+   -- Computes machine_life_runtime = BAT_TIME + OFF (accumulated battery lifetime
+   -- across swaps). Also computes SSD life expectancy from SMART percentage used.
+   -- Handles battery swap detection and NVRAM corruption migration.
    procedure Update_Machine_Life (State : in out Earu_State) is
-      use Earu.IO;
-      BAT_TIME : constant Real := Execute_And_Read_Real ("ioreg -r -c AppleSmartBattery -a | plutil -p - | grep '""TotalOperatingTime""' | grep -oE '[0-9]+' | head -n 1");
+       use Earu.IO;
+       -- !!! BULLSHIT WARNING #1: ioreg's TotalOperatingTime is ALREADY IN HOURS,
+       -- NOT SECONDS. A healthy-but-degraded battery reports e.g. 30667 which is
+       -- ~3.5 YEARS of accumulated battery runtime, NOT 8.5 hours.
+       -- Someone (us) naively divided by 3600 and turned 3.5 years of real battery
+       -- life into a laughable 8.5 hours. Do NOT "fix" the units again. It's hours.
+       -- The variable is named BAT_TIME (hours), not BAT_TIME_SEC. Keep it that way.
+       BAT_TIME : constant Real := Execute_And_Read_Real ("ioreg -r -c AppleSmartBattery -a | plutil -p - | grep '""TotalOperatingTime""' | grep -oE '[0-9]+' | head -n 1");
       SSD_TIME : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Power On Hours"" | awk '{print $NF}' | tr -d ','");
       SSD_SPARE : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Available Spare:"" | grep -oE '[0-9]+' | head -n 1");
       SSD_USED : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Percentage Used:"" | grep -oE '[0-9]+' | head -n 1");
@@ -138,30 +181,56 @@ procedure Earu_Daemon is
       SSD_WRITE : constant Real := Execute_And_Read_Real ("smartctl -a disk0 | grep ""Data Units Written:"" | awk '{print $(NF-2)}' | tr -d ','");
       
       OFF      : Real := Read_NVRAM_Real ("machine_runtime_offset", 0.0);
-      LAST_BAT : constant Real := Read_NVRAM_Real ("machine_last_battery", 0.0);
-      SMART_THRESHOLD : constant Real := 500.0;
+      LAST_BAT : Real := Read_NVRAM_Real ("machine_last_battery", 0.0);
       
       Total_Age : Real;
       Total_Expected_Hours : Real;
       Hours_Left : Real;
    begin
-      if BAT_TIME < LAST_BAT - 5.0 and BAT_TIME > 0.0 then
-         Ada.Text_IO.Put_Line ("[!] ALERT: Battery swap detected. Incrementing hardware offset.");
+       -- 1. Migrate old corrupted values (a previous buggy version stored
+       --    garbage ~1.39B in the offset; nothing sensible can be salvaged).
+       --    Reset once so life starts clean from the real BAT_TIME (hours).
+       if OFF > 100_000.0 then
+          Ada.Text_IO.Put_Line ("[!] Migrating corrupted runtime_offset to hours.");
+          OFF := 0.0;
+          LAST_BAT := 0.0;
+          Write_NVRAM_Real ("machine_runtime_offset", 0.0);
+          Write_NVRAM_Real ("machine_last_battery", 0.0);
+       end if;
+       
+       -- 2. Battery swap detection: if current battery dropped >25% from stored value
+       --    (both in HOURS), the battery was physically replaced. Its lifetime
+       --    gets folded into OFF so machine_life_runtime keeps accumulating
+       --    across swaps instead of resetting to the new battery's 0h.
+      if LAST_BAT > 0.0 and BAT_TIME > 0.0 and BAT_TIME < LAST_BAT * 0.75 then
+         Ada.Text_IO.Put_Line ("[!] Battery swap detected (was" &
+            Real'Image (LAST_BAT) & "h, now" & Real'Image (BAT_TIME) & "h). Accumulating offset.");
          OFF := OFF + LAST_BAT;
          Write_NVRAM_Real ("machine_runtime_offset", OFF);
       end if;
       
-      Total_Age := BAT_TIME + OFF;
-      State.System.Machine_Life_Runtime := Total_Age;
+      -- 3. Store current battery time for next comparison
+      Write_NVRAM_Real ("machine_last_battery", BAT_TIME);
+      
+       -- 4. Total age = accumulated battery lifetime runtime.
+       --    !!! BULLSHIT WARNING #2: machine_life_runtime is the BATTERY's
+       --    accumulated lifetime runtime across swaps (BAT_TIME + OFF), NOT the
+       --    SSD's power-on hours and NOT "machine years". The SSD has its own
+       --    lifetime tracked below (SSD_Life_Left_*). We already made the mistake
+       --    of shoving SSD_TIME in here once; the user (rightly) called it garbage
+       --    because an SSD showing "0Y" while the machine is years old is absurd.
+       --    If the value ever shows < 24h, something is wrong: BAT_TIME is hours.
+       Total_Age := BAT_TIME + OFF;
+       State.System.Machine_Life_Runtime := Total_Age;
       State.System.SSD_Available_Spare := SSD_SPARE;
       State.System.SSD_Used_Pct := SSD_USED;
       State.System.SSD_Data_Read_Units := SSD_READ;
       State.System.SSD_Data_Write_Units := SSD_WRITE;
 
-      -- Calculate SSD Life Expectancy
-      if SSD_USED > 0.0 then
-         Total_Expected_Hours := (Total_Age / SSD_USED) * 100.0;
-         Hours_Left := Total_Expected_Hours - Total_Age;
+      -- 5. Calculate SSD Life Expectancy (use SSD hours, not battery hours)
+      if SSD_USED > 0.0 and SSD_TIME > 0.0 then
+         Total_Expected_Hours := (SSD_TIME / SSD_USED) * 100.0;
+         Hours_Left := Total_Expected_Hours - SSD_TIME;
          
          if Hours_Left < 0.0 then Hours_Left := 0.0; end if;
          
@@ -173,12 +242,6 @@ procedure Earu_Daemon is
          State.System.SSD_Life_Left_Months := 1188.0;
          State.System.SSD_Life_Left_Days := 36135.0;
       end if;
-      
-      if SSD_TIME > 0.0 and then (SSD_TIME - Total_Age) > SMART_THRESHOLD then
-          Ada.Text_IO.Put_Line ("[!] WARNING: Machine age trails SSD lifetime (" & SSD_TIME'Img & " hrs).");
-      end if;
-      
-      Write_NVRAM_Real ("machine_last_battery", BAT_TIME);
    end Update_Machine_Life;
 
    Accel_SHM : IMU_SHM_Ptr := null;
@@ -189,6 +252,9 @@ procedure Earu_Daemon is
    Lid_Data    : Lid_SHM_Ptr := null;
    ALS_Data    : ALS_SHM_Record_Ptr := null;
 
+   -- IMU sensor processing task. Reads accel/gyro ring buffers from shared memory,
+   -- runs Mahony AHRS orientation filter, dead reckoning, pedometer step detection,
+   -- vibration analysis, and transportation mode classification.
    task Sensors_Task;
    task body Sensors_Task is
       Last_Total : Unsigned_64 := 0;
@@ -392,7 +458,10 @@ procedure Earu_Daemon is
     Weather_Fetcher_Task : Earu.Weather_Fetcher.Fetcher;
     Stale_Watchdog_Task  : Earu.Stale_Detector.Watchdog;
 
-    task body System_Log_Watcher_Task is
+    -- System log watcher task. Polls macOS system log every 60s for errors.
+   -- Sets the Log_Error flag in state if errors are detected. Used to trigger
+   -- INTERFERENCE warnings in the master caution/warning system.
+   task body System_Log_Watcher_Task is
        Ret : Interfaces.C.int;
        pragma Unreferenced (Ret);
     begin
@@ -411,11 +480,20 @@ procedure Earu_Daemon is
           null;
     end System_Log_Watcher_Task;
 
+   -- Main orchestrator task. Runs every 100ms. Handles:
+   -- - GPS fix processing and dead reckoning updates
+   -- - Battery gradient calculation and charging detection
+   -- - Master warning/caution trigger evaluation
+   -- - Stats_SHM sync (CPU, memory, temps, fans, power)
+   -- - ML mood/heartbeat sync from Python ML Bridge
+   -- - HID idle time detection (500ms dedicated timer)
+   -- - Machine life runtime and SSD life updates
    task body Monitor_Task is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
       Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 301.0);
       Last_NVRAM_Sync_Hour     : Integer := -1;
       Last_Sidecar_Check       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 31.0);
+      Last_HID_Idle_Read       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
    begin
       while Weather_SHM = null or Stats_SHM = null loop delay 0.1; end loop;
       loop
@@ -423,6 +501,17 @@ procedure Earu_Daemon is
           if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Sidecar_Check) > 30.0 then
              Ensure_Sidecars_Running;
              Last_Sidecar_Check := Ada.Calendar.Clock;
+          end if;
+
+          -- 0.5. Dedicated HID idle read every 500ms (independent of Stats_SHM)
+          if Ada.Calendar."-" (Ada.Calendar.Clock, Last_HID_Idle_Read) >= 0.5 then
+             declare
+                Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+             begin
+                Full.System.Non_Human_HID_Idle_ns := Real (Get_HID_Idle_Time_NS);
+                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+             end;
+             Last_HID_Idle_Read := Ada.Calendar.Clock;
           end if;
 
           -- 1. Periodic Machine Life Update (every 5 minutes)
@@ -439,11 +528,13 @@ procedure Earu_Daemon is
 
           -- 2. Periodic NVRAM Persistence (Every 12 hours of EARU uptime)
           declare
-             Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+             Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
              Uptime_Hours : constant Integer := Integer (Full.System.Uptime_Earu / 3600.0);
           begin
              if Uptime_Hours /= Last_NVRAM_Sync_Hour and then (Uptime_Hours mod 12 = 0 or Uptime_Hours = 0) then
                 Save_All_To_NVRAM (Full);
+                -- Sync the incremented cycle count back to state buffer
+                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
                 Last_NVRAM_Sync_Hour := Uptime_Hours;
              end if;
           end;
@@ -513,6 +604,8 @@ procedure Earu_Daemon is
                 -- 1. Master Warning Triggers
                 declare
                    W_Ptr : Positive := 1;
+                   -- Appends a warning message to the Warning_Reason string buffer.
+                   -- Used by the master warning trigger evaluation.
                    procedure Add_W(Msg : String) is
                       Len : constant Positive := Msg'Length;
                    begin
@@ -539,6 +632,8 @@ procedure Earu_Daemon is
                 -- 2. Master Caution Triggers
                 declare
                    C_Ptr : Positive := 1;
+                   -- Appends a caution message to the Caution_Reason string buffer.
+                   -- Used by the master caution trigger evaluation.
                    procedure Add_C(Msg : String) is
                       Len : constant Positive := Msg'Length;
                    begin
@@ -647,7 +742,7 @@ procedure Earu_Daemon is
                S.Battery_Full_Wh := Real (Stats_SHM.Bat_Full_Wh);
                S.Battery_Health_Pct := Real (Stats_SHM.Bat_Health_Pct);
                S.Load_Avg := (Real (Stats_SHM.Load_Avg_1), Real (Stats_SHM.Load_Avg_5), Real (Stats_SHM.Load_Avg_15));
-               S.Non_Human_HID_Idle_ns := Real (Get_HID_Idle_Time_NS);
+               -- HID idle now read on dedicated 500ms timer, not here
                S.Uptime_System := Real (Stats_SHM.Uptime_System);
                S.Uptime_Earu := Real (Stats_SHM.Uptime_Earu);
                
@@ -661,7 +756,8 @@ procedure Earu_Daemon is
                   D_TaRT : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRT.dat");
                   D_TaRW : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRW.dat");
                   
-                  function Get_Ts0P return Real is
+                   -- Reads Ts0P sensor with case-insensitive fallback (Ts0P → Ts0p).
+                   function Get_Ts0P return Real is
                      V : Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts0P.dat");
                   begin
                      if V = 0.0 then
@@ -670,7 +766,8 @@ procedure Earu_Daemon is
                      return V;
                   end Get_Ts0P;
                   
-                  function Get_Ts1P return Real is
+                   -- Reads Ts1P sensor with case-insensitive fallback (Ts1P → Ts1p).
+                   function Get_Ts1P return Real is
                      V : Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts1P.dat");
                   begin
                      if V = 0.0 then
@@ -861,6 +958,9 @@ procedure Earu_Daemon is
       end loop;
    end Monitor_Task;
 
+   -- Telemetry writer task. Runs every 200ms. Writes the full EARU state to
+   -- /Volumes/EARU_dataIO/EARU_data.dat (RAM disk). Computes BlueMarble time
+   -- anchors, structural fatigue updates, and measures loop consistency.
    task body Telemetry_Task is
       use Ada.Real_Time;
       Start_Time, End_Time : Ada.Real_Time.Time;
@@ -910,6 +1010,9 @@ procedure Earu_Daemon is
       end loop;
    end Telemetry_Task;
 
+   -- Symlink watcher task. Polls every 5s and creates symlinks in the working
+   -- directory for any new .dat files appearing in /Volumes/EARU_dataIO/.
+   -- Allows the daemon to reference RAM disk sensor files by local path.
    task body Symlink_Watcher_Task is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -934,6 +1037,9 @@ procedure Earu_Daemon is
          null;
    end Symlink_Watcher_Task;
 
+   -- Network probe task. DNS-resolves 13 predefined domains every 30s to detect
+   -- internet connectivity. Updates shared network availability status flags
+   -- (Available/Unavailable) for each domain.
    task body Network_Probe_Task is
       use GNAT.Sockets;
    begin
@@ -973,12 +1079,12 @@ begin
    Weather_Fetcher_Task.Start;
 
    declare
-      Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Machine_Life, Q_W, Q_X, Q_Y, Q_Z : Earu.Types.Real;
+      Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Machine_Life, NVRAM_Cycles, Q_W, Q_X, Q_Y, Q_Z : Earu.Types.Real;
       Load_Ok : Boolean;
    begin
       Earu.IO.Load_Initial_State (
          "/Volumes/EARU_dataIO/EARU_data.dat",
-         Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Machine_Life,
+         Lat, Lon, Alt, Heading, Total_Dist, Cumulative_Fatigue, Machine_Life, NVRAM_Cycles,
          Q_W, Q_X, Q_Y, Q_Z, Load_Ok
       );
       
@@ -993,6 +1099,7 @@ begin
             State.Location.Total_Dist := Total_Dist;
             State.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue := Cumulative_Fatigue;
             State.System.Machine_Life_Runtime := Machine_Life;
+            State.System.NVRAM_Write_Cycles := NVRAM_Cycles;
             State.Orientation.Q := (W => Q_W, X => Q_X, Y => Q_Y, Z => Q_Z);
             Ada.Text_IO.Put_Line ("[ok] Live state successfully restored from persistent data storage!");
          else
@@ -1017,6 +1124,9 @@ begin
    ALS_Data  := Earu.Shm.Create_ALS_SHM ("/vib_detect_shm_als");
 
    declare
+      -- C import: starts native IOKit SPU sensor reading background thread.
+      -- Reads accel, gyro, lid angle, and ambient light sensor data from
+      -- Apple's SPU (System Programming Unit) and writes to shared memory.
       procedure start_iokit_sensors (
          accel : Earu.Shm.IMU_SHM_Ptr;
          gyro  : Earu.Shm.IMU_SHM_Ptr;

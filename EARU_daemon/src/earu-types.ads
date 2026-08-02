@@ -266,12 +266,15 @@ package Earu.Types is
       Drain_Time_DeepHib      : aliased Real := 0.0;
       SSD_Available_Spare     : aliased Real := 100.0;
       SSD_Used_Pct            : aliased Real := 0.0;
-      SSD_Data_Read_Units     : aliased Real := 0.0;
-      SSD_Data_Write_Units    : aliased Real := 0.0;
-       SSD_Life_Left_Years     : aliased Real := 0.0;
-       SSD_Life_Left_Months    : aliased Real := 0.0;
-        SSD_Life_Left_Days      : aliased Real := 0.0;
-        P_Augmented             : aliased Real := 0.0;
+       SSD_Data_Read_Units     : aliased Real := 0.0;
+       SSD_Data_Write_Units    : aliased Real := 0.0;
+        SSD_Life_Left_Years     : aliased Real := 0.0;
+        SSD_Life_Left_Months    : aliased Real := 0.0;
+         SSD_Life_Left_Days      : aliased Real := 0.0;
+         -- NVRAM endurance tracking (write-cycle based, NOT runtime based)
+         NVRAM_Write_Cycles     : aliased Real := 0.0;
+         NVRAM_Rated_Endurance  : aliased Real := 100_000.0;  -- SPI NOR flash rated cycles
+         P_Augmented             : aliased Real := 0.0;
         P_External              : aliased Real := 0.0;
         P_Internal              : aliased Real := 0.0;
         PMSet_Info              : aliased String (1 .. 1024) := (others => ' ');

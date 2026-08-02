@@ -971,6 +971,18 @@ $$\text{Risk}_{total} = \text{Risk}_{mechanical} + \text{Risk}_{SSD}$$
 $$\text{Risk}_{SSD} = 0.15 \cdot \left(\frac{\text{SSD\_Used}}{100}\right) + \frac{100 - \text{SSD\_Spare}}{5}$$
 This ensures that as the SSD nears its TBW (Total Bytes Written) limit or exhausts its spare blocks, the overall "Structural Health" of the machine is penalized, reflecting the integrated nature of modern compute hardware.
 
+### 24.4 NVRAM Endurance (Write-Cycle Model)
+NVRAM health is decoupled from `machine_life_runtime` and tracked via actual write cycles against a rated endurance. macOS NVRAM is SPI NOR flash rated for ~100,000 write cycles. The system persists a monotonically incrementing counter (`earu_nvram_cycles`) in NVRAM itself, incremented on every 12-hour sync.
+
+$$\text{NVRAM\_Health} = 100.0 - \left(\frac{\text{NVRAM\_Write\_Cycles}}{\text{NVRAM\_Rated\_Endurance}} \times 100.0\right)$$
+
+$$\text{NVRAM\_Risk} = \min\left(1.0, \frac{\text{NVRAM\_Write\_Cycles}}{\text{NVRAM\_Rated\_Endurance}}\right) \times 0.1$$
+
+With EARU syncing every 12 hours, the theoretical NVRAM lifespan is:
+$$T_{NVRAM} = \frac{100{,}000 \text{ cycles}}{2 \text{ cycles/day}} \approx 136.99 \text{ years}$$
+
+This is vastly longer than any other hardware component, so NVRAM is rarely the bottleneck — but the model remains for completeness and to detect anomalous write patterns (e.g., rapid reboots causing frequent syncs).
+
 ---
 
 ## 25. Astronomical Solar Ephemeris & The "Blue Marble" Time Anchors

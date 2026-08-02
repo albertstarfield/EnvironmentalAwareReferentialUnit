@@ -30,6 +30,7 @@ package Earu.IO is
       Total_Dist           : out Earu.Types.Real;
       Cumulative_Fatigue   : out Earu.Types.Real;
       Machine_Life_Runtime : out Earu.Types.Real;
+      NVRAM_Write_Cycles   : out Earu.Types.Real;
       Q_W, Q_X, Q_Y, Q_Z   : out Earu.Types.Real;
       Success              : out Boolean
    );

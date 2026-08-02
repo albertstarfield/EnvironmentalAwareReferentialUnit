@@ -302,6 +302,7 @@ package body Earu.IO is
       Total_Dist           : out Earu.Types.Real;
       Cumulative_Fatigue   : out Earu.Types.Real;
       Machine_Life_Runtime : out Earu.Types.Real;
+      NVRAM_Write_Cycles   : out Earu.Types.Real;
       Q_W, Q_X, Q_Y, Q_Z   : out Earu.Types.Real;
       Success              : out Boolean
    ) is
@@ -332,7 +333,7 @@ package body Earu.IO is
       Success := False;
       Lat := -6.333012; Lon := 106.971199; Alt := 0.0;
       Heading := 0.0; Total_Dist := 0.0; Cumulative_Fatigue := 0.0;
-      Machine_Life_Runtime := 0.0;
+      Machine_Life_Runtime := 0.0; NVRAM_Write_Cycles := 0.0;
       Q_W := 1.0; Q_X := 0.0; Q_Y := 0.0; Q_Z := 0.0;
 
       begin
@@ -359,6 +360,7 @@ package body Earu.IO is
             Total_Dist := Get_Real_Value (S_JSON, "total_distance_m", Total_Dist);
             Cumulative_Fatigue := Get_Real_Value (S_JSON, "cumulative_fatigue", Cumulative_Fatigue);
             Machine_Life_Runtime := Get_Real_Value (S_JSON, "machine_life_runtime", 0.0);
+            NVRAM_Write_Cycles := Get_Real_Value (S_JSON, "nvram_write_cycles", 0.0);
             Success := True;
          exception
             when others => Success := False;
@@ -561,6 +563,8 @@ package body Earu.IO is
       AP    ("uptime_earu",               F (State.System.Uptime_Earu));
       AP    ("uptime_system",             F (State.System.Uptime_System));
       AP    ("machine_life_runtime",      F (State.System.Machine_Life_Runtime));
+      AP    ("nvram_write_cycles",        F (State.System.NVRAM_Write_Cycles));
+      AP    ("nvram_rated_endurance",     F (State.System.NVRAM_Rated_Endurance));
       AP    ("cpu_usage",                 F (State.System.CPU_Usage));
       AP    ("mem_usage",                 F (State.System.Mem_Usage));
       AI    ("battery_percent",           State.System.Battery_Percent);

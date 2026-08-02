@@ -1176,6 +1176,8 @@ class PrimaryFlightDisplay:
                     self.battery_design_wh = float(sys_d.get('BatteryDesignCapacityWh', 0.0))
 
                     self.machine_life = float(sys_d.get('machine_life_runtime', 0.0))
+                    self.nvram_write_cycles = float(sys_d.get('nvram_write_cycles', 0.0))
+                    self.nvram_rated_endurance = float(sys_d.get('nvram_rated_endurance', 100000.0))
                     self.ssd_spare = float(sys_d.get('ssd_available_spare', 100.0))
                     self.ssd_used = float(sys_d.get('ssd_used_pct', 0.0))
                     self.ssd_read = float(sys_d.get('ssd_data_read_units', 0.0))
@@ -1204,7 +1206,7 @@ class PrimaryFlightDisplay:
                     if now_ts - self.life_anchor_ts >= 60.0:
                         self.life_anchor_ts = now_ts
                         # Minimum life across all critical components
-                        nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
+                        nvram_life_y = max(0.0, (self.nvram_rated_endurance - self.nvram_write_cycles) / max(1.0, self.nvram_rated_endurance) * 10.0)
                         min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y, self.batt_life_y)
                         self.life_anchor_seconds = min_life_y * 8760.0 * 3600.0
 
@@ -2863,7 +2865,7 @@ class PrimaryFlightDisplay:
             elapsed = time.time() - self.life_anchor_ts
             realtime_left = max(0.0, self.life_anchor_seconds - elapsed)
         else:
-            nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
+            nvram_life_y = max(0.0, (self.nvram_rated_endurance - self.nvram_write_cycles) / max(1.0, self.nvram_rated_endurance) * 10.0)
             min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y, self.batt_life_y)
             realtime_left = min_life_y * 8760.0 * 3600.0
 
@@ -2924,10 +2926,10 @@ class PrimaryFlightDisplay:
         self.canvas.create_line(360, 490, 650, 490, fill="#333")
 
         struct_pct = min(100.0, max(0.0, (self.struct_life_y / 200.0) * 100.0))
-        ssd_pct = min(100.0, max(0.0, (self.ssd_life_y / 10.0) * 100.0))
+        ssd_pct = min(100.0, max(0.0, 100.0 - self.ssd_used))
         batt_pct = min(100.0, max(0.0, self.battery_health))
-        nvram_health = min(100.0, max(0.0, 100.0 - (self.machine_life / 50000.0 * 100.0)))
-        nvram_life_y = max(0.0, (50000.0 - self.machine_life) / 8760.0)
+        nvram_health = min(100.0, max(0.0, 100.0 - (self.nvram_write_cycles / max(1.0, self.nvram_rated_endurance) * 100.0)))
+        nvram_life_y = max(0.0, (self.nvram_rated_endurance - self.nvram_write_cycles) / max(1.0, self.nvram_rated_endurance) * 10.0)
         overall_life_pct = min(struct_pct, ssd_pct, batt_pct, nvram_health)
 
         def draw_vbar(bx, by, bw, bh, pct, color):
@@ -2969,7 +2971,7 @@ class PrimaryFlightDisplay:
         self.canvas.create_text(562, bar_y + bar_h + 15, text=f"{self.batt_life_y:.1f}Y", fill=bt_col, font=("Monaco", 9, "bold"), anchor="n")
         self.canvas.create_text(562, bar_y + bar_h + 30, text="BATT", fill="white", font=("Monaco", 8), anchor="n")
         # 5. NVRAM
-        nv_col = "green" if nvram_health > 50 else "yellow"
+        nv_col = "green" if nvram_health > 50 else ("yellow" if nvram_health > 20 else "red")
         draw_vbar(610, bar_y, bar_w, bar_h, nvram_health, nv_col)
         self.canvas.create_text(622, bar_y + bar_h + 15, text=f"{nvram_life_y:.1f}Y", fill=nv_col, font=("Monaco", 9, "bold"), anchor="n")
         self.canvas.create_text(622, bar_y + bar_h + 30, text="NVRAM", fill="white", font=("Monaco", 8), anchor="n")

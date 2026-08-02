@@ -122,6 +122,8 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `ssd_life_left_days`  | Days | Predicted remaining SSD life in days. |
 | `ssd_data_read_units` | Units | Total data units read from the SSD. |
 | `ssd_data_write_units`| Units | Total data units written to the SSD. |
+| `nvram_write_cycles` | Cycles | Monotonically incrementing counter of NVRAM write operations (incremented every 12h sync). |
+| `nvram_rated_endurance` | Cycles | Rated write endurance of the SPI NOR flash (default: 100,000). |
 | `pmset_info` | String | Raw output from macOS `pmset -g live`. |
 
 ### 9. `loop_consistency` (Performance)
