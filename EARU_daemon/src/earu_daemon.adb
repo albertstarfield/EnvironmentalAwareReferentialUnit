@@ -74,12 +74,16 @@ procedure Earu_Daemon is
 
    -- Launches the Python ML Bridge sidecar (earu_ml_bridge.py) in background.
    -- Handles ML inference, mood detection, and battery life prediction.
+   -- Wrapped in taskpolicy -b so the long-running Python process is throttled
+   -- to background priority (low power, children inherit the policy).
    procedure Start_ML_Bridge is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
    begin
       Ada.Text_IO.Put_Line ("[*] Automatically invoking Python ML Bridge (Enhanced Parity)...");
-      Ret := C_System (Interfaces.C.To_C ("REAL_SENSOR=1 /opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &"));
+      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
+         "REAL_SENSOR=1 /opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &"
+      )));
    end Start_ML_Bridge;
 
    -- Launches the Python ADB Mock sidecar (earu_adb_mock.py) in background.
@@ -89,7 +93,9 @@ procedure Earu_Daemon is
       pragma Unreferenced (Ret);
    begin
       Ada.Text_IO.Put_Line ("[*] Automatically invoking Python ADB Mock sidecar...");
-      Ret := C_System (Interfaces.C.To_C ("/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &"));
+      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
+         "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &"
+      )));
    end Start_ADB_Mock;
 
    -- Launches the Python System Bridge sidecar (earu_system_bridge.py) in background.
@@ -99,7 +105,9 @@ procedure Earu_Daemon is
       pragma Unreferenced (Ret);
    begin
       Ada.Text_IO.Put_Line ("[*] Automatically invoking Python System Bridge (Stats SHM writer)...");
-      Ret := C_System (Interfaces.C.To_C ("/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &"));
+      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
+         "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &"
+      )));
    end Start_System_Bridge;
 
    -- Health check watchdog for Python sidecars. Uses pgrep to check if
@@ -110,17 +118,17 @@ procedure Earu_Daemon is
    begin
       -- Check if earu_ml_bridge.py is alive via pgrep
       -- (stats_worker runs as a child of ml_bridge, no separate system_bridge)
-      Ret := C_System (Interfaces.C.To_C (
+      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
          "pgrep -f earu_ml_bridge.py > /dev/null 2>&1 || " &
          "(echo '[!] ml_bridge.py dead, relaunching' && " &
          "REAL_SENSOR=1 /opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_ml_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/bridge.log 2>&1 &)"
-      ));
+      )));
       -- Check if earu_adb_mock.py is alive via pgrep
-      Ret := C_System (Interfaces.C.To_C (
+      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
          "pgrep -f earu_adb_mock.py > /dev/null 2>&1 || " &
          "(echo '[!] adb_mock.py dead, relaunching' && " &
          "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &)"
-      ));
+      )));
    end Ensure_Sidecars_Running;
 
    -- Persists critical state to NVRAM (lat, lon, alt, heading, total distance,
@@ -256,8 +264,10 @@ procedure Earu_Daemon is
    Net_Last_Time   : Real := 0.0;
 
    -- Network bandwidth monitoring via netstat -ib
-   -- Reads Ibytes/Obytes from en0, computes delta over 1 second interval,
-   -- and converts to kbps. Sets Active_Network_Accessed = True if either
+   -- Reads Ibytes/Obytes from en0 twice (30s apart), computes the byte delta
+   -- divided by the elapsed time, and converts to kbps. The result is a
+   -- 30-second average, not an instantaneous rate. Sets
+   -- Active_Network_Accessed = True if either
    -- direction has traffic > 0.
    procedure Update_Network_Bandwidth (State : in out Earu_State) is
       use Earu.IO;
@@ -546,6 +556,7 @@ procedure Earu_Daemon is
       Last_NVRAM_Sync_Hour     : Integer := -1;
       Last_Sidecar_Check       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 31.0);
       Last_HID_Idle_Read       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
+      Last_Network_Update      : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
    begin
       while Weather_SHM = null or Stats_SHM = null loop delay 0.1; end loop;
       loop
@@ -566,13 +577,22 @@ procedure Earu_Daemon is
               Last_HID_Idle_Read := Ada.Calendar.Clock;
            end if;
 
-           -- 0.6. Network bandwidth monitoring (every 1 second)
-           declare
-              Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
-           begin
-              Update_Network_Bandwidth (Full);
-              Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
-           end;
+           -- 0.6. Network bandwidth monitoring (every 30 seconds).
+           -- Samples netstat totals twice 30s apart, then divides the byte
+           -- delta by the elapsed time inside Update_Network_Bandwidth. Not
+           -- instantaneous, but a 30s average - plenty for a "network active"
+           -- stat. Kept sparse on purpose: each sample spawns 2 shell procs,
+           -- and doing that every 100ms was genuinely wasteful (net power
+           -- draw jumped from ~9W to ~22W).
+           if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Network_Update) >= 30.0 then
+              declare
+                 Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+              begin
+                 Update_Network_Bandwidth (Full);
+                 Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+                 Last_Network_Update := Ada.Calendar.Clock;
+              end;
+           end if;
 
            -- 1. Periodic Machine Life Update (every 5 minutes)
           if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Machine_Life_Update) > 300.0 then

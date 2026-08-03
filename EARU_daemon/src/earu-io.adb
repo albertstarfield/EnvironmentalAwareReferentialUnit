@@ -141,10 +141,33 @@ package body Earu.IO is
    function C_System (Command : Interfaces.C.char_array) return Interfaces.C.int;
    pragma Import (C, C_System, "system");
 
+   --  Wrap_Background
+   --  Wraps a shell command so it runs under `taskpolicy -b` (PRIO_DARWIN_BG):
+   --  throttled disk I/O, low scheduling priority, reduced power impact.
+   --  Every spawned helper process (netstat, smartctl, ioreg, nvram, ...)
+   --  inherits the policy. This matters: polling netstat every 100ms with
+   --  full-priority shell procs measurably raised net power draw (~9W -> ~22W).
+   --
+   --  Single quotes in the inner command are escaped as '\'' so the whole
+   --  command can be safely wrapped in one outer single-quoted argument.
+   function Wrap_Background (Command : String) return String is
+      Result : Unbounded_String := To_Unbounded_String ("taskpolicy -b /bin/sh -c '");
+   begin
+      for I in Command'Range loop
+         if Command (I) = ''' then
+            Append (Result, "'\''");
+         else
+            Append (Result, Command (I));
+         end if;
+      end loop;
+      Append (Result, "'");
+      return To_String (Result);
+   end Wrap_Background;
+
    function Read_NVRAM_Real (Name : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real is
       Ret : Interfaces.C.int;
       Tmp_File : constant String := "/tmp/earu_nvram_" & Name & ".txt";
-      Command : constant String := "nvram " & Name & " 2>/dev/null | awk '{print $2}' > " & Tmp_File;
+      Command : constant String := Wrap_Background ("nvram " & Name & " 2>/dev/null | awk '{print $2}' > " & Tmp_File);
       File : Ada.Text_IO.File_Type;
       Line : Unbounded_String;
    begin
@@ -166,7 +189,7 @@ package body Earu.IO is
    procedure Write_NVRAM_Real (Name : String; Value : Earu.Types.Real) is
       Ret : Interfaces.C.int;
       Value_Str : constant String := F (Value);
-      Command : constant String := "nvram " & Name & "=" & Value_Str;
+      Command : constant String := Wrap_Background ("nvram " & Name & "=" & Value_Str);
    begin
       Ret := C_System (Interfaces.C.To_C (Command));
    end Write_NVRAM_Real;
@@ -202,7 +225,10 @@ package body Earu.IO is
       Line   : String (1 .. 1024);
       Last   : Integer := 0;
    begin
-      Stream := C_Popen (To_C (Command), To_C ("r"));
+      --  Run the command under taskpolicy -b so the spawned shell and all its
+      --  children (netstat, smartctl, ioreg, ...) run in background priority:
+      --  throttled I/O + reduced power draw.
+      Stream := C_Popen (To_C (Wrap_Background (Command)), To_C ("r"));
       if Stream = System.Null_Address then
          return Default;
       end if;
