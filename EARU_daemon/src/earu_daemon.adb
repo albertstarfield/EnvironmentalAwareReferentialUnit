@@ -244,16 +244,23 @@ procedure Earu_Daemon is
       end if;
    end Update_Machine_Life;
 
+   -- Persistent state for network bandwidth delta calculation.
+   -- IMPORTANT: These MUST be declared here (library/outer level), NOT as
+   -- locals inside Update_Network_Bandwidth. In Ada, local variables are
+   -- re-initialized on every call, so locals always reset to 0.0 - the
+   -- "with Volatile" aspect does NOT give them C-style static persistence.
+   -- (This was a bug: locals made Static_Last_Time always 0.0, so the
+   --  Delta_Time > 0.5 guard never passed and bandwidth stayed 0 kbps.)
+   Net_Prev_Ibytes : Real := 0.0;
+   Net_Prev_Obytes : Real := 0.0;
+   Net_Last_Time   : Real := 0.0;
+
    -- Network bandwidth monitoring via netstat -ib
    -- Reads Ibytes/Obytes from en0, computes delta over 1 second interval,
    -- and converts to kbps. Sets Active_Network_Accessed = True if either
    -- direction has traffic > 0.
    procedure Update_Network_Bandwidth (State : in out Earu_State) is
       use Earu.IO;
-      -- Previous byte counts for delta calculation
-      Static_Prev_Ibytes : Real := 0.0 with Volatile;
-      Static_Prev_Obytes : Real := 0.0 with Volatile;
-      Static_Last_Time   : Real := 0.0 with Volatile;
       -- Current readings
       Cur_Ibytes  : Real;
       Cur_Obytes  : Real;
@@ -266,27 +273,27 @@ procedure Earu_Daemon is
       Cur_Ibytes := Execute_And_Read_Real ("/usr/sbin/netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $7}'");
       Cur_Obytes := Execute_And_Read_Real ("/usr/sbin/netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $10}'");
       Cur_Time := Real(C_Time(null));
-      Delta_Time := Cur_Time - Static_Last_Time;
+      Delta_Time := Cur_Time - Net_Last_Time;
       
-      if Delta_Time > 0.5 and Static_Last_Time > 0.0 then
+      if Delta_Time > 0.5 and Net_Last_Time > 0.0 then
          -- Calculate bandwidth in kbps (kilobits per second)
          declare
-            Delta_In  : constant Real := Cur_Ibytes - Static_Prev_Ibytes;
-            Delta_Out : constant Real := Cur_Obytes - Static_Prev_Obytes;
+            Delta_In  : constant Real := Cur_Ibytes - Net_Prev_Ibytes;
+            Delta_Out : constant Real := Cur_Obytes - Net_Prev_Obytes;
          begin
             State.System.Total_Network_Bandwidth_Down_Kbps := (Delta_In * 8.0) / Delta_Time / 1000.0;
             State.System.Total_Network_Bandwidth_Up_Kbps   := (Delta_Out * 8.0) / Delta_Time / 1000.0;
-            -- Active if either direction exceeds 500 kbps threshold
+            -- Active if either direction exceeds 1 Mbps (1000 kbps) threshold
             State.System.Active_Network_Accessed :=
-               State.System.Total_Network_Bandwidth_Down_Kbps >= 500.0 or
-               State.System.Total_Network_Bandwidth_Up_Kbps >= 500.0;
+               State.System.Total_Network_Bandwidth_Down_Kbps >= 1000.0 or
+               State.System.Total_Network_Bandwidth_Up_Kbps >= 1000.0;
          end;
       end if;
       
       -- Store for next iteration
-      Static_Prev_Ibytes := Cur_Ibytes;
-      Static_Prev_Obytes := Cur_Obytes;
-      Static_Last_Time   := Cur_Time;
+      Net_Prev_Ibytes := Cur_Ibytes;
+      Net_Prev_Obytes := Cur_Obytes;
+      Net_Last_Time   := Cur_Time;
    end Update_Network_Bandwidth;
 
    Accel_SHM : IMU_SHM_Ptr := null;
