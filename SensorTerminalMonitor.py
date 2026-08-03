@@ -1185,6 +1185,9 @@ class PrimaryFlightDisplay:
                     self.ssd_life_y = float(sys_d.get('ssd_life_left_years', 0.0))
                     self.ssd_life_m = float(sys_d.get('ssd_life_left_months', 0.0))
                     self.ssd_life_d = float(sys_d.get('ssd_life_left_days', 0.0))
+                    self.active_network = sys_d.get('active_network_accessed', 'false')
+                    self.net_up_kbps = float(sys_d.get('total_network_bandwidth_up_kbps', 0.0))
+                    self.net_down_kbps = float(sys_d.get('total_network_bandwidth_down_kbps', 0.0))
 
                     seismic = data.get('seismic_activity', {})
                     df = seismic.get('damage_fatigue', {})
@@ -2975,6 +2978,13 @@ class PrimaryFlightDisplay:
         draw_vbar(610, bar_y, bar_w, bar_h, nvram_health, nv_col)
         self.canvas.create_text(622, bar_y + bar_h + 15, text=f"{nvram_life_y:.1f}Y", fill=nv_col, font=("Monaco", 9, "bold"), anchor="n")
         self.canvas.create_text(622, bar_y + bar_h + 30, text="NVRAM", fill="white", font=("Monaco", 8), anchor="n")
+
+        # 6. NETWORK BANDWIDTH (between NVRAM bar and NET & COMMS panel)
+        net_active = self.active_network if isinstance(self.active_network, str) else str(self.active_network)
+        net_col = "green" if net_active.upper() == 'TRUE' else "gray"
+        self.canvas.create_text(650, bar_y + 10, anchor="nw", text="NET", fill=net_col, font=("Monaco", 8, "bold"))
+        self.canvas.create_text(650, bar_y + 25, anchor="nw", text=f"UP:{self.net_up_kbps:.0f}k", fill="white", font=("Monaco", 8))
+        self.canvas.create_text(650, bar_y + 40, anchor="nw", text=f"DN:{self.net_down_kbps:.0f}k", fill="white", font=("Monaco", 8))
 
         # Bottom Right Network & Comms Panel (Box B)
         # Net & Comms Status (Mapped from user_entity_detection)

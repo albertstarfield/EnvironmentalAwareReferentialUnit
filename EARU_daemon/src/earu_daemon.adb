@@ -244,6 +244,49 @@ procedure Earu_Daemon is
       end if;
    end Update_Machine_Life;
 
+   -- Network bandwidth monitoring via netstat -ib
+   -- Reads Ibytes/Obytes from en0, computes delta over 1 second interval,
+   -- and converts to kbps. Sets Active_Network_Accessed = True if either
+   -- direction has traffic > 0.
+   procedure Update_Network_Bandwidth (State : in out Earu_State) is
+      use Earu.IO;
+      -- Previous byte counts for delta calculation
+      Static_Prev_Ibytes : Real := 0.0 with Volatile;
+      Static_Prev_Obytes : Real := 0.0 with Volatile;
+      Static_Last_Time   : Real := 0.0 with Volatile;
+      -- Current readings
+      Cur_Ibytes  : Real;
+      Cur_Obytes  : Real;
+      Cur_Time    : Real;
+      Delta_Time  : Real;
+   begin
+      -- Read current byte counts from netstat
+      Cur_Ibytes := Execute_And_Read_Real ("netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $8}'");
+      Cur_Obytes := Execute_And_Read_Real ("netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $10}'");
+      Cur_Time := Real(C_Time(null));
+      Delta_Time := Cur_Time - Static_Last_Time;
+      
+      if Delta_Time > 0.5 and Static_Last_Time > 0.0 then
+         -- Calculate bandwidth in kbps (kilobits per second)
+         declare
+            Delta_In  : constant Real := Cur_Ibytes - Static_Prev_Ibytes;
+            Delta_Out : constant Real := Cur_Obytes - Static_Prev_Obytes;
+         begin
+            State.System.Total_Network_Bandwidth_Down_Kbps := (Delta_In * 8.0) / Delta_Time / 1000.0;
+            State.System.Total_Network_Bandwidth_Up_Kbps   := (Delta_Out * 8.0) / Delta_Time / 1000.0;
+            -- Active if either direction exceeds 500 kbps threshold
+            State.System.Active_Network_Accessed :=
+               State.System.Total_Network_Bandwidth_Down_Kbps >= 500.0 or
+               State.System.Total_Network_Bandwidth_Up_Kbps >= 500.0;
+         end;
+      end if;
+      
+      -- Store for next iteration
+      Static_Prev_Ibytes := Cur_Ibytes;
+      Static_Prev_Obytes := Cur_Obytes;
+      Static_Last_Time   := Cur_Time;
+   end Update_Network_Bandwidth;
+
    Accel_SHM : IMU_SHM_Ptr := null;
    Gyro_SHM  : IMU_SHM_Ptr := null;
    Weather_SHM : Weather_SHM_Ptr := null;
@@ -503,18 +546,26 @@ procedure Earu_Daemon is
              Last_Sidecar_Check := Ada.Calendar.Clock;
           end if;
 
-          -- 0.5. Dedicated HID idle read every 500ms (independent of Stats_SHM)
-          if Ada.Calendar."-" (Ada.Calendar.Clock, Last_HID_Idle_Read) >= 0.5 then
-             declare
-                Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
-             begin
-                Full.System.Non_Human_HID_Idle_ns := Real (Get_HID_Idle_Time_NS);
-                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
-             end;
-             Last_HID_Idle_Read := Ada.Calendar.Clock;
-          end if;
+           -- 0.5. Dedicated HID idle read every 500ms (independent of Stats_SHM)
+           if Ada.Calendar."-" (Ada.Calendar.Clock, Last_HID_Idle_Read) >= 0.5 then
+              declare
+                 Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+              begin
+                 Full.System.Non_Human_HID_Idle_ns := Real (Get_HID_Idle_Time_NS);
+                 Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+              end;
+              Last_HID_Idle_Read := Ada.Calendar.Clock;
+           end if;
 
-          -- 1. Periodic Machine Life Update (every 5 minutes)
+           -- 0.6. Network bandwidth monitoring (every 1 second)
+           declare
+              Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
+           begin
+              Update_Network_Bandwidth (Full);
+              Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+           end;
+
+           -- 1. Periodic Machine Life Update (every 5 minutes)
           if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Machine_Life_Update) > 300.0 then
              declare
                 Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;

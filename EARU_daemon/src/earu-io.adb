@@ -594,6 +594,9 @@ package body Earu.IO is
       AP    ("ssd_life_left_days",        F (State.System.SSD_Life_Left_Days));
       AP    ("ssd_data_read_units",       F (State.System.SSD_Data_Read_Units));
       AP    ("ssd_data_write_units",      F (State.System.SSD_Data_Write_Units));
+      ABool ("active_network_accessed",   State.System.Active_Network_Accessed);
+      AP    ("total_network_bandwidth_up_kbps",   F (State.System.Total_Network_Bandwidth_Up_Kbps));
+      AP    ("total_network_bandwidth_down_kbps", F (State.System.Total_Network_Bandwidth_Down_Kbps));
       AP    ("pmset_info",                S (Trim_Null (State.System.PMSet_Info)), False);
       Append (Buf, "}, ");
 
