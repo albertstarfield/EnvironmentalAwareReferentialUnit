@@ -263,8 +263,8 @@ procedure Earu_Daemon is
       -- Read current byte counts from netstat -ib
       -- Columns: Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
       -- $7 = Ibytes, $10 = Obytes
-      Cur_Ibytes := Execute_And_Read_Real ("netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $7}'");
-      Cur_Obytes := Execute_And_Read_Real ("netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $10}'");
+      Cur_Ibytes := Execute_And_Read_Real ("/usr/sbin/netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $7}'");
+      Cur_Obytes := Execute_And_Read_Real ("/usr/sbin/netstat -ib 2>/dev/null | grep '^en0 ' | head -1 | awk '{print $10}'");
       Cur_Time := Real(C_Time(null));
       Delta_Time := Cur_Time - Static_Last_Time;
       

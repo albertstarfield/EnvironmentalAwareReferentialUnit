@@ -4,6 +4,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Interfaces.C;
 with Interfaces.C.Strings;
+with System;
 with GNAT.SHA256;
 with Earu.Types;
 
@@ -25,6 +26,7 @@ package body Earu.IO is
    use Earu.Types;
    use Earu.Shm;
    use type Interfaces.Unsigned_32;
+   use type System.Address;
    use Ada.Strings.Unbounded;
 
    package Real_IO is new Ada.Text_IO.Float_IO (Real);
@@ -169,24 +171,68 @@ package body Earu.IO is
       Ret := C_System (Interfaces.C.To_C (Command));
    end Write_NVRAM_Real;
 
+   function C_Popen (Command : Interfaces.C.char_array; Mode : Interfaces.C.char_array) return System.Address;
+   pragma Import (C, C_Popen, "popen");
+
+   function C_Pclose (Stream : System.Address) return Interfaces.C.int;
+   pragma Import (C, C_Pclose, "pclose");
+
+   function C_Fread (Ptr : System.Address; Size : Interfaces.C.size_t;
+                     N : Interfaces.C.size_t; Stream : System.Address) return Interfaces.C.size_t;
+   pragma Import (C, C_Fread, "fread");
+
+   --  Execute_And_Read_Real
+   --  Runs a shell command and reads its FIRST line of output as a Real.
+   --
+   --  IMPLEMENTATION NOTE (2026-08-03):
+   --  The previous implementation redirected the command output to a single
+   --  shared temp file (/tmp/earu_cmd_out.txt). That was broken: 10 callers
+   --  across 6 concurrent daemon tasks (Sensors_Task, Monitor_Task,
+   --  Telemetry_Task, Network_Probe_Task, ...) all raced on the same file -
+   --  one task would truncate/overwrite the file between another task's
+   --  system() call and its file read, producing empty/garbage values
+   --  (e.g. network bandwidth always 0). This version uses popen() so each
+   --  call reads its output through a private pipe - no shared state, no race.
    function Execute_And_Read_Real (Command : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real is
-      Ret : Interfaces.C.int;
-      Tmp_File : constant String := "/tmp/earu_cmd_out.txt";
-      Full_Command : constant String := Command & " > " & Tmp_File & " 2>/dev/null";
-      File : Ada.Text_IO.File_Type;
-      Line : Unbounded_String;
+      use Interfaces.C;
+      Stream : System.Address;
+      Buf    : char_array (0 .. 1023);
+      N_Read : size_t;
+      Ret    : int;
+      Line   : String (1 .. 1024);
+      Last   : Integer := 0;
    begin
-      Ret := C_System (Interfaces.C.To_C (Full_Command));
+      Stream := C_Popen (To_C (Command), To_C ("r"));
+      if Stream = System.Null_Address then
+         return Default;
+      end if;
+
+      N_Read := C_Fread (Buf (0)'Address, 1, 1024, Stream);
+      Ret := C_Pclose (Stream);
+
+      if N_Read = 0 then
+         return Default;
+      end if;
+
+      --  Convert the raw bytes to a trimmed String
+      for I in 0 .. size_t (N_Read - 1) loop
+         Line (Integer (I) + 1) := Character (Buf (I));
+      end loop;
+      Last := Integer (N_Read);
+
+      --  Trim trailing whitespace / newline / CR
+      while Last > 0 and then (Line (Last) = ' ' or Line (Last) = ASCII.LF or Line (Last) = ASCII.CR or Line (Last) = ASCII.HT) loop
+         Last := Last - 1;
+      end loop;
+
+      if Last = 0 then
+         return Default;
+      end if;
+
       begin
-         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Tmp_File);
-         if not Ada.Text_IO.End_Of_File (File) then
-            Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
-         end if;
-         Ada.Text_IO.Close (File);
-         return Real'Value (To_String (Line));
+         return Real'Value (Line (1 .. Last));
       exception
-         when others =>
-            if Ada.Text_IO.Is_Open (File) then Ada.Text_IO.Close (File); end if;
+         when Constraint_Error =>
             return Default;
       end;
    end Execute_And_Read_Real;
