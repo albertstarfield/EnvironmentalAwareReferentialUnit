@@ -2215,31 +2215,19 @@ class PrimaryFlightDisplay:
             if n == "BATT HEALTH": col = "green" if self.battery_health > 80 else "yellow"
             self.canvas.create_text(x_pwr, y_pwr + i*30, anchor="nw", text=f"{n:20}: {v}", fill=col, font=("Monaco", 10))
 
-        # --- SMC Power Management Keys ---
-        x_smc, y_smc = 750, y_pwr + len(pwr_metrics) * 30 + 30
-        smc_metrics = [
-            ("aPMX", f"{self.smc_aPMX:.0f}", "Active Perf Mode"),
-            ("mTPL", f"{self.smc_mTPL:.0f} W", "Max Turbo Pwr Lim"),
-            ("mUTL", f"{self.smc_mUTL:.0f} W", "Max User Turbo Lim"),
-            ("xPPT", f"{self.smc_xPPT:.0f} W" if self.smc_xPPT < 255 else "NONE", "Pkg Pwr Tracking"),
-            ("xLPM", f"{self.smc_xLPM:.0f} W", "Low Power Mode Lim"),
-            ("PHPB", f"{self.smc_PHPB:.0f} W", "Pkg High Pwr Budget"),
-            ("PHPM", f"{self.smc_PHPM:.2f}", "Pkg High Pwr Mode"),
-            ("PHPC", f"{self.smc_PHPC:.2f} A", "Pkg High Pwr Curr"),
-            ("PHPS", f"{self.smc_PHPS:.2f} W", "Pkg High Pwr Sensor"),
-            ("PMVC", f"{self.smc_PMVC:.2f} A", "VRM Current"),
-            ("PPSC", f"{self.smc_PPSC:.2f} A", "Supply Current"),
-            ("PSVR", f"{self.smc_PSVR:.2f}", "Supply VRM Health"),
-            ("PDBR", f"{self.smc_PDBR:.2f} W", "Battery Rate"),
-            ("PDTR", f"{self.smc_PDTR:.1f} C", "Device Temp Rate"),
+        # --- Network Bandwidth (replaced SMC Power Mgmt - now on Energy page) ---
+        x_net, y_net = 750, y_pwr + len(pwr_metrics) * 30 + 30
+        net_active_str = str(self.active_network) if isinstance(self.active_network, str) else str(self.active_network)
+        net_active = net_active_str.upper() == 'TRUE'
+        net_col = "green" if net_active else "gray"
+        net_metrics = [
+            ("ACCESS", net_active_str.upper(), net_col),
+            ("UPLOAD", f"{self.net_up_kbps:.0f} kbps", "cyan" if self.net_up_kbps > 0 else "gray"),
+            ("DOWNLOAD", f"{self.net_down_kbps:.0f} kbps", "cyan" if self.net_down_kbps > 0 else "gray"),
         ]
-        self.canvas.create_text(x_smc, y_smc - 20, anchor="nw", text="SMC POWER MGMT", fill="#ff8800", font=("Monaco", 11, "bold"))
-        for i, (key, val, desc) in enumerate(smc_metrics):
-            # Color code: write keys (aPMX, mTPL) in cyan, read keys in white
-            col = "#00ccff" if key in ("aPMX", "mTPL") else "white"
-            if key == "xPPT" and self.smc_xPPT >= 255: col = "#666"
-            self.canvas.create_text(x_smc, y_smc + i * 18, anchor="nw",
-                                    text=f"{key:5s}: {val:16s} {desc}", fill=col, font=("Monaco", 9))
+        self.canvas.create_text(x_net, y_net - 20, anchor="nw", text="NETWORK BANDWIDTH", fill="#00ccff", font=("Monaco", 11, "bold"))
+        for i, (label, val, col) in enumerate(net_metrics):
+            self.canvas.create_text(x_net, y_net + i * 22, anchor="nw", text=f"{label:10}: {val}", fill=col, font=("Monaco", 10))
 
         # --- Vertical Battery Fuel Gauge ---
         bx = 945
@@ -2978,13 +2966,6 @@ class PrimaryFlightDisplay:
         draw_vbar(610, bar_y, bar_w, bar_h, nvram_health, nv_col)
         self.canvas.create_text(622, bar_y + bar_h + 15, text=f"{nvram_life_y:.1f}Y", fill=nv_col, font=("Monaco", 9, "bold"), anchor="n")
         self.canvas.create_text(622, bar_y + bar_h + 30, text="NVRAM", fill="white", font=("Monaco", 8), anchor="n")
-
-        # 6. NETWORK BANDWIDTH (between NVRAM bar and NET & COMMS panel)
-        net_active = self.active_network if isinstance(self.active_network, str) else str(self.active_network)
-        net_col = "green" if net_active.upper() == 'TRUE' else "gray"
-        self.canvas.create_text(650, bar_y + 10, anchor="nw", text="NET", fill=net_col, font=("Monaco", 8, "bold"))
-        self.canvas.create_text(650, bar_y + 25, anchor="nw", text=f"UP:{self.net_up_kbps:.0f}k", fill="white", font=("Monaco", 8))
-        self.canvas.create_text(650, bar_y + 40, anchor="nw", text=f"DN:{self.net_down_kbps:.0f}k", fill="white", font=("Monaco", 8))
 
         # Bottom Right Network & Comms Panel (Box B)
         # Net & Comms Status (Mapped from user_entity_detection)
