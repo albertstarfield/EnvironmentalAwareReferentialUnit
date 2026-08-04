@@ -246,6 +246,24 @@ def stats_worker(
     power_history: list[tuple[float, float]] = []
     last_power_time = time.time()
 
+    # Slow-cadence read timers. The loop below runs every ~1s, but we do NOT
+    # want to re-exec shell commands every second:
+    #   - get_detailed_battery()  -> 1 subprocess exec (ioreg)
+    #   - get_pmset_info()        -> 2 subprocess execs (pmset -g batt, pmset -g)
+    #   => battery + pmset reads refresh every 300s (5 min) to cut exec spam.
+    #   - get_smc_data()          -> plain disk reads, NO exec
+    #   => SMC temps refresh every 30s.
+    last_battery_exec_time = 0.0
+    last_smc_disk_time = 0.0
+
+    # Seed values so the first loop iteration always has data to pack
+    # (the timed refresh below updates them at 300s / 30s cadence).
+    design_wh, energy_wh, full_wh, health = get_detailed_battery()
+    temps, rpms, turbo = get_smc_data()
+    pmset = get_pmset_info()
+    last_battery_exec_time = time.time()
+    last_smc_disk_time = time.time()
+
     while True:
         try:
             if not imu_shm:
@@ -333,9 +351,17 @@ def stats_worker(
             batt_state = 1 if batt and not batt.power_plugged else 2
             load_avg = psutil.getloadavg()
             hid_idle_ns = get_hid_idle_nanoseconds()
-            design_wh, energy_wh, full_wh, health = get_detailed_battery()
-            temps, rpms, turbo = get_smc_data()
-            pmset = get_pmset_info()
+
+            read_t = time.time()
+            # Battery (1 ioreg exec) + pmset (2 execs): every 300s only.
+            if read_t - last_battery_exec_time >= 300.0:
+                design_wh, energy_wh, full_wh, health = get_detailed_battery()
+                pmset = get_pmset_info()
+                last_battery_exec_time = read_t
+            # SMC temps/fans/turbo: plain disk reads (no exec), every 30s.
+            if read_t - last_smc_disk_time >= 30.0:
+                temps, rpms, turbo = get_smc_data()
+                last_smc_disk_time = read_t
 
             t_cpu = time.perf_counter_ns()
             t_rtc = time.time_ns()
