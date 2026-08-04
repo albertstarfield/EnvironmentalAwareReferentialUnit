@@ -14,6 +14,7 @@ with Ada.Calendar;
 with Ada.Calendar.Formatting;
 with Ada.Numerics.Generic_Elementary_Functions;
 with Ada.Real_Time;
+with Ada.Command_Line;
 with GNAT.Sockets;
 with Earu.Network_Status;
 with Ada.Strings.Fixed;
@@ -1224,7 +1225,7 @@ begin
    end;
 
    Ada.Text_IO.Put_Line ("[*] Initializing Shared Memory (Waiting for Python Sidecar bootstrap)...");
-   for I in 1 .. 60 loop
+   for I in 1 .. 180 loop
       Weather_SHM := Open_Weather_SHM ("/earu_v2_weather_shm");
       Stats_SHM   := Open_Stats_SHM ("/earu_v2_stats_shm");
       ML_Results  := Open_ML_SHM ("/earu_v2_ml_shm");
@@ -1232,14 +1233,17 @@ begin
          Ada.Text_IO.Put_Line ("[ok] Shared Memory successfully mapped!");
          exit;
       end if;
-      Ada.Text_IO.Put_Line ("[*] Shared Memory not ready yet, retrying in 1s (Attempt" & Integer'Image(I) & "/60)...");
+      Ada.Text_IO.Put_Line ("[*] Shared Memory not ready yet, retrying in 1s (Attempt" & Integer'Image(I) & "/180)...");
       delay 1.0;
    end loop;
-   if Accel_SHM = null or Stats_SHM = null then
-      Ada.Text_IO.Put_Line ("[!] WARNING: Shared Memory Initialization TIMED OUT! Tasks may stall.");
-   else
-      Ada.Text_IO.Put_Line ("EARU Daemon Concurrent Core Active.");
+   if Weather_SHM = null or Stats_SHM = null or ML_Results = null then
+      Ada.Text_IO.Put_Line ("[!] FATAL: Shared Memory not available after 180s. Restarting EARU system...");
+      -- Exit non-zero so launchd (KeepAlive=true) restarts start.sh --service,
+      -- which pkills all EARU processes (daemon + Python sidecars) and relaunches.
+      Ada.Command_Line.Set_Exit_Status (1);
+      return;
    end if;
+   Ada.Text_IO.Put_Line ("EARU Daemon Concurrent Core Active.");
 
    -- Start stale detection watchdog
    Stale_Watchdog_Task.Start;
