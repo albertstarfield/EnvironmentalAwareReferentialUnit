@@ -2,6 +2,7 @@ with Ada.Text_IO;
 with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Exceptions;
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
@@ -841,11 +842,6 @@ package body Earu.IO is
       end loop;
       Append (Buf, "], ");
 
-      --  ── parity hashes (written by ML bridge into SHM header → State) ─────
-      AP ("p_augmented", F (State.System.P_Augmented));
-      AP ("p_external",  F (State.System.P_External));
-      AP ("p_internal",  F (State.System.P_Internal), False);
-
       --  ── close root & compute self-parity hash ─────────────────────────────
       declare
          Pre_Parity : constant String := To_String (Buf) & "}";
@@ -880,11 +876,16 @@ package body Earu.IO is
             Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
          end;
       exception
-         when others => 
+         when E : others =>
+            Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error,
+               "[Write_EARU_Data] exception: " & Ada.Exceptions.Exception_Message (E));
             if Is_Open (File) then Close (File); end if;
       end;
    end Write_EARU_Data;
 
+   -- SAFETY NOTE: These caches are written only by Monitor_Task (single-writer).
+   -- No mutex needed because Ada task scheduling guarantees mutual exclusion
+   -- for a single task accessing its own variables.
    Cache_TCMz : Real := 75.0;
    Cache_Tg0X : Real := 60.0;
    Cache_TaLP : Real := 50.0;
@@ -989,12 +990,15 @@ package body Earu.IO is
          else return 0.0;
          end if;
       end if;
-   exception
-      when others =>
-         if Is_Open (File) then
-            Close (File);
-         end if;
-         if Filename = "sensor_temp_TCMz.dat" then return Cache_TCMz;
+    exception
+       when others =>
+          if Is_Open (File) then
+             Close (File);
+          end if;
+          -- NOTE: Cache lookup duplicated from lines 970-989 above.
+          -- Refactoring into a helper would require restructuring the
+          -- nested begin blocks. Accept duplication for now.
+          if Filename = "sensor_temp_TCMz.dat" then return Cache_TCMz;
          elsif Filename = "sensor_temp_Tg0X.dat" then return Cache_Tg0X;
          elsif Filename = "sensor_temp_TaLP.dat" then return Cache_TaLP;
          elsif Filename = "sensor_temp_TaRF.dat" then return Cache_TaRF;
@@ -1020,7 +1024,7 @@ package body Earu.IO is
       package Int_IO is new Ada.Text_IO.Integer_IO (Integer);
    begin
       begin
-         Open (File, In_File, "/usr/local/EnvironmentalAwareReferentialUnit/EARU_dataIO/" & Filename);
+          Open (File, In_File, "/Volumes/EARU_dataIO/" & Filename);
       exception
          when Name_Error | Use_Error =>
             begin

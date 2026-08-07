@@ -117,8 +117,10 @@ procedure Earu_Daemon is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
    begin
-      -- Check if earu_ml_bridge.py is alive via pgrep
-      -- (stats_worker runs as a child of ml_bridge, no separate system_bridge)
+       -- Check if earu_ml_bridge.py is alive via pgrep
+       -- (stats_worker runs as a child of ml_bridge, no separate system_bridge)
+       -- NOTE: system_bridge.py is NOT monitored here. If Start_System_Bridge
+       -- is used, Ensure_Sidecars_Running should also pgrep it.
       Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
          "pgrep -f earu_ml_bridge.py > /dev/null 2>&1 || " &
          "(echo '[!] ml_bridge.py dead, relaunching' && " &
@@ -535,8 +537,8 @@ procedure Earu_Daemon is
           Ret := C_System (Interfaces.C.To_C (
              "log show --predicate 'logType == error OR category == ""Error""' --last 1m --style compact | grep -v 'Filtering the log data using' | grep -v 'Log architecture' | grep -q ."
           ));
-          Earu.State_Store.State_Buffer.Set_Log_Error (Ret = 0);
-          delay 60.0;
+           Earu.State_Store.State_Buffer.Set_Log_Error (Ret = 0);
+           delay 300.0;
        end loop;
     exception
        when others =>
@@ -559,7 +561,21 @@ procedure Earu_Daemon is
       Last_HID_Idle_Read       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
       Last_Network_Update      : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
    begin
-      while Weather_SHM = null or Stats_SHM = null loop delay 0.1; end loop;
+      --  Wait for Weather/Stats SHM to be ready, but with a hard timeout.
+      --  The main block SHM wait (180s) is the primary defense; this is
+      --  defense-in-depth for Monitor_Task which starts at elaboration time.
+      declare
+         SHM_Timeout : constant Duration := 180.0;
+         Start       : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      begin
+         while Weather_SHM = null or Stats_SHM = null loop
+            if Ada.Calendar."-" (Ada.Calendar.Clock, Start) > SHM_Timeout then
+               Earu.State_Store.State_Buffer.Set_Log_Error (True);
+               exit;
+            end if;
+            delay 0.1;
+         end loop;
+      end;
       loop
           -- 0. Sidecar watchdog (every 30 seconds)
           if Ada.Calendar."-" (Ada.Calendar.Clock, Last_Sidecar_Check) > 30.0 then

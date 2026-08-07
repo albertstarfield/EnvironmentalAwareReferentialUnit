@@ -37,7 +37,7 @@ def get_adb_devices():
             paths.append(os.path.join(android_home, "platform-tools"))
         env["PATH"] = ":".join(paths) + ":" + env.get("PATH", "")
 
-        res = subprocess.run(["adb", "devices"], capture_output=True, text=True, check=True, env=env)
+        res = subprocess.run(["taskpolicy", "-b", "adb", "devices"], capture_output=True, text=True, check=True, env=env)
         devices = []
         for line in res.stdout.splitlines():
             line = line.strip()
@@ -61,6 +61,7 @@ def send_mock_location(device, lat, lon, alt):
         env["PATH"] = ":".join(paths) + ":" + env.get("PATH", "")
 
         cmd = [
+            "taskpolicy", "-b",
             "adb", "-s", device, "shell", "am", "broadcast",
             "-a", "com.adbmockgps.SET_LOCATION",
             "--es", "lat", f"{lat:.6f}",
