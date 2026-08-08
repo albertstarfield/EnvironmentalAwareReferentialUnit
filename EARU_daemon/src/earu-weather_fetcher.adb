@@ -41,9 +41,14 @@
 --              precipitation, rain, cloud_cover, wind_speed_10m,
 --              wind_direction_10m, weather_code, soil_temperature_0cm,
 --              soil_temperature_54cm, soil_moisture_0_to_1cm, uv_index,
---              direct_radiation, global_tilted_irradiance
+--              direct_radiation, global_tilted_irradiance, shortwave_radiation,
+--              sunshine_duration, cape, freezing_level_height,
+--              boundary_layer_height, lifted_index, vapour_pressure_deficit,
+--              total_column_integrated_water_vapour, dew_point_2m,
+--              wet_bulb_temperature_2m, surface_pressure
 --    daily:    temperature_2m_max, temperature_2m_min, precipitation_sum,
---              precipitation_probability_max, sunrise, sunset, uv_index_max
+--              precipitation_probability_max, sunrise, sunset, uv_index_max,
+--              daylight_duration
 --  ==========================================================================
 
 with Interfaces.C;
@@ -131,15 +136,19 @@ package body Earu.Weather_Fetcher is
       & ",precipitation,rain,weather_code,cloud_cover,pressure_msl"
       & ",wind_speed_10m,wind_direction_10m,surface_pressure"
       & ",visibility,evapotranspiration"
-      --  Hourly forecast (15 fields × 16 days × 24 h)
+      --  Hourly forecast (26 fields × 16 days × 24 h)
       & "&hourly=temperature_2m,relative_humidity_2m,precipitation_probability"
       & ",precipitation,rain,cloud_cover,wind_speed_10m,wind_direction_10m"
       & ",weather_code,soil_temperature_0cm,soil_temperature_54cm"
       & ",soil_moisture_0_to_1cm,uv_index,direct_radiation"
-      & ",global_tilted_irradiance"
-      --  Daily summary (7 fields × 16 days)
+      & ",global_tilted_irradiance,shortwave_radiation,sunshine_duration"
+      & ",cape,freezing_level_height,boundary_layer_height,lifted_index"
+      & ",vapour_pressure_deficit,total_column_integrated_water_vapour"
+      & ",dew_point_2m,wet_bulb_temperature_2m,surface_pressure"
+      --  Daily summary (8 fields × 16 days)
       & "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum"
       & ",precipitation_probability_max,sunrise,sunset,uv_index_max"
+      & ",daylight_duration"
       & "&timezone=auto&timeformat=unixtime&forecast_days=16";
 
    --  Output file path on the RAM disk.  Writing directly to EARU_dataIO
