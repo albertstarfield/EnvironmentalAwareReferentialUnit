@@ -542,6 +542,7 @@ class PrimaryFlightDisplay:
         self.targets: dict[str, float] = {
             'pitch': 0.0, 'roll': 0.0, 'heading': 0.0, 'alt': 0.0, 'speed': 0.0, 'lat': 0.0, 'lon': 0.0,
             'cf_velocity': 1.0, 'cf_heading': 0.0, 'cf_altitude': 0.0, 'cf_vertical_rate': 1.0,
+            'alt_rate': 0.0, 'mach': 0.0,
             'vel_x': 0.0, 'vel_y': 0.0, 'vel_z': 0.0, 'anchor_refresh_speed': 0.0
         }
         self.lerp_factor: float = 0.1
@@ -554,6 +555,48 @@ class PrimaryFlightDisplay:
         self.adv_detail_page: int = 0
         self.wifi_devices: list[dict[str, Any]] = []
         self.bt_devices: list[dict[str, Any]] = []
+
+        # Safety-net defaults for attributes set in update_data()
+        # (prevents AttributeError if update_data fails on first frame)
+        self.active_network: str = "false"
+        self.net_up_kbps: float = 0.0
+        self.net_down_kbps: float = 0.0
+        self.sig_locs: list[Any] = []
+        self.inside_sig_loc: bool = False
+        self.machine_life: float = 0.0
+        self.nvram_write_cycles: float = 0.0
+        self.nvram_rated_endurance: float = 100000.0
+        self.ssd_spare: float = 100.0
+        self.ssd_used: float = 0.0
+        self.ssd_read: float = 0.0
+        self.ssd_write: float = 0.0
+        self.ssd_life_y: float = 0.0
+        self.ssd_life_m: float = 0.0
+        self.ssd_life_d: float = 0.0
+        self.struct_life_y: float = 0.0
+        self.struct_life_m: float = 0.0
+        self.struct_life_d: float = 0.0
+        self.cum_fatigue: float = 0.0
+        self.agg_risk: float = 0.0
+        self.smc_aPMX: float = 0.0
+        self.smc_mTPL: float = 0.0
+        self.smc_mUTL: float = 0.0
+        self.smc_xPPT: float = 255.0
+        self.smc_xLPM: float = 0.0
+        self.smc_PHPB: float = 0.0
+        self.smc_PHPM: float = 0.0
+        self.smc_PHPC: float = 0.0
+        self.smc_PHPS: float = 0.0
+        self.smc_PMVC: float = 0.0
+        self.smc_PPSC: float = 0.0
+        self.smc_PSVR: float = 0.0
+        self.smc_PDBR: float = 0.0
+        self.smc_PDTR: float = 0.0
+
+        # Significant-location tracking (used in update_significant_locations)
+        self.prev_sig_loc_count: int = 0
+        self.sig_loc_message: str = ""
+        self.sig_loc_message_time: float = 0.0
 
         # Start background wireless scanning thread
         self.stop_wireless_scan = threading.Event()
@@ -770,9 +813,9 @@ class PrimaryFlightDisplay:
             {"label": "PROGNOS", "page": 2, "rect": (float(15+2*btn_w), 5.0, float(15+3*btn_w), 55.0)},
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
-            {"label": "WEATHER", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
+            {"label": "METAR", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
             {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
-            {"label": "CLIM", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
+            {"label": "WEATHER", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
             {"label": "ENERGY", "page": 9, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
             {"label": "SEARCH", "page": 8, "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
             {"label": "CENTER", "cmd": "center", "rect": (float(55+10*btn_w), 5.0, float(55+11*btn_w), 55.0)},
@@ -1007,267 +1050,284 @@ class PrimaryFlightDisplay:
             if self.map_widget: self.map_widget.pack_forget()
             self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
 
+    def _read_data_file(self) -> list[str] | None:
+        """Read data file with retry for mid-write race condition (Murphy's Law).
+
+        The daemon writes JSON to this file asynchronously. A read can catch the
+        file between a truncation and re-write, yielding empty or partial content.
+        Retrying a few times with a short delay almost always yields a clean read.
+        """
+        for attempt in range(3):
+            try:
+                with open(self.data_path, 'r') as f:
+                    lines = f.readlines()
+                if lines:
+                    return lines
+            except (OSError, PermissionError, ValueError):
+                pass
+            time.sleep(0.05)
+        return None
+
     def update_data(self) -> None:
         try:
             if os.path.exists(self.data_path):
-                with open(self.data_path, 'r') as f:
-                    lines = f.readlines()
-                    if not lines: return
+                lines = self._read_data_file()
+                if not lines: return
 
-                    data = None
-                    primary_error = None
+                data = None
+                primary_error = None
 
-                    # Try first line (Primary JSON)
-                    line = lines[0].strip()
-                    if line:
-                        # Clean up any residual recovery info if it somehow ended up on the same line
-                        if "[RECOVERY" in line: line = line.split("[RECOVERY")[0]
+                # Try first line (Primary JSON)
+                line = lines[0].strip()
+                if line:
+                    # Clean up any residual recovery info if it somehow ended up on the same line
+                    if "[RECOVERY" in line: line = line.split("[RECOVERY")[0]
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError as e:
+                        primary_error = e
+
+                # If primary failed or is missing, try recovery block (Second line)
+                if data is None and len(lines) > 1:
+                    rec_line = lines[1].strip()
+                    if rec_line.startswith("[RECOVERY_V1:"):
                         try:
-                            data = json.loads(line)
-                        except json.JSONDecodeError as e:
-                            primary_error = e
+                            # Format: [RECOVERY_V1:base64_data:hash]
+                            parts = rec_line[13:-1].split(":")
+                            if len(parts) >= 2:
+                                b64_data = parts[0]
+                                json_str = base64.b64decode(b64_data).decode()
+                                data = json.loads(json_str)
+                                # Optional: print(f"[{datetime.datetime.now()}] DATA RECOVERY: Restored data from recovery block.")
+                        except Exception as e:
+                            print(f"[{datetime.datetime.now()}] RECOVERY ERROR: Failed to restore from recovery block: {e}")
 
-                    # If primary failed or is missing, try recovery block (Second line)
-                    if data is None and len(lines) > 1:
-                        rec_line = lines[1].strip()
-                        if rec_line.startswith("[RECOVERY_V1:"):
-                            try:
-                                # Format: [RECOVERY_V1:base64_data:hash]
-                                parts = rec_line[13:-1].split(":")
-                                if len(parts) >= 2:
-                                    b64_data = parts[0]
-                                    json_str = base64.b64decode(b64_data).decode()
-                                    data = json.loads(json_str)
-                                    # Optional: print(f"[{datetime.datetime.now()}] DATA RECOVERY: Restored data from recovery block.")
-                            except Exception as e:
-                                print(f"[{datetime.datetime.now()}] RECOVERY ERROR: Failed to restore from recovery block: {e}")
+                if data is None:
+                    if primary_error:
+                        print(f"[{datetime.datetime.now()}] DATA ERROR: Failed to parse primary JSON from {self.data_path}")
+                        print(f"  Error: {primary_error}")
+                        print(f"  Line: {lines[0].strip()[:200]}...") # Truncate for log safety
+                    return
 
-                    if data is None:
-                        if primary_error:
-                            print(f"[{datetime.datetime.now()}] DATA ERROR: Failed to parse primary JSON from {self.data_path}")
-                            print(f"  Error: {primary_error}")
-                            print(f"  Line: {lines[0].strip()[:200]}...") # Truncate for log safety
-                        return
+                def clean_none(val):
+                    if isinstance(val, dict):
+                        return {k: clean_none(v) for k, v in val.items()}
+                    elif isinstance(val, list):
+                        return [clean_none(v) for v in val]
+                    elif val is None:
+                        return 0.0
+                    return val
 
-                    def clean_none(val):
-                        if isinstance(val, dict):
-                            return {k: clean_none(v) for k, v in val.items()}
-                        elif isinstance(val, list):
-                            return [clean_none(v) for v in val]
-                        elif val is None:
-                            return 0.0
-                        return val
+                data = clean_none(data)
+                self.full_data = data
 
-                    data = clean_none(data)
-                    self.full_data = data
+                # Smooth rates & thermodynamics (EMA filters)
+                smc = data.get('smc', {})
+                raw_massflow = float(smc.get('massflow_kg_s', 0.0))
+                raw_heatflux = float(smc.get('heatflux_j', 0.0))
+                raw_power = float(smc.get('power', 0.0))
+                raw_inefficiency = float(smc.get('thermal_inefficiency_w', max(0.0, raw_power - raw_heatflux)))
+                raw_efficiency = float(smc.get('cooling_efficiency_pct', (raw_heatflux / raw_power * 100.0) if raw_power > 0.0 else 0.0))
+                raw_work_eff = float(smc.get('work_efficiency_pct', 100.0 - raw_efficiency))
 
-                    # Smooth rates & thermodynamics (EMA filters)
-                    smc = data.get('smc', {})
-                    raw_massflow = float(smc.get('massflow_kg_s', 0.0))
-                    raw_heatflux = float(smc.get('heatflux_j', 0.0))
-                    raw_power = float(smc.get('power', 0.0))
-                    raw_inefficiency = float(smc.get('thermal_inefficiency_w', max(0.0, raw_power - raw_heatflux)))
-                    raw_efficiency = float(smc.get('cooling_efficiency_pct', (raw_heatflux / raw_power * 100.0) if raw_power > 0.0 else 0.0))
-                    raw_work_eff = float(smc.get('work_efficiency_pct', 100.0 - raw_efficiency))
+                alpha = 0.08  # Silky-smooth coefficient
+                if self.smooth_power == 0.0 and raw_power > 0.0:
+                    self.smooth_massflow = raw_massflow
+                    self.smooth_heatflux = raw_heatflux
+                    self.smooth_power = raw_power
+                    self.smooth_inefficiency = raw_inefficiency
+                    self.smooth_efficiency = raw_efficiency
+                    self.smooth_work_efficiency = raw_work_eff
+                else:
+                    self.smooth_massflow = alpha * raw_massflow + (1.0 - alpha) * self.smooth_massflow
+                    self.smooth_heatflux = alpha * raw_heatflux + (1.0 - alpha) * self.smooth_heatflux
+                    self.smooth_power = alpha * raw_power + (1.0 - alpha) * self.smooth_power
+                    self.smooth_inefficiency = alpha * raw_inefficiency + (1.0 - alpha) * self.smooth_inefficiency
+                    self.smooth_efficiency = alpha * raw_efficiency + (1.0 - alpha) * self.smooth_efficiency
+                    self.smooth_work_efficiency = alpha * raw_work_eff + (1.0 - alpha) * self.smooth_work_efficiency
 
-                    alpha = 0.08  # Silky-smooth coefficient
-                    if self.smooth_power == 0.0 and raw_power > 0.0:
-                        self.smooth_massflow = raw_massflow
-                        self.smooth_heatflux = raw_heatflux
-                        self.smooth_power = raw_power
-                        self.smooth_inefficiency = raw_inefficiency
-                        self.smooth_efficiency = raw_efficiency
-                        self.smooth_work_efficiency = raw_work_eff
-                    else:
-                        self.smooth_massflow = alpha * raw_massflow + (1.0 - alpha) * self.smooth_massflow
-                        self.smooth_heatflux = alpha * raw_heatflux + (1.0 - alpha) * self.smooth_heatflux
-                        self.smooth_power = alpha * raw_power + (1.0 - alpha) * self.smooth_power
-                        self.smooth_inefficiency = alpha * raw_inefficiency + (1.0 - alpha) * self.smooth_inefficiency
-                        self.smooth_efficiency = alpha * raw_efficiency + (1.0 - alpha) * self.smooth_efficiency
-                        self.smooth_work_efficiency = alpha * raw_work_eff + (1.0 - alpha) * self.smooth_work_efficiency
+                # Record history queue once per second (1Hz) based on telemetry epoch time stamp
+                current_time = float(data.get('time', 0.0))
+                if current_time != self.last_telemetry_time:
+                    self.last_telemetry_time = current_time
+                    self.work_efficiency_history.append(raw_work_eff)
 
-                    # Record history queue once per second (1Hz) based on telemetry epoch time stamp
-                    current_time = float(data.get('time', 0.0))
-                    if current_time != self.last_telemetry_time:
-                        self.last_telemetry_time = current_time
-                        self.work_efficiency_history.append(raw_work_eff)
+                # Master Warning / Caution state updates
+                loc = data.get('location', {})
+                raw_warning = bool(loc.get('master_warning', False))
+                raw_caution = bool(loc.get('master_caution', False))
 
-                    # Master Warning / Caution state updates
-                    loc = data.get('location', {})
-                    raw_warning = bool(loc.get('master_warning', False))
-                    raw_caution = bool(loc.get('master_caution', False))
-
-                    if raw_warning:
-                        if not self.prev_warning:
-                            self.warn_acknowledged = False
-                            self.prev_warning = True
-
-                        # Repeating Warning Chime (Every 1.5s) if not acknowledged
-                        if not self.warn_acknowledged and time.time() - self.last_warning_chime > 1.5:
-                            play_chime("warning")
-                            self.last_warning_chime = time.time()
-                    else:
-                        self.prev_warning = False
+                if raw_warning:
+                    if not self.prev_warning:
                         self.warn_acknowledged = False
-                        self.last_warning_chime = 0.0
+                        self.prev_warning = True
 
-                    if raw_caution:
-                        if not self.prev_caution:
-                            self.caution_acknowledged = False
-                            self.prev_caution = True
+                    # Repeating Warning Chime (Every 1.5s) if not acknowledged
+                    if not self.warn_acknowledged and time.time() - self.last_warning_chime > 1.5:
+                        play_chime("warning")
+                        self.last_warning_chime = time.time()
+                else:
+                    self.prev_warning = False
+                    self.warn_acknowledged = False
+                    self.last_warning_chime = 0.0
 
-                        # Repeating Caution Chime (Every 4.0s) if not acknowledged
-                        if not self.caution_acknowledged and time.time() - self.last_caution_chime > 4.0:
-                            play_chime("caution")
-                            self.last_caution_chime = time.time()
-                    else:
-                        self.prev_caution = False
+                if raw_caution:
+                    if not self.prev_caution:
                         self.caution_acknowledged = False
-                        self.last_caution_chime = 0.0
+                        self.prev_caution = True
 
-                    orient = data.get('orientation', {})
-                    self.raw_pitch = float(orient.get('pitch', 0.0))
-                    self.raw_roll = float(orient.get('roll', 0.0))
-                    self.targets['pitch'] = self.raw_pitch * self.pitch_sign
-                    self.targets['roll'] = self.raw_roll * self.roll_sign
+                    # Repeating Caution Chime (Every 4.0s) if not acknowledged
+                    if not self.caution_acknowledged and time.time() - self.last_caution_chime > 4.0:
+                        play_chime("caution")
+                        self.last_caution_chime = time.time()
+                else:
+                    self.prev_caution = False
+                    self.caution_acknowledged = False
+                    self.last_caution_chime = 0.0
 
-                    self.transportation_category = str(loc.get('transportation_category', 'stationary')).strip()
-                    self.targets['alt'] = float(loc.get('alt', 0.0))
-                    self.targets['speed'] = float(loc.get('v_mag', 0.0) * 1.94384)
-                    self.targets['heading'] = float(loc.get('heading', 0.0))
-                    self.targets['lat'] = float(loc.get('lat', 0.0))
-                    self.targets['lon'] = float(loc.get('lon', 0.0))
-                    self.targets['alt_rate'] = float(loc.get('alt_rate', 0.0) * 196.85)
-                    self.targets['mach'] = float(loc.get('mach', 0.0))
+                orient = data.get('orientation', {})
+                self.raw_pitch = float(orient.get('pitch', 0.0))
+                self.raw_roll = float(orient.get('roll', 0.0))
+                self.targets['pitch'] = self.raw_pitch * self.pitch_sign
+                self.targets['roll'] = self.raw_roll * self.roll_sign
 
-                    vel_list = loc.get('vel', [0.0, 0.0, 0.0])
-                    if isinstance(vel_list, list) and len(vel_list) >= 3:
-                        self.targets['vel_x'] = float(vel_list[0])
-                        self.targets['vel_y'] = float(vel_list[1])
-                        self.targets['vel_z'] = float(vel_list[2])
-                    else:
-                        self.targets['vel_x'] = 0.0
-                        self.targets['vel_y'] = 0.0
-                        self.targets['vel_z'] = 0.0
+                self.transportation_category = str(loc.get('transportation_category', 'stationary')).strip()
+                self.targets['alt'] = float(loc.get('alt', 0.0))
+                self.targets['speed'] = float(loc.get('v_mag', 0.0) * 1.94384)
+                self.targets['heading'] = float(loc.get('heading', 0.0))
+                self.targets['lat'] = float(loc.get('lat', 0.0))
+                self.targets['lon'] = float(loc.get('lon', 0.0))
+                self.targets['alt_rate'] = float(loc.get('alt_rate', 0.0) * 196.85)
+                self.targets['mach'] = float(loc.get('mach', 0.0))
 
-                    # Corrected values from EARU
-                    self.targets['cf_velocity'] = float(loc.get('CorrectionFactor_Reckoning_Velocity', 1.0))
-                    self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
-                    self.targets['cf_altitude'] = float(loc.get('CorrectionFactor_Reckoning_Altitude', 0.0))
-                    self.targets['cf_vertical_rate'] = float(loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0))
-                    self.targets['anchor_refresh_speed'] = float(loc.get('locationd_anchor_refresh_speed', 0.0))
-                    self.loc_time = float(loc.get('time', 0.0))
-                    self.lockin_miss = float(loc.get('lockin_miss', 0.0))
-                    self.warning_reason = str(loc.get('warning_reason', "")).strip()
-                    self.caution_reason = str(loc.get('caution_reason', "")).strip()
-                    self.sig_locs = loc.get('significant_locations', [])
-                    self.inside_sig_loc = bool(loc.get('inside_significant_location', False))
+                vel_list = loc.get('vel', [0.0, 0.0, 0.0])
+                if isinstance(vel_list, list) and len(vel_list) >= 3:
+                    self.targets['vel_x'] = float(vel_list[0])
+                    self.targets['vel_y'] = float(vel_list[1])
+                    self.targets['vel_z'] = float(vel_list[2])
+                else:
+                    self.targets['vel_x'] = 0.0
+                    self.targets['vel_y'] = 0.0
+                    self.targets['vel_z'] = 0.0
 
-                    sys_d = data.get('system', {})
-                    self.cpu = float(sys_d.get('cpu_usage', 0.0))
-                    self.batt = int(sys_d.get('battery_percent', 0))
-                    self.charging = bool(sys_d.get('battery_charging', False))
-                    self.hid_idle = float(sys_d.get('nonHumanInputHIDIdle', 0.0))
-                    self.uptime_earu = float(sys_d.get('uptime_earu', 0.0))
+                # Corrected values from EARU
+                self.targets['cf_velocity'] = float(loc.get('CorrectionFactor_Reckoning_Velocity', 1.0))
+                self.targets['cf_heading'] = float(loc.get('CorrectionFactor_Reckoning_Heading', 0.0))
+                self.targets['cf_altitude'] = float(loc.get('CorrectionFactor_Reckoning_Altitude', 0.0))
+                self.targets['cf_vertical_rate'] = float(loc.get('CorrectionFactor_Reckoning_VerticalRate', 1.0))
+                self.targets['anchor_refresh_speed'] = float(loc.get('locationd_anchor_refresh_speed', 0.0))
+                self.loc_time = float(loc.get('time', 0.0))
+                self.lockin_miss = float(loc.get('lockin_miss', 0.0))
+                self.warning_reason = str(loc.get('warning_reason', "")).strip()
+                self.caution_reason = str(loc.get('caution_reason', "")).strip()
+                self.sig_locs = loc.get('significant_locations', [])
+                self.inside_sig_loc = bool(loc.get('inside_significant_location', False))
 
-                    self.battery_bank_wh = float(sys_d.get('BatteryEnergyBankWh', 0.0))
-                    self.battery_health = float(sys_d.get('BatteryHealthPct', 100.0))
-                    self.battery_full_wh = float(sys_d.get('BatteryFullChargeCapacityWh', 0.0))
-                    self.battery_design_wh = float(sys_d.get('BatteryDesignCapacityWh', 0.0))
+                sys_d = data.get('system', {})
+                self.cpu = float(sys_d.get('cpu_usage', 0.0))
+                self.batt = int(sys_d.get('battery_percent', 0))
+                self.charging = bool(sys_d.get('battery_charging', False))
+                self.hid_idle = float(sys_d.get('nonHumanInputHIDIdle', 0.0))
+                self.uptime_earu = float(sys_d.get('uptime_earu', 0.0))
 
-                    self.machine_life = float(sys_d.get('machine_life_runtime', 0.0))
-                    self.nvram_write_cycles = float(sys_d.get('nvram_write_cycles', 0.0))
-                    self.nvram_rated_endurance = float(sys_d.get('nvram_rated_endurance', 100000.0))
-                    self.ssd_spare = float(sys_d.get('ssd_available_spare', 100.0))
-                    self.ssd_used = float(sys_d.get('ssd_used_pct', 0.0))
-                    self.ssd_read = float(sys_d.get('ssd_data_read_units', 0.0))
-                    self.ssd_write = float(sys_d.get('ssd_data_write_units', 0.0))
-                    self.ssd_life_y = float(sys_d.get('ssd_life_left_years', 0.0))
-                    self.ssd_life_m = float(sys_d.get('ssd_life_left_months', 0.0))
-                    self.ssd_life_d = float(sys_d.get('ssd_life_left_days', 0.0))
-                    self.active_network = sys_d.get('active_network_accessed', 'false')
-                    self.net_up_kbps = float(sys_d.get('total_network_bandwidth_up_kbps', 0.0))
-                    self.net_down_kbps = float(sys_d.get('total_network_bandwidth_down_kbps', 0.0))
+                self.battery_bank_wh = float(sys_d.get('BatteryEnergyBankWh', 0.0))
+                self.battery_health = float(sys_d.get('BatteryHealthPct', 100.0))
+                self.battery_full_wh = float(sys_d.get('BatteryFullChargeCapacityWh', 0.0))
+                self.battery_design_wh = float(sys_d.get('BatteryDesignCapacityWh', 0.0))
 
-                    seismic = data.get('seismic_activity', {})
-                    df = seismic.get('damage_fatigue', {})
-                    self.struct_life_y = float(df.get('structural_life_left_y', 0.0))
-                    self.struct_life_m = float(df.get('structural_life_left_m', 0.0))
-                    self.struct_life_d = float(df.get('structural_life_left_d', 0.0))
-                    self.cum_fatigue = float(df.get('cumulative_fatigue', 0.0))
-                    self.agg_risk = float(df.get('aggregated_risk', 0.0))
+                self.machine_life = float(sys_d.get('machine_life_runtime', 0.0))
+                self.nvram_write_cycles = float(sys_d.get('nvram_write_cycles', 0.0))
+                self.nvram_rated_endurance = float(sys_d.get('nvram_rated_endurance', 100000.0))
+                self.ssd_spare = float(sys_d.get('ssd_available_spare', 100.0))
+                self.ssd_used = float(sys_d.get('ssd_used_pct', 0.0))
+                self.ssd_read = float(sys_d.get('ssd_data_read_units', 0.0))
+                self.ssd_write = float(sys_d.get('ssd_data_write_units', 0.0))
+                self.ssd_life_y = float(sys_d.get('ssd_life_left_years', 0.0))
+                self.ssd_life_m = float(sys_d.get('ssd_life_left_months', 0.0))
+                self.ssd_life_d = float(sys_d.get('ssd_life_left_days', 0.0))
+                self.active_network = sys_d.get('active_network_accessed', 'false')
+                self.net_up_kbps = float(sys_d.get('total_network_bandwidth_up_kbps', 0.0))
+                self.net_down_kbps = float(sys_d.get('total_network_bandwidth_down_kbps', 0.0))
 
-                    # Battery Life Prediction Math (Hobbs time vs Degradation) now handled in EARU_daemon
-                    self.batt_life_y = float(sys_d.get('Batt_Life_Y', 10.0))
-                    self.drain_time_act = float(sys_d.get('Drain_Time_Active', 0.0))
-                    self.drain_time_slp = float(sys_d.get('Drain_Time_Sleep', 0.0))
-                    self.drain_time_hib = float(sys_d.get('Drain_Time_Hib', 0.0))
-                    self.drain_time_dhib = float(sys_d.get('Drain_Time_DeepHib', 0.0))
+                seismic = data.get('seismic_activity', {})
+                df = seismic.get('damage_fatigue', {})
+                self.struct_life_y = float(df.get('structural_life_left_y', 0.0))
+                self.struct_life_m = float(df.get('structural_life_left_m', 0.0))
+                self.struct_life_d = float(df.get('structural_life_left_d', 0.0))
+                self.cum_fatigue = float(df.get('cumulative_fatigue', 0.0))
+                self.agg_risk = float(df.get('aggregated_risk', 0.0))
 
-                    # 60s Reanchoring Logic for Real-Time Countdown
-                    now_ts = time.time()
-                    if now_ts - self.life_anchor_ts >= 60.0:
-                        self.life_anchor_ts = now_ts
-                        # Minimum life across all critical components
-                        nvram_life_y = max(0.0, (self.nvram_rated_endurance - self.nvram_write_cycles) / max(1.0, self.nvram_rated_endurance) * 10.0)
-                        min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y, self.batt_life_y)
-                        self.life_anchor_seconds = min_life_y * 8760.0 * 3600.0
+                # Battery Life Prediction Math (Hobbs time vs Degradation) now handled in EARU_daemon
+                self.batt_life_y = float(sys_d.get('Batt_Life_Y', 10.0))
+                self.drain_time_act = float(sys_d.get('Drain_Time_Active', 0.0))
+                self.drain_time_slp = float(sys_d.get('Drain_Time_Sleep', 0.0))
+                self.drain_time_hib = float(sys_d.get('Drain_Time_Hib', 0.0))
+                self.drain_time_dhib = float(sys_d.get('Drain_Time_DeepHib', 0.0))
 
-                    smc = data.get('smc', {})
-                    self.power_rate = float(smc.get('PowerRateUsage', 0.0))
-                    self.day_usage_wh = float(smc.get('DayPowerUsage_Wh', 0.0))
-                    self.month_usage_wh = float(smc.get('AccumulativePowerUsageThisMonth_Wh', 0.0))
-                    self.meter_usage_wh = float(smc.get('AccumulativePowerUsageMeter_Wh', 0.0))
-                    self.est_today_wh = float(smc.get('EstimatedTodayPowerUsage_Wh', 0.0))
-                    self.power_survival_w = float(smc.get('PowerSurvivalW', 0.0))
-                    self.survive_today = str(smc.get('WillBatterySurviveOneDay', "Yes"))
-                    self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
-                    self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
-                    self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
-                    self.turbo = int(float(smc.get('turbo', 0)))
+                # 60s Reanchoring Logic for Real-Time Countdown
+                now_ts = time.time()
+                if now_ts - self.life_anchor_ts >= 60.0:
+                    self.life_anchor_ts = now_ts
+                    # Minimum life across all critical components
+                    nvram_life_y = max(0.0, (self.nvram_rated_endurance - self.nvram_write_cycles) / max(1.0, self.nvram_rated_endurance) * 10.0)
+                    min_life_y = min(self.struct_life_y, self.ssd_life_y, nvram_life_y, self.batt_life_y)
+                    self.life_anchor_seconds = min_life_y * 8760.0 * 3600.0
 
-                    # SMC Power Management Keys
-                    self.smc_aPMX = float(smc.get('aPMX', 0.0))
-                    self.smc_mTPL = float(smc.get('mTPL', 0.0))
-                    self.smc_mUTL = float(smc.get('mUTL', 0.0))
-                    self.smc_xPPT = float(smc.get('xPPT', 255.0))
-                    self.smc_xLPM = float(smc.get('xLPM', 0.0))
-                    self.smc_PHPB = float(smc.get('PHPB', 0.0))
-                    self.smc_PHPM = float(smc.get('PHPM', 0.0))
-                    self.smc_PHPC = float(smc.get('PHPC', 0.0))
-                    self.smc_PHPS = float(smc.get('PHPS', 0.0))
-                    self.smc_PMVC = float(smc.get('PMVC', 0.0))
-                    self.smc_PPSC = float(smc.get('PPSC', 0.0))
-                    self.smc_PSVR = float(smc.get('PSVR', 0.0))
-                    self.smc_PDBR = float(smc.get('PDBR', 0.0))
-                    self.smc_PDTR = float(smc.get('PDTR', 0.0))
+                smc = data.get('smc', {})
+                self.power_rate = float(smc.get('PowerRateUsage', 0.0))
+                self.day_usage_wh = float(smc.get('DayPowerUsage_Wh', 0.0))
+                self.month_usage_wh = float(smc.get('AccumulativePowerUsageThisMonth_Wh', 0.0))
+                self.meter_usage_wh = float(smc.get('AccumulativePowerUsageMeter_Wh', 0.0))
+                self.est_today_wh = float(smc.get('EstimatedTodayPowerUsage_Wh', 0.0))
+                self.power_survival_w = float(smc.get('PowerSurvivalW', 0.0))
+                self.survive_today = str(smc.get('WillBatterySurviveOneDay', "Yes"))
+                self.must_hibernate = str(smc.get('inOrderToSurviveDayMustHibernate', "No"))
+                self.pulse_wake = float(smc.get('PulsingSuggestionMaintenanceWindowWake', 0.0))
+                self.pulse_length = float(smc.get('PulsingSuggestionMaintenanceWindowWakeLength', 0.0))
+                self.turbo = int(float(smc.get('turbo', 0)))
 
-                    # Parse fan RPMs correctly from the list
-                    raw_fans = smc.get('fan_rpms', [0.0, 0.0])
-                    self.fan_rpms = [float(f) for f in raw_fans] if isinstance(raw_fans, list) else [0.0, 0.0]
+                # SMC Power Management Keys
+                self.smc_aPMX = float(smc.get('aPMX', 0.0))
+                self.smc_mTPL = float(smc.get('mTPL', 0.0))
+                self.smc_mUTL = float(smc.get('mUTL', 0.0))
+                self.smc_xPPT = float(smc.get('xPPT', 255.0))
+                self.smc_xLPM = float(smc.get('xLPM', 0.0))
+                self.smc_PHPB = float(smc.get('PHPB', 0.0))
+                self.smc_PHPM = float(smc.get('PHPM', 0.0))
+                self.smc_PHPC = float(smc.get('PHPC', 0.0))
+                self.smc_PHPS = float(smc.get('PHPS', 0.0))
+                self.smc_PMVC = float(smc.get('PMVC', 0.0))
+                self.smc_PPSC = float(smc.get('PPSC', 0.0))
+                self.smc_PSVR = float(smc.get('PSVR', 0.0))
+                self.smc_PDBR = float(smc.get('PDBR', 0.0))
+                self.smc_PDTR = float(smc.get('PDTR', 0.0))
 
-                    # Fallback for older targets if needed, otherwise default to 0
-                    self.fan_targets = [
-                        float(smc.get('F0Tg', 0.0)),
-                        float(smc.get('F1Tg', 0.0))
-                    ]
-                    self.airflow_inlet_c = float(smc.get('airflow_inlet_k', 293.15)) - 273.15
-                    self.airflow_outlet_c = float(smc.get('airflow_outlet_k', 293.15)) - 273.15
-                    self.lid_angle = float(data.get('lid_angle', 110.0))
-                    self.lid_speed = float(data.get('lid_speed', 0.0))
-                    # Parse hinge_airflow with a solid mathematical fallback based on fan RPMs and screen angle
-                    avg_fan = sum(self.fan_rpms) / len(self.fan_rpms) if self.fan_rpms else 0.0
-                    fallback_flow = 15.0 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
-                    self.hinge_airflow = float(data.get('hinge_airflow', max(0.0, fallback_flow)))
+                # Parse fan RPMs correctly from the list
+                raw_fans = smc.get('fan_rpms', [0.0, 0.0])
+                self.fan_rpms = [float(f) for f in raw_fans] if isinstance(raw_fans, list) else [0.0, 0.0]
 
-                    fallback_mass = 0.003 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
-                    self.outflow_mass_flow = float(data.get('outflow_mass_flow', max(0.0, fallback_mass)))
+                # Fallback for older targets if needed, otherwise default to 0
+                self.fan_targets = [
+                    float(smc.get('F0Tg', 0.0)),
+                    float(smc.get('F1Tg', 0.0))
+                ]
+                self.airflow_inlet_c = float(smc.get('airflow_inlet_k', 293.15)) - 273.15
+                self.airflow_outlet_c = float(smc.get('airflow_outlet_k', 293.15)) - 273.15
+                self.lid_angle = float(data.get('lid_angle', 110.0))
+                self.lid_speed = float(data.get('lid_speed', 0.0))
+                # Parse hinge_airflow with a solid mathematical fallback based on fan RPMs and screen angle
+                avg_fan = sum(self.fan_rpms) / len(self.fan_rpms) if self.fan_rpms else 0.0
+                fallback_flow = 15.0 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
+                self.hinge_airflow = float(data.get('hinge_airflow', max(0.0, fallback_flow)))
 
-                    delta_t = max(0.0, self.airflow_outlet_c - self.airflow_inlet_c)
-                    fallback_heatflux = self.outflow_mass_flow * 1005.0 * delta_t
-                    self.outflow_heatflux = float(data.get('outflow_heatflux', max(0.0, fallback_heatflux)))
+                fallback_mass = 0.003 * (avg_fan / 6000.0) * math.sin(math.radians(min(180.0, max(0.0, self.lid_angle))))
+                self.outflow_mass_flow = float(data.get('outflow_mass_flow', max(0.0, fallback_mass)))
 
-                    self.simulated = False
+                delta_t = max(0.0, self.airflow_outlet_c - self.airflow_inlet_c)
+                fallback_heatflux = self.outflow_mass_flow * 1005.0 * delta_t
+                self.outflow_heatflux = float(data.get('outflow_heatflux', max(0.0, fallback_heatflux)))
+
+                self.simulated = False
 
             else:
                 self.simulated = True
@@ -1278,6 +1338,8 @@ class PrimaryFlightDisplay:
                 self.targets['vel_x'] = 10.0 * math.cos(t * 0.2)
                 self.targets['vel_y'] = 10.0 * math.sin(t * 0.2)
                 self.targets['vel_z'] = 0.5 * math.sin(t * 0.1)
+                self.targets['alt_rate'] = 200.0 * math.sin(t * 0.15)
+                self.targets['mach'] = 0.25 + 0.05 * math.sin(t * 0.3)
                 self.cpu, self.batt, self.hid_idle = 25+5*math.sin(t), 85, (t % 60)
                 self.turbo = 0
                 # SMC Power Management defaults for simulated mode
@@ -2742,12 +2804,7 @@ class PrimaryFlightDisplay:
 
     def update_significant_locations(self) -> None:
         # Centralized detection from EARU_daemon / ML Bridge.
-        if not hasattr(self, 'prev_sig_loc_count'):
-            self.prev_sig_loc_count = 0
-            self.sig_loc_message = ""
-            self.sig_loc_message_time = 0.0
-
-        current_count = len(getattr(self, 'sig_locs', []))
+        current_count = len(self.sig_locs)
         if current_count > self.prev_sig_loc_count and self.prev_sig_loc_count > 0:
             new_loc = self.sig_locs[0]
             self.sig_loc_message = f"NEW SIGNIFICANT LOCATION ANCHORED: ({new_loc.get('lat', 0.0):.4f}, {new_loc.get('lon', 0.0):.4f})"
@@ -3336,22 +3393,22 @@ class PrimaryFlightDisplay:
         tendency = float(weather.get('pressure_tendency_hpa', 0.0))
         hum = float(smc.get('humidity_pct', 0.0))
 
-        # Color background based on weather conditions
-        if t_c < 2 and spread < 3:
+        # Read condition_icon from the Ada daemon instead of duplicating
+        # the classification logic here.  The daemon uses WMO CIMO Guide
+        # thresholds (dew-point spread) and ICAO Annex 3 rules.
+        cond_icon = str(weather.get('condition_icon', '')).strip() or 'SHINY'
+
+        # Background color mapping (visual only — logic lives in earu-math.adb)
+        if cond_icon == "SNOWING":
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
-            cond_icon = "SNOWING"
-        elif spread < 2.0 and tendency < -0.2:
+        elif cond_icon == "RAINING":
             self.canvas.create_rectangle(0, 0, w, h, fill="#0a1a2a", outline="")
-            cond_icon = "RAINING"
-        elif spread < 1.5:
+        elif cond_icon == "FOGGY":
             self.canvas.create_rectangle(0, 0, w, h, fill="#2c2c2c", outline="")
-            cond_icon = "FOGGY"
-        elif spread < 5.0:
+        elif cond_icon == "CLOUDY":
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a3a5a", outline="")
-            cond_icon = "CLOUDY"
         else:
             self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
-            cond_icon = "SHINY"
 
         self.canvas.create_text(w/2, 40, text=f"METAR/TAF - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
 
@@ -3460,11 +3517,24 @@ class PrimaryFlightDisplay:
     def draw_weather_page(self, w: float, h: float) -> None:
         sub_t = ["SUMMARY & TRENDS", "SURFACE & SOIL", "SOLAR RADIATION", "AVIATION & STABILITY", "HUMIDITY & VAPOUR"]
         z_lbl = ["FULL (3mo+16d)", "LAST 30 DAYS", "LAST 7 DAYS", "LAST 24 HOURS", "16-DAY FORECAST"]
-        self.canvas.create_text(w/2, 25, text=f"METEO: {sub_t[self.clim_subpage]}", fill="#00ff7f", font=("Monaco", 18, "bold"))
+        self.canvas.create_text(w/2, 25, text=f"WEATHER: {sub_t[self.clim_subpage]}", fill="#00ff7f", font=("Monaco", 18, "bold"))
         self.canvas.create_text(w/2, 45, text=f"[ CYCLE PAGES ({self.clim_subpage+1}/5) | ZOOM: {z_lbl[self.clim_zoom]} (CLICK GRAPH) ]", fill="#aaa", font=("Monaco", 8))
 
-        weather = self.full_data.get('ecosystem_weather', {})
-        meteo = weather.get('3rdparty_meteo', {})
+        # 3rdparty_meteo is written to a separate file by the Ada daemon
+        # to keep EARU_data.dat small (reduces CPU from 15 Hz reads).
+        # The daemon's weather fetcher writes to /Volumes/EARU_dataIO/EARU_meteo.dat
+        # every 30 minutes via curl → Open-Meteo API.
+        meteo = {}
+        meteo_path = "/Volumes/EARU_dataIO/EARU_meteo.dat"
+        try:
+            if os.path.exists(meteo_path):
+                mtime = os.path.getmtime(meteo_path)
+                # Only use if less than 2 hours old (fetcher runs every 30 min)
+                if (time.time() - mtime) < 7200:
+                    with open(meteo_path, 'r') as mf:
+                        meteo = json.loads(mf.read())
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
         if not meteo:
             self.canvas.create_text(w/2, h/2, text="NO 3RD PARTY METEO DATA", fill="red", font=("Monaco", 14))
             return

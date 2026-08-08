@@ -15,7 +15,7 @@ package Earu.State_Store is
       procedure Update_Weather (W : Weather_Type; L : Location_Type);
       procedure Update_Location (L : Location_Type);
       procedure Update_Ecosystem (E : Ecosystem_Weather_Type);
-      procedure Update_System (S : System_Stats_Type; E : Electron_Travel_Type);
+      procedure Update_System (S : System_Stats_Type; E : Interaction_Responsiveness_Type);
       procedure Update_SMC (SMC : SMC_Type);
       procedure Update_Parity (Aug, Ext, Int_Val : Real);
       procedure Update_ML (User : User_Detection_Type; Sig_Count : Integer; Sig_Locs : Significant_Location_Array; Inside : Boolean);

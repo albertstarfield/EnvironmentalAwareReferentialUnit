@@ -35,13 +35,13 @@ package body Earu.State_Store is
          State.Ecosystem_Weather := E;
       end Update_Ecosystem;
 
-      procedure Update_System (S : System_Stats_Type; E : Electron_Travel_Type) is
+      procedure Update_System (S : System_Stats_Type; E : Interaction_Responsiveness_Type) is
       begin
          State.System := S;
-         State.Electron_Travel := E;
-         State.Electron_Travel.Log_Error := Log_Error_Detected;
+         State.Interaction_Responsiveness := E;
+         State.Interaction_Responsiveness.Log_Error := Log_Error_Detected;
          if Log_Error_Detected then
-            State.Electron_Travel.Interference := True;
+            State.Interaction_Responsiveness.Interference := True;
          end if;
       end Update_System;
 
@@ -204,7 +204,7 @@ package body Earu.State_Store is
       begin
          State := (others => <>);
          State.Ecosystem_Weather.Category := (others => ' ');
-         State.Electron_Travel.TS_ISO := (others => ' ');
+         State.Interaction_Responsiveness.TS_ISO := (others => ' ');
          State.Location.Compass_Dir := (others => ' ');
          State.System.P_Augmented := 0.0;
          State.System.P_External  := 0.0;

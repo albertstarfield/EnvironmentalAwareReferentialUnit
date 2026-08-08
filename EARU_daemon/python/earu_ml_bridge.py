@@ -31,10 +31,7 @@ from earu_location_bridge import (  # noqa: E402
     get_terrain_anchor,
     global_location,
 )
-from earu_system_bridge import (  # noqa: E402
-    STATS_SHM_NAME,
-    stats_worker,
-)
+# earu_system_bridge removed — system metrics now collected natively by Ada System_Metrics_Task
 from earu_wireless_bridge import (  # noqa: E402
     global_bt_devices,
     global_wifi_devices,
@@ -544,12 +541,6 @@ def ml_worker() -> None:
     except Exception:
         shm = shared_memory.SharedMemory(name=ML_SHM_NAME, create=True, size=1024)
 
-    stats_shm: shared_memory.SharedMemory | None = None
-    try:
-        stats_shm = shared_memory.SharedMemory(name=STATS_SHM_NAME)
-    except Exception:
-        pass
-
     update_count = 0
     day_data_buffer: list[list[float]] = []
     last_train_day = 0
@@ -560,13 +551,15 @@ def ml_worker() -> None:
 
             energy_wh = 50.0
             power_w = 10.0
-            if stats_shm is not None and stats_shm.buf is not None:
-                try:
-                    buf = bytes(stats_shm.buf)
-                    power_w = struct.unpack_from("<f", buf, 340)[0]
-                    energy_wh = struct.unpack_from("<f", buf, 364)[0]
-                except Exception:
-                    pass
+            try:
+                with open("/Volumes/EARU_dataIO/EARU_data.dat") as f:
+                    data = json.load(f)
+                system = data.get("system", {})
+                smc = data.get("smc", {})
+                power_w = float(smc.get("power", 10.0))
+                energy_wh = float(system.get("BatteryEnergyBankWh", 50.0))
+            except Exception:
+                pass
 
             if last_train_day == 0:
                 last_train_day = today
@@ -795,7 +788,7 @@ def main() -> None:
     print("[*] Starting EARU Production Bridge...")
 
     for name in [
-        STATS_SHM_NAME, WEATHER_SHM_NAME, ML_SHM_NAME,
+        WEATHER_SHM_NAME, ML_SHM_NAME,
         "vib_detect_shm", "vib_detect_shm_gyro",
         "vib_detect_shm_lid", "vib_detect_shm_als",
     ]:
@@ -817,7 +810,6 @@ def main() -> None:
     import multiprocessing as mp
 
     processes = [
-        mp.Process(target=stats_worker, args=(global_location, VibrationDetector), daemon=True),
         mp.Process(target=weather_worker, daemon=True),
         mp.Process(target=ml_worker, daemon=True),
     ]

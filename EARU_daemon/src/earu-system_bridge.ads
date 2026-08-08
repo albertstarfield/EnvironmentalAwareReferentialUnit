@@ -1,16 +1,20 @@
---  earu_system_bridge.ads — Native Ada replacement for Python stats_worker.
+--  earu-system_bridge.ads — Native Ada replacement for Python stats_worker.
 --
 --  Reads system metrics (CPU%, memory%, load average, uptime) via C helpers,
 --  SMC thermal sensors and fan RPMs from disk files, battery details via ioreg,
 --  HID idle time, and power tracking data.  Writes directly to the state store,
 --  eliminating the need for Stats_SHM and the Python sidecar for system metrics.
 --
+--  Also maintains hardware clocks (Interaction_Responsiveness timestamps), power
+--  accumulation (day/month/meter usage from PSTR), a pulsing solver for
+--  battery survival, and persists power metrics to JSON across restarts.
+--
 with Interfaces.C;
 
 package Earu.System_Bridge is
    pragma SPARK_Mode (Off);
 
-   --  C imports from system_metrics.c
+   --  C imports from system_metrics.c: CPU, memory, loadavg, uptime
    function Get_CPU_Usage return Interfaces.C.double;
    pragma Import (C, Get_CPU_Usage, "get_cpu_usage");
 
@@ -22,6 +26,20 @@ package Earu.System_Bridge is
 
    function Get_Uptime_Sec return Interfaces.C.double;
    pragma Import (C, Get_Uptime_Sec, "get_uptime_sec");
+
+   --  C imports from system_metrics.c: hardware clocks
+   function Get_Monotonic_NS return Long_Long_Integer;
+   pragma Import (C, Get_Monotonic_NS, "get_monotonic_ns");
+
+   function Get_Wallclock_NS return Long_Long_Integer;
+   pragma Import (C, Get_Wallclock_NS, "get_wallclock_ns");
+
+   procedure Get_Date_Time_Fields
+     (Year, Month, Day, Hour, Min, Sec : out Interfaces.C.int);
+   pragma Import (C, Get_Date_Time_Fields, "get_datetime_fields");
+
+   function Get_Seconds_Since_Midnight return Interfaces.C.double;
+   pragma Import (C, Get_Seconds_Since_Midnight, "get_seconds_since_midnight");
 
    --  C import for HID idle time (from spu_sensor_reader.c)
    function Get_HID_Idle_Time_NS return Interfaces.Unsigned_64;

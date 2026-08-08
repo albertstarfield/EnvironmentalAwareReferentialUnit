@@ -14,6 +14,19 @@ export USER=albertstarfield
 PROJECT_ROOT="/usr/local/EnvironmentalAwareReferentialUnit"
 DAEMON_DIR="$PROJECT_ROOT/EARU_daemon"
 
+# --clean flag or .force_clean marker: force full clean rebuild
+FORCE_CLEAN=false
+FORCE_CLEAN_FILE="$DAEMON_DIR/.force_clean"
+for arg in "$@"; do
+    if [ "$arg" = "--clean" ]; then
+        FORCE_CLEAN=true
+    fi
+done
+if [ -f "$FORCE_CLEAN_FILE" ]; then
+    FORCE_CLEAN=true
+    rm -f "$FORCE_CLEAN_FILE"
+fi
+
 # Determine the original non-root user (e.g., albertstarfield) who invoked sudo
 ORIGINAL_USER="${SUDO_USER:-albertstarfield}"
 if [ "$ORIGINAL_USER" = "root" ]; then
@@ -63,27 +76,57 @@ pkill -f "earu_adb_mock.py" 2>/dev/null
 pkill -f "earu_daemon" 2>/dev/null
 
 # 5. Build or Skip
-if [ "$CURRENT_HASH" != "$OLD_HASH" ] || [ ! -f "./bin/earu_daemon" ]; then
-    echo "[*] Source changed or binary missing. Building EARU Daemon..."
+FAIL_COUNT_FILE="$DAEMON_DIR/.build_fail_count"
+MAX_FAILS=5
+RETRY_BASE_DELAY=5  # Base delay in seconds for exponential backoff
 
-    # Clean up stale locks or half-built compilation directories to resolve parallel build corruption
-    echo "[*] Cleaning up build artifacts and locks..."
+if [ "$FORCE_CLEAN" = true ]; then
+    echo "[*] --clean flag: forcing full clean rebuild..."
     rm -rf obj bin
     run_as_user alr --non-interactive clean 2>/dev/null
+    echo 0 > "$FAIL_COUNT_FILE"
+fi
 
-    # Build the project using the original user's toolchain
-    echo "[*] Building with Alire as $ORIGINAL_USER..."
-    run_as_user alr --non-interactive build
+if [ "$CURRENT_HASH" != "$OLD_HASH" ] || [ ! -f "./bin/earu_daemon" ] || [ "$FORCE_CLEAN" = true ]; then
+    echo "[*] Source changed or binary missing. Building EARU Daemon..."
 
-    if [ $? -ne 0 ]; then
-        echo "[!] Build failed. Cleaning build cache and retrying..."
-        rm -rf obj bin
+    # Incremental build: do NOT clean obj/bin — let GNAT only recompile changed files.
+    # This makes small edits compile in ~5-10s instead of 5+ minutes.
+    echo "[*] Building with Alire (incremental) as $ORIGINAL_USER..."
+
+    FAIL_COUNT=$(cat "$FAIL_COUNT_FILE" 2>/dev/null || echo 0)
+
+    # Retry loop with exponential backoff: 5s, 25s, 125s, 625s
+    while true; do
         run_as_user alr --non-interactive build
-        if [ $? -ne 0 ]; then
-            echo "[!] Build failed again. Please check compilation logs."
-            exit 1
+
+        if [ $? -eq 0 ]; then
+            echo 0 > "$FAIL_COUNT_FILE"
+            break  # Build succeeded
         fi
-    fi
+
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        echo "$FAIL_COUNT" > "$FAIL_COUNT_FILE"
+
+        if [ "$FAIL_COUNT" -ge "$MAX_FAILS" ]; then
+            echo "[!] Build failed $FAIL_COUNT times consecutively. Performing full clean rebuild..."
+            rm -rf obj bin
+            run_as_user alr --non-interactive clean 2>/dev/null
+            run_as_user alr --non-interactive build
+            if [ $? -ne 0 ]; then
+                echo "[!] Full clean rebuild also failed. Please check compilation logs."
+                exit 1
+            fi
+            echo 0 > "$FAIL_COUNT_FILE"
+            break
+        fi
+
+        # Exponential backoff: RETRY_BASE_DELAY ^ fail_count (5, 25, 125, 625)
+        # This way we have more time before it go full clean rebuild.
+        BACKOFF_DELAY=$(( RETRY_BASE_DELAY ** FAIL_COUNT ))
+        echo "[!] Build failed (attempt $FAIL_COUNT/$MAX_FAILS). Retrying in ${BACKOFF_DELAY}s..."
+        sleep "$BACKOFF_DELAY"
+    done
     
     # Save the hash if build succeeded
     echo "$CURRENT_HASH" > "$HASH_FILE"

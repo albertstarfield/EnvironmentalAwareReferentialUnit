@@ -71,7 +71,7 @@ package body Earu.Bridge is
          
          -- Apply dynamic environmental multipliers
          Increment := Increment * Thermal_Stress * Humidity_Stress * Pressure_Stress;
-         if State.Electron_Travel.Interference then
+         if State.Interaction_Responsiveness.Interference then
             Increment := Increment * 1.2;
          end if;
       end if;
@@ -92,7 +92,7 @@ package body Earu.Bridge is
       State.Seismic_Activity.Damage_Fatigue.Electromech_Fatigue_Prob := Electromech_P;
 
       -- Unfactored external interference
-      Unfactored_P := (if State.Electron_Travel.Interference then 0.25 else 0.0);
+      Unfactored_P := (if State.Interaction_Responsiveness.Interference then 0.25 else 0.0);
       Unfactored_P := Real'Max (0.0, Real'Min (1.0, Unfactored_P + Env_Fatigue * 0.2));
 
       -- --- Aggregated System Risk ---

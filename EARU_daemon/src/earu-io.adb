@@ -6,6 +6,7 @@ with Ada.Exceptions;
 with Interfaces.C.Strings;
 with GNAT.SHA256;
 
+with Earu.Weather_Fetcher;
 with System;
 
    -- =========================================================================
@@ -418,18 +419,18 @@ package body Earu.IO is
 
       --  ── high_res_drift ───────────────────────────────────────────────────
       Append (Buf, """high_res_drift"": {");
-      AL ("t_cpu_ns",               State.Electron_Travel.T_CPU_ns);
-      AL ("t_rtc_ns",               State.Electron_Travel.T_RTC_ns);
-      AL ("t_gpu_ns",               State.Electron_Travel.T_GPU_ns);
-      AL ("t_dat_ns",               State.Electron_Travel.T_DAT_ns);
-      AL ("t_spu_ns",               State.Electron_Travel.T_SPU_ns);
+      AL ("t_cpu_ns",               State.Interaction_Responsiveness.T_CPU_ns);
+      AL ("t_rtc_ns",               State.Interaction_Responsiveness.T_RTC_ns);
+      AL ("t_gpu_ns",               State.Interaction_Responsiveness.T_GPU_ns);
+      AL ("t_dat_ns",               State.Interaction_Responsiveness.T_DAT_ns);
+      AL ("t_spu_ns",               State.Interaction_Responsiveness.T_SPU_ns);
       AP ("t_inference_fabric_ns",  "0");
-      AP ("spu_lat_ms",             F (State.Electron_Travel.SPU_Lat_ms));
-      AP ("gpu_lat_ms",             F (State.Electron_Travel.GPU_Lat_ms));
-      AP ("rtc_jitter_ms",          F (State.Electron_Travel.RTC_Jitter_ms));
+      AP ("spu_lat_ms",             F (State.Interaction_Responsiveness.SPU_Lat_ms));
+      AP ("gpu_lat_ms",             F (State.Interaction_Responsiveness.GPU_Lat_ms));
+      AP ("rtc_jitter_ms",          F (State.Interaction_Responsiveness.RTC_Jitter_ms));
       AP ("inference_fabric_lat_ms","0.0");
-      AP ("interference",           (if State.Electron_Travel.Interference then """Yes""" else """No"""));
-      AP ("ts",                     S (Trim_Null (State.Electron_Travel.TS_ISO)), False);
+      AP ("interference",           (if State.Interaction_Responsiveness.Interference then """Yes""" else """No"""));
+      AP ("ts",                     S (Trim_Null (State.Interaction_Responsiveness.TS_ISO)), False);
       Append (Buf, "}, ");
 
       --  ── location ─────────────────────────────────────────────────────────
@@ -636,6 +637,7 @@ package body Earu.IO is
       --  ── ecosystem_weather ────────────────────────────────────────────────
       Append (Buf, """ecosystem_weather"": {");
       AP ("category",              S (Trim_Null (State.Ecosystem_Weather.Category)));
+      AP ("condition_icon",        S (Trim_Null (State.Ecosystem_Weather.Condition_Icon)));
       AP ("dew_point_k",           F (State.Ecosystem_Weather.Dew_Point_K));
       AP ("dew_point_spread",      F (State.Ecosystem_Weather.Dew_Point_Spread));
       AP ("humidity_pct",          F (State.Ecosystem_Weather.Humidity_Pct));
@@ -679,7 +681,30 @@ package body Earu.IO is
          Bucket ("10.0",  State.Ecosystem_Weather.Stats.S_10_0);
          Bucket ("100.0", State.Ecosystem_Weather.Stats.S_100_0, False);
       end;
-      Append (Buf, "}}, ");
+      --  Close the stats inner dict.
+      Append (Buf, "}");
+      --  3rdparty_meteo is now written to a separate file (EARU_meteo.dat)
+      --  by the weather fetcher to keep EARU_data.dat small.  The viewer
+      --  reads it directly from that file when page 7 is active.
+      --  Close the metar_taf sub-object (computed by earu-math.adb).
+      if State.Ecosystem_Weather.Metar_Report (1) /= ' ' then
+         Append (Buf, ",");
+         Append (Buf, """metar_taf"": {");
+         Append (Buf, """metar"": """
+                 & Ada.Strings.Fixed.Trim (State.Ecosystem_Weather.Metar_Report, Ada.Strings.Both)
+                 & """");
+         Append (Buf, ",");
+         Append (Buf, """taf"": """
+                 & Ada.Strings.Fixed.Trim (State.Ecosystem_Weather.Taf_Report, Ada.Strings.Both)
+                 & """");
+         Append (Buf, ",");
+         Append (Buf, """wind_speed_kts"": " & F (State.Ecosystem_Weather.Wind_Speed_Kts));
+         Append (Buf, ",");
+         Append (Buf, """wind_dir_deg"": " & F (State.Ecosystem_Weather.Wind_Dir_Deg));
+         Append (Buf, "}");
+      end if;
+      --  Close the ecosystem_weather dict.
+      Append (Buf, "}, ");
 
       --  ── Sol_BlueMarble_TimeAnchor ─────────────────────────────────────────
       Append (Buf, """Sol_BlueMarble_TimeAnchor"": {");

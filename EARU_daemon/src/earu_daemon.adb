@@ -19,6 +19,7 @@ with Ada.Strings.Fixed;
 with Earu.Weather_Fetcher;
 with Earu.Stale_Detector;
 with Earu.System_Bridge;
+pragma Unreferenced (Earu.System_Bridge);
 
 -- Main entry point for the EARU daemon.
 -- Sets up RAM disk, loads persistent state, spawns Python sidecars,
@@ -96,21 +97,12 @@ procedure Earu_Daemon is
       )));
    end Start_ADB_Mock;
 
-   -- Launches the Python System Bridge sidecar (earu_system_bridge.py) in background.
-   -- Writes Stats_SHM with CPU, memory, load average, and system metrics.
-   procedure Start_System_Bridge is
-      Ret : Interfaces.C.int;
-      pragma Unreferenced (Ret);
-   begin
-      Ada.Text_IO.Put_Line ("[*] Automatically invoking Python System Bridge (Stats SHM writer)...");
-      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
-         "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &"
-      )));
-   end Start_System_Bridge;
+   -- Start_System_Bridge removed: system metrics now collected natively
+   -- by Earu.System_Bridge.System_Metrics_Task (no Python dependency).
 
    -- Health check watchdog for Python sidecars. Uses pgrep to check if
-   -- earu_ml_bridge.py, earu_adb_mock.py, and earu_system_bridge.py are
-   -- alive; relaunches dead ones.
+   -- earu_ml_bridge.py and earu_adb_mock.py are alive; relaunches dead ones.
+   -- (earu_system_bridge.py removed — system metrics now native Ada)
    procedure Ensure_Sidecars_Running is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
@@ -127,12 +119,7 @@ procedure Earu_Daemon is
          "(echo '[!] adb_mock.py dead, relaunching' && " &
          "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &)"
       )));
-      -- Check if earu_system_bridge.py is alive via pgrep
-      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
-         "pgrep -f earu_system_bridge.py > /dev/null 2>&1 || " &
-         "(echo '[!] system_bridge.py dead, relaunching' && " &
-         "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &)"
-      )));
+      -- system_bridge.py removed: system metrics now native Ada
    end Ensure_Sidecars_Running;
 
    -- Persists critical state to NVRAM (lat, lon, alt, heading, total distance,
@@ -313,7 +300,7 @@ procedure Earu_Daemon is
    Accel_SHM : IMU_SHM_Ptr := null;
    Gyro_SHM  : IMU_SHM_Ptr := null;
    Weather_SHM : Weather_SHM_Ptr := null;
-   Stats_SHM   : Stats_SHM_Ptr := null;
+   -- Stats_SHM removed: system metrics now native Ada (no Python dependency)
    ML_Results  : ML_SHM_Ptr := null;
    Lid_Data    : Lid_SHM_Ptr := null;
    ALS_Data    : ALS_SHM_Record_Ptr := null;
@@ -571,14 +558,14 @@ procedure Earu_Daemon is
 
    -- Main orchestrator task. Runs every 100ms. Handles:
    -- - GPS fix processing and dead reckoning updates
-   -- - Battery gradient calculation and charging detection
-   -- - Master warning/caution trigger evaluation
-   -- - Stats_SHM sync (CPU, memory, temps, fans, power)
-   -- - ML mood/heartbeat sync from Python ML Bridge
+    -- - Battery gradient calculation and charging detection
+    -- - Master warning/caution trigger evaluation
+    -- - System metrics now collected natively by System_Metrics_Task (no SHM needed)
+    -- - ML mood/heartbeat sync from Python ML Bridge
    -- - HID idle time detection (500ms dedicated timer)
    -- - Machine life runtime and SSD life updates
    task body Monitor_Task is
-      Last_W, Last_ML, Last_S : Unsigned_32 := 0;
+       Last_W, Last_ML : Unsigned_32 := 0;
       pragma Unreferenced (Last_ML);
       Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 301.0);
       Last_NVRAM_Sync_Hour     : Integer := -1;
@@ -586,14 +573,16 @@ procedure Earu_Daemon is
       Last_HID_Idle_Read       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
       Last_Network_Update      : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
    begin
-      --  Wait for Weather/Stats SHM to be ready, but with a hard timeout.
+      --  Wait for Weather SHM to be ready, but with a hard timeout.
       --  The main block SHM wait (180s) is the primary defense; this is
       --  defense-in-depth for Monitor_Task which starts at elaboration time.
+      --  Weather_SHM is set by the main block before Monitor_Task reaches here.
       declare
          SHM_Timeout : constant Duration := 180.0;
          Start       : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+         pragma Warnings (Off, "possible infinite loop");
       begin
-         while Weather_SHM = null or Stats_SHM = null loop
+         while Weather_SHM = null loop
             if Ada.Calendar."-" (Ada.Calendar.Clock, Start) > SHM_Timeout then
                Earu.State_Store.State_Buffer.Set_Log_Error (True);
                exit;
@@ -614,7 +603,7 @@ procedure Earu_Daemon is
                  Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
               begin
                  Full.System.Non_Human_HID_Idle_ns := Real (Get_HID_Idle_Time_NS);
-                 Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+                 Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Interaction_Responsiveness);
               end;
               Last_HID_Idle_Read := Ada.Calendar.Clock;
            end if;
@@ -631,7 +620,7 @@ procedure Earu_Daemon is
                  Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
               begin
                  Update_Network_Bandwidth (Full);
-                 Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+                 Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Interaction_Responsiveness);
                  Last_Network_Update := Ada.Calendar.Clock;
               end;
            end if;
@@ -642,7 +631,7 @@ procedure Earu_Daemon is
                 Full : Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
              begin
                 Update_Machine_Life (Full);
-                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Interaction_Responsiveness);
                 Earu.State_Store.State_Buffer.Update_Damage_Fatigue (Full.Seismic_Activity.Damage_Fatigue);
                 Last_Machine_Life_Update := Ada.Calendar.Clock;
              end;
@@ -656,7 +645,7 @@ procedure Earu_Daemon is
              if Uptime_Hours /= Last_NVRAM_Sync_Hour and then (Uptime_Hours mod 12 = 0 or Uptime_Hours = 0) then
                 Save_All_To_NVRAM (Full);
                 -- Sync the incremented cycle count back to state buffer
-                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+                Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Interaction_Responsiveness);
                 Last_NVRAM_Sync_Hour := Uptime_Hours;
              end if;
           end;
@@ -691,7 +680,7 @@ procedure Earu_Daemon is
                     L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
                  end if;
                  L.Pressure_HPa := Real (Weather_SHM.Pressure_HPa);
-                Earu.Math.Update_Weather_Thermodynamics (Eco, SMC, L, W, Real (Stats_SHM.SMC_Ambient_K));
+                Earu.Math.Update_Weather_Thermodynamics (Eco, SMC, L, W, SMC.Ambient_Temp_K);
                 Earu.State_Store.State_Buffer.Update_Weather (W, L);
                 Earu.State_Store.State_Buffer.Update_Ecosystem (Eco);
                 Earu.State_Store.State_Buffer.Update_SMC (SMC);
@@ -741,8 +730,8 @@ procedure Earu_Daemon is
                       end if;
                    end Add_W;
                 begin
-                   if Full.Electron_Travel.Log_Error then Add_W("INTERFERENCE [SYSTEM_INTEGRITY_EXCUSE_FAILURE]"); end if;
-                   if Full.Electron_Travel.Interference and not Full.Electron_Travel.Log_Error then Add_W("INTERFERENCE [MOVE AWAY FROM EM]"); end if;
+                   if Full.Interaction_Responsiveness.Log_Error then Add_W("INTERFERENCE [SYSTEM_INTEGRITY_EXCUSE_FAILURE]"); end if;
+                   if Full.Interaction_Responsiveness.Interference and not Full.Interaction_Responsiveness.Log_Error then Add_W("INTERFERENCE [MOVE AWAY FROM EM]"); end if;
                    if Full.Seismic_Activity.Damage_Fatigue.Anomaly_Upset_Count > 0 then Add_W("ANOMALY [CHECK HARDWARE]"); end if;
                    if Full.Seismic_Activity.Damage_Fatigue.Aggregated_Risk > 0.48 then Add_W("HIGH_RISK [SUSPEND OPERATIONS]"); end if;
                    if Full.SMC.Temps.TCMz > 100.0 then Add_W("TCMZ_OVERHEAT [COOL DEVICE]"); end if;
@@ -846,158 +835,14 @@ procedure Earu_Daemon is
                      end loop;
                   end if;
                end;
-               Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Electron_Travel);
+               Earu.State_Store.State_Buffer.Update_System (Full.System, Full.Interaction_Responsiveness);
             end;
          end;
 
-         if Stats_SHM.Header.Update_Count /= Last_S then
-             Ada.Text_IO.Put_Line ("[*] Stats_SHM update detected! Count=" & Stats_SHM.Header.Update_Count'Img & " Last_S=" & Last_S'Img);
-             declare
-                Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
-                S    : System_Stats_Type := Full.System;
-                SMC  : SMC_Type := Full.SMC;
-             begin
-                S.CPU_Usage := Real (Stats_SHM.CPU_Usage);
-                S.Mem_Usage := Real (Stats_SHM.Mem_Usage);
-
-               S.Battery_Design_Wh := Real (Stats_SHM.Bat_Design_Wh);
-               S.Battery_Energy_Wh := Real (Stats_SHM.Bat_Energy_Wh);
-               S.Battery_Full_Wh := Real (Stats_SHM.Bat_Full_Wh);
-               S.Battery_Health_Pct := Real (Stats_SHM.Bat_Health_Pct);
-               S.Load_Avg := (Real (Stats_SHM.Load_Avg_1), Real (Stats_SHM.Load_Avg_5), Real (Stats_SHM.Load_Avg_15));
-               -- HID idle now read on dedicated 500ms timer, not here
-               S.Uptime_System := Real (Stats_SHM.Uptime_System);
-               S.Uptime_Earu := Real (Stats_SHM.Uptime_Earu);
-               
-               declare
-                  D_TCMz : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TCMz.dat");
-                  D_Tg0X : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Tg0X.dat");
-                  D_TaLP : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaLP.dat");
-                  D_TaLT : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaLT.dat");
-                  D_TaLW : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaLW.dat");
-                  D_TaRF : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRF.dat");
-                  D_TaRT : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRT.dat");
-                  D_TaRW : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_TaRW.dat");
-                  
-                   -- Reads Ts0P sensor with case-insensitive fallback (Ts0P → Ts0p).
-                   function Get_Ts0P return Real is
-                     V : Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts0P.dat");
-                  begin
-                     if V = 0.0 then
-                        V := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts0p.dat");
-                     end if;
-                     return V;
-                  end Get_Ts0P;
-                  
-                   -- Reads Ts1P sensor with case-insensitive fallback (Ts1P → Ts1p).
-                   function Get_Ts1P return Real is
-                     V : Real := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts1P.dat");
-                  begin
-                     if V = 0.0 then
-                        V := Earu.IO.Read_Sensor_Real ("sensor_temp_Ts1p.dat");
-                     end if;
-                     return V;
-                  end Get_Ts1P;
-
-                  D_Ts0P : constant Real := Get_Ts0P;
-                  D_Ts1P : constant Real := Get_Ts1P;
-                  D_PSTR : constant Real := Earu.IO.Read_Sensor_Real ("sensor_temp_PSTR.dat");
-                  D_Fan0 : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F0Ac.dat");
-                  D_Fan1 : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F1Ac.dat");
-                  D_Fan0_Tg : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F0Tg.dat");
-                  D_Fan1_Tg : constant Real := Earu.IO.Read_Sensor_Real ("sensor_fan_F1Tg.dat");
-                  D_Turbo : constant Integer := Earu.IO.Read_Sensor_Integer ("sensor_TURBO_MODE.dat");
-               begin
-                   -- SMC temps: always read direct from disk, no Python fallback
-                   SMC.Ambient_Temp_K := D_Ts1P + 273.15;
-                   SMC.Humidity_Pct := Real (Stats_SHM.SMC_Humidity);
-                   SMC.TaLP_K := D_TaLP + 273.15;
-                   SMC.TaRF_K := D_TaRF + 273.15;
-
-                   SMC.Fan_RPMs := (D_Fan0, D_Fan1);
-                   SMC.Fan_Targets := (D_Fan0_Tg, D_Fan1_Tg);
-
-                   SMC.Temps.TCMz := D_TCMz;
-                   SMC.Temps.Tg0X := D_Tg0X;
-                   SMC.Temps.TaLP := D_TaLP;
-                   SMC.Temps.TaLT := D_TaLT;
-                   SMC.Temps.TaLW := D_TaLW;
-                   SMC.Temps.TaRF := D_TaRF;
-                   SMC.Temps.TaRT := D_TaRT;
-                   SMC.Temps.TaRW := D_TaRW;
-                   SMC.Temps.Ts0P := D_Ts0P;
-                   SMC.Temps.Ts1P := D_Ts1P;
-
-                   SMC.Temps.PSTR := D_PSTR;
-                   SMC.Power := D_PSTR;
-                   SMC.Power_Rate_Usage := D_PSTR;
-                  
-                  SMC.Turbo := D_Turbo;
-               end;
-               
-               SMC.Day_Power_Usage_Wh := Real (Stats_SHM.Day_Power_Wh);
-               SMC.Est_Today_Power_Wh := Real (Stats_SHM.Est_Today_Wh);
-               SMC.Accum_Power_Month_Wh := Real (Stats_SHM.Month_Power_Wh);
-               SMC.Accum_Power_Meter_Wh := Real (Stats_SHM.Meter_Power_Wh);
-               SMC.Thrust_N := Real (Stats_SHM.SMC_Thrust_N);
-               SMC.Power_Survival_W := Real (Stats_SHM.Power_Survival_W);
-
-               SMC.Pulse_Wake := Real (Stats_SHM.SMC_Pulse_Wake);
-                SMC.Pulse_Length := Real (Stats_SHM.SMC_Pulse_Len);
-                SMC.Heatflux_J := Real (Stats_SHM.Heatflux_J);
-                SMC.Airflow_Inlet_K := Real (Stats_SHM.SMC_Inlet_K);
-                SMC.Airflow_Outlet_K := Real (Stats_SHM.SMC_Outlet_K);
-
-                --  SMC Power Management Keys (read from sensor files)
-                SMC.Active_Perf_Mode    := Earu.IO.Read_Sensor_Real ("sensor_smc_aPMX.dat");
-                SMC.Max_Turbo_Power_Lim := Earu.IO.Read_Sensor_Real ("sensor_smc_mTPL.dat");
-                SMC.Max_User_Turbo_Lim  := Earu.IO.Read_Sensor_Real ("sensor_smc_mUTL.dat");
-                SMC.Pkg_Power_Tracking  := Earu.IO.Read_Sensor_Real ("sensor_smc_xPPT.dat");
-                SMC.Low_Power_Mode_Lim  := Earu.IO.Read_Sensor_Real ("sensor_smc_xLPM.dat");
-                SMC.Pkg_High_Pwr_Budget := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPB.dat");
-                SMC.Pkg_High_Pwr_Mode   := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPM.dat");
-                SMC.Pkg_High_Pwr_Curr   := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPC.dat");
-                SMC.Pkg_High_Pwr_Sensor := Earu.IO.Read_Sensor_Real ("sensor_smc_PHPS.dat");
-                SMC.Pwr_Mgmt_Vrm_Curr   := Earu.IO.Read_Sensor_Real ("sensor_smc_PMVC.dat");
-                SMC.Pwr_Supply_Curr     := Earu.IO.Read_Sensor_Real ("sensor_smc_PPSC.dat");
-                SMC.Pwr_Supply_Vrm      := Earu.IO.Read_Sensor_Real ("sensor_smc_PSVR.dat");
-                SMC.Pwr_Device_Batt_Rate:= Earu.IO.Read_Sensor_Real ("sensor_smc_PDBR.dat");
-                SMC.Pwr_Device_Temp_Rate:= Earu.IO.Read_Sensor_Real ("sensor_smc_PDTR.dat");
-               
-               SMC.Will_Bat_Survive := SMC.Pulse_Wake = 0.0;
-               if not SMC.Will_Bat_Survive then
-                  declare
-                     Seconds_Until_Midnight : constant Real := 86400.0 - Real (Long_Long_Integer (C_Time (null)) mod 86400);
-                     Hours_Until_Midnight   : constant Real := Seconds_Until_Midnight / 3600.0;
-                     Target_P               : Real := 10.0;
-                     Avg_P_Active           : constant Real := (if SMC.Power > 0.0 then SMC.Power else 10.0);
-                     P_Agg                  : Real;
-                  begin
-                     if Hours_Until_Midnight > 0.0 then
-                        Target_P := S.Battery_Energy_Wh / Hours_Until_Midnight;
-                     end if;
-                     P_Agg := (Avg_P_Active * 1.0 + 0.5 * 3599.0) / 3600.0;
-                     SMC.Must_Hibernate := (Target_P < P_Agg) and (S.Battery_Percent < 10);
-                  end;
-               else
-                  SMC.Must_Hibernate := False;
-               end if;
-               
-                -- Recompute cooling/work efficiency from final Power and Heatflux_J
-                if SMC.Power > 0.0 then
-                   SMC.Cooling_Efficiency_Pct := Real'Min (100.0, (SMC.Heatflux_J / SMC.Power) * 100.0);
-                else
-                   SMC.Cooling_Efficiency_Pct := 0.0;
-                end if;
-                SMC.Work_Efficiency_Pct    := Real'Max (0.0, 100.0 - SMC.Cooling_Efficiency_Pct);
-                SMC.Thermal_Inefficiency_W := Real'Max (0.0, SMC.Power - SMC.Heatflux_J);
-
-                Earu.State_Store.State_Buffer.Update_System (S, (T_CPU_ns => Long_Long_Integer (Stats_SHM.T_CPU_ns), T_RTC_ns => Long_Long_Integer (Stats_SHM.T_RTC_ns), T_GPU_ns => Long_Long_Integer (Stats_SHM.T_GPU_ns), T_ANE_ns => Long_Long_Integer (Stats_SHM.T_ANE_ns), T_DAT_ns => Long_Long_Integer (Stats_SHM.T_DAT_ns), T_SPU_ns => Long_Long_Integer (Stats_SHM.T_SPU_ns), SPU_Lat_ms => Real (Stats_SHM.SPU_Lat_ms), GPU_Lat_ms => Real (Stats_SHM.GPU_Lat_ms), ANE_Lat_ms => Real (Stats_SHM.ANE_Lat_ms), RTC_Jitter_ms => Real (Stats_SHM.RTC_Jitter_ms), Interference => Stats_SHM.Header.Padding /= 0, Log_Error => False, TS_ISO => Stats_SHM.TS_ISO));
-                Earu.State_Store.State_Buffer.Update_SMC (SMC);
-                        Earu.State_Store.State_Buffer.Update_Damage (Real (Stats_SHM.Fatigue_Cum), Real (Stats_SHM.Seu_Risk), Full.Seismic_Activity.Peak_G);
-               Last_S := Stats_SHM.Header.Update_Count;
-            end;
-         end if;
+         -- Stats_SHM reading removed: all system metrics now collected natively
+         -- by Earu.System_Bridge.System_Metrics_Task (CPU, mem, battery, SMC temps,
+         -- fans, power tracking, power management keys, thermodynamics, damage)
+         -- No Python dependency for system metrics.
 
          -- Process and update ML mood and heartbeat data from sidecar shared memory
          declare
@@ -1028,7 +873,7 @@ procedure Earu_Daemon is
                   S_ML.Drain_Time_Sleep   := Real (ML_Results.Drain_Time_Slp);
                   S_ML.Drain_Time_Hib     := Real (ML_Results.Drain_Time_Hib);
                   S_ML.Drain_Time_DeepHib := Real (ML_Results.Drain_Time_DHib);
-                  Earu.State_Store.State_Buffer.Update_System (S_ML, Full.Electron_Travel);
+                  Earu.State_Store.State_Buffer.Update_System (S_ML, Full.Interaction_Responsiveness);
                end;
             else
                -- Fallback to basic vibration-based heuristic if ML sidecar is unavailable
@@ -1112,11 +957,11 @@ procedure Earu_Daemon is
                   Alt        => State.Location.Alt
                );
                
-               if State.Electron_Travel.TS_ISO(1) = ' ' then
-                  State.Electron_Travel.TS_ISO (1 .. 10) := TS (1 .. 10);
-                  State.Electron_Travel.TS_ISO (11) := 'T';
-                  State.Electron_Travel.TS_ISO (12 .. 19) := TS (12 .. 19);
-                  State.Electron_Travel.TS_ISO (20 .. 26) := ".000000";
+               if State.Interaction_Responsiveness.TS_ISO(1) = ' ' then
+                  State.Interaction_Responsiveness.TS_ISO (1 .. 10) := TS (1 .. 10);
+                  State.Interaction_Responsiveness.TS_ISO (11) := 'T';
+                  State.Interaction_Responsiveness.TS_ISO (12 .. 19) := TS (12 .. 19);
+                  State.Interaction_Responsiveness.TS_ISO (20 .. 26) := ".000000";
                end if;
                Earu.IO.Write_EARU_Data (State, "/Volumes/EARU_dataIO/EARU_data.dat", Weather_SHM);
             end;
@@ -1233,14 +1078,13 @@ begin
          
          Earu.State_Store.State_Buffer.Update_Location (State.Location);
          Earu.State_Store.State_Buffer.Update_Damage_Fatigue (State.Seismic_Activity.Damage_Fatigue);
-         Earu.State_Store.State_Buffer.Update_System (State.System, State.Electron_Travel);
+         Earu.State_Store.State_Buffer.Update_System (State.System, State.Interaction_Responsiveness);
          Earu.State_Store.State_Buffer.Update_Sensors (State.Accel, State.Gyro, State.Orientation.Q);
       end;
    end;
 
-     Start_ML_Bridge;
-     Start_ADB_Mock;
-     Start_System_Bridge;
+      Start_ML_Bridge;
+      Start_ADB_Mock;
    Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
    Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
    Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");
@@ -1270,16 +1114,15 @@ begin
    Ada.Text_IO.Put_Line ("[*] Initializing Shared Memory (Waiting for Python Sidecar bootstrap)...");
    for I in 1 .. 180 loop
       Weather_SHM := Open_Weather_SHM ("/earu_v2_weather_shm");
-      Stats_SHM   := Open_Stats_SHM ("/earu_v2_stats_shm");
       ML_Results  := Open_ML_SHM ("/earu_v2_ml_shm");
-      if Weather_SHM /= null and Stats_SHM /= null and ML_Results /= null then
+      if Weather_SHM /= null and ML_Results /= null then
          Ada.Text_IO.Put_Line ("[ok] Shared Memory successfully mapped!");
          exit;
       end if;
       Ada.Text_IO.Put_Line ("[*] Shared Memory not ready yet, retrying in 1s (Attempt" & Integer'Image(I) & "/180)...");
       delay 1.0;
    end loop;
-   if Weather_SHM = null or Stats_SHM = null or ML_Results = null then
+   if Weather_SHM = null or ML_Results = null then
       Ada.Text_IO.Put_Line ("[!] FATAL: Shared Memory not available after 180s. Restarting EARU system...");
       -- Exit non-zero so launchd (KeepAlive=true) restarts start.sh --service,
       -- which pkills all EARU processes (daemon + Python sidecars) and relaunches.

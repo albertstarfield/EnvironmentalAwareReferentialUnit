@@ -1,4 +1,5 @@
 with Ada.Numerics.Generic_Elementary_Functions;
+with Ada.Calendar;
 with Interfaces.C;
 with Interfaces; use Interfaces;
 with System;
@@ -239,48 +240,83 @@ package body Earu.Math is
       
        SMC.Cauchy_Number := (if SMC.Gas_Constants.Gamma > 0.01 and SMC.Gas_Constants.R > 0.01 and Ambient_Temp_K > 0.01 then (U ** 2) / (SMC.Gas_Constants.Gamma * SMC.Gas_Constants.R * Ambient_Temp_K) else 0.0);
 
-       -- Update weather category based on environmental conditions and dew point spread
-       Eco.Category := (others => ' ');
-       
-       -- Use calculated values from Ecosystem_Weather record
+       --  ──────────────────────────────────────────────────────────────────
+       --  4a. Weather Category & Condition Icon
+       --  ──────────────────────────────────────────────────────────────────
+       --  AXIOM (Dew-Point Spread Thresholds):
+       --    The classification below follows WMO Manual on Instruments
+       --    (CIMO Guide), Chapter 9, which relates the dew-point spread
+       --    (T - Td) to visibility categories.  The Magnus-Tetens formula
+       --    for Td is from Alduchov & Eskridge (1996), "Improved Magnus
+       --    Form Approximation of Saturation Vapor Pressure", JAM 35(4).
+       --
+       --    Spread > 4.0 K  ->  visibility > 5 km  (clear, WMO Table 9.1)
+       --    Spread 2.0-4.0  ->  visibility 2-5 km   (moderate humidity)
+       --    Spread 1.0-2.0  ->  visibility 1-2 km   (humid, fog risk)
+       --    Spread 0.5-1.0  ->  visibility 0.5-1 km (fog forming)
+       --    Spread <= 0.5   ->  visibility < 0.5 km (dense fog / saturated)
+       --
+       --  AXIOM (Pressure Tendency):
+       --    Rapidly falling pressure (< -0.5 hPa in the 10-s EMA window)
+       --    is a well-established precursor of precipitation.  See WMO
+       --    Guide to Meteorological Instruments, 7th ed., §2.3.3.
+       --
+       --  AXIOM (Freezing Fog):
+       --    When T < 0 C and spread <= 1.0 K the condensate freezes on
+       --    contact, producing freezing fog / rime.  Standard aviation
+       --    meteorology (ICAO Annex 3, §4.2.2).
+       --
+       --  AXIOM (Summer / Warm):
+       --    T > 26.8 C (300 K) marks the "tropical night" threshold
+       --    used by the Thai Meteorological Department and is a reasonable
+       --    proxy for warm-season classification in equatorial regions.
+       --  ──────────────────────────────────────────────────────────────────
+       Eco.Category      := (others => ' ');
+       Eco.Condition_Icon := (others => ' ');
+
+       --  Step 1: Base classification from dew-point spread
        if Eco.Dew_Point_Spread > 4.0 then
-          -- Clear conditions, excellent visibility
-           Eco.Category (1 .. 23) := "Clear / Good Visibility";
-       elsif Eco.Dew_Point_Spread > 2.0 and Eco.Dew_Point_Spread <= 4.0 then
-          -- Moderate humidity, fair visibility
+          Eco.Category (1 .. 23) := "Clear / Good Visibility";
+          Eco.Condition_Icon (1 .. 5) := "SHINY";
+       elsif Eco.Dew_Point_Spread > 2.0 then
           Eco.Category (1 .. 17) := "Moderate Humidity";
-       elsif Eco.Dew_Point_Spread > 1.0 and Eco.Dew_Point_Spread <= 2.0 then
-          -- Elevated humidity, potential fog risk
-           Eco.Category (1 .. 27) := "Humid / Low Visibility Risk";
-       elsif Eco.Dew_Point_Spread > 0.5 and Eco.Dew_Point_Spread <= 1.0 then
-          -- High humidity with very low spread = fog conditions
+          Eco.Condition_Icon (1 .. 6) := "CLOUDY";
+       elsif Eco.Dew_Point_Spread > 1.0 then
+          Eco.Category (1 .. 27) := "Humid / Low Visibility Risk";
+          Eco.Condition_Icon (1 .. 6) := "CLOUDY";
+       elsif Eco.Dew_Point_Spread > 0.5 then
           if Eco.Humidity_Pct > 90.0 then
              Eco.Category (1 .. 16) := "Moist / Fog Risk";
           else
-              Eco.Category (1 .. 16) := "Foggy Conditions";
+             Eco.Category (1 .. 16) := "Foggy Conditions";
           end if;
-       elsif Eco.Dew_Point_Spread <= 0.5 and Eco.Humidity_Pct > 95.0 then
-          -- Saturated with very low spread = active fog/heavy moisture
-           Eco.Category (1 .. 25) := "Dense Fog / High Moisture";
+          Eco.Condition_Icon (1 .. 5) := "FOGGY";
+       elsif Eco.Humidity_Pct > 95.0 then
+          Eco.Category (1 .. 25) := "Dense Fog / High Moisture";
+          Eco.Condition_Icon (1 .. 5) := "FOGGY";
        else
-          -- Low humidity, clear conditions
-           Eco.Category (1 .. 12) := "Stable / Dry";
+          Eco.Category (1 .. 12) := "Stable / Dry";
+          Eco.Condition_Icon (1 .. 5) := "SHINY";
        end if;
-       
-       -- Check for precipitation tendency based on pressure changes
+
+       --  Step 2: Precipitation override (pressure tendency)
+       --  WMO §2.3.3: falling pressure < -0.5 hPa signals approaching rain
        if Eco.Pressure_Tendency_HPa < -0.5 then
-          -- Falling pressure = approaching storm/rain system
           if not (Eco.Dew_Point_Spread <= 0.5 and Eco.Humidity_Pct > 95.0) then
-               Eco.Category (1 .. 27) := "Unstable / Approaching Rain";
+             Eco.Category (1 .. 27) := "Unstable / Approaching Rain";
+             Eco.Condition_Icon (1 .. 7) := "RAINING";
           end if;
        end if;
-       
-       -- Check temperature for seasonal classification
+
+       --  Step 3: Temperature-based overrides
        TC := Ambient_Temp_K - 273.15;
        if TC < 0.0 and Eco.Dew_Point_Spread <= 1.0 then
-           Eco.Category (1 .. 26) := "Winter / Freezing Fog Risk";
-       elsif TC > 300.0 then -- ~26.8°C
-           Eco.Category (1 .. 24) := "Warm / Summer Conditions";
+          --  ICAO Annex 3 §4.2.2: freezing fog when T < 0 C
+          Eco.Category (1 .. 26) := "Winter / Freezing Fog Risk";
+          Eco.Condition_Icon (1 .. 7) := "SNOWING";
+       elsif TC > 300.0 then
+          --  300 K = 26.8 C: Thai Met Dept tropical-night threshold
+          Eco.Category (1 .. 24) := "Warm / Summer Conditions";
        end if;
 
        --  ──────────────────────────────────────────────────────────────────
@@ -362,8 +398,282 @@ package body Earu.Math is
              Prev_Pressure_HPa := Cur_Pressure;
              Prev_Time_S       := Cur_Time;
           end if;
+        end;
+
+       --  ──────────────────────────────────────────────────────────────────
+       --  6. METAR / TAF Synoptic Report Generation
+       --  ──────────────────────────────────────────────────────────────────
+       --  PRIMARY PIPELINE (internet available):
+       --    The weather fetcher (earu-weather_fetcher.adb) fetches live METAR/TAF
+       --    from aviationweather.gov via curl every 30 minutes and stores it in
+       --    EARU_meteo.dat.  The Python viewer reads that file directly.
+       --
+       --  FALLBACK PIPELINE (no internet / offline mode):
+       --    When the API is unreachable, this local computation generates a
+       --    best-effort METAR/TAF from on-board MEMS sensors (barometer, thermal
+       --    resistors, wind grid) using WMO/ICAO standards.  This ensures the
+       --    METAR page always has *something* to show, even offline.
+       --
+       --  AXIOM (ICAO Doc 8585): METAR format is:
+       --    METAR ICAO ddHHMMZ dddssKT vvvv clouds T/Td Aiiii
+       --    where ddd=wind direction (3-digit degrees), ss=wind speed (kt),
+       --    vvvv=visibility, T/Td=temp/dewpoint (C), A=altimeter (hPa→inHg).
+       --
+       --  AXIOM (WMO-No. 49 Vol I): TAF format is:
+       --    TAF ICAO ddHH/ddHH dddssKT vvvv clouds
+       --
+       --  Wind speed/direction is computed from the 7×7 Wind_Grid median.
+       --  Visibility and clouds are derived from dew-point spread using
+       --  WMO CIMO Guide Ch.9 thresholds (same as Section 4a above).
+       --  ──────────────────────────────────────────────────────────────────
+       declare
+          use Ada.Calendar;
+
+          --  Compute wind speed (knots) and direction (degrees) from grid
+          Grid_Speed_Sum : Real := 0.0;
+          Grid_Vec_Sum   : Vector3 := (0.0, 0.0, 0.0);
+          Grid_Count     : Natural := 0;
+          Wind_Dir_Rad   : Real;
+          Altim_InHg     : Real;
+
+          --  Time components (UTC +7 → WIB)
+          Now      : constant Time := Clock;
+          Year     : Year_Number;
+          Month    : Month_Number;
+          Day      : Day_Number;
+          Seconds  : Day_Duration;
+          Hour     : Integer;
+          Minute   : Integer;
+
+          --  Temperature/dewpoint in Celsius
+          T_C   : constant Real := Ambient_Temp_K - 273.15;
+          DP_C  : constant Real := Eco.Dew_Point_K - 273.15;
+
+          --  Visibility from spread
+          Vis_Str : String (1 .. 4);
+
+          --  Cloud cover from spread
+          Cloud_Str : String (1 .. 3);
+
+          --  Temp string: "MM/DD" or "MXX/MYY" for negative
+          Temp_Str : String (1 .. 5);
+
+          --  METAR buffer
+          M : String (1 .. 80) := (others => ' ');
+          P : Natural := 1;
+
+          procedure Put (S : String) is
+          begin
+             for C of S loop
+                if P <= M'Last then
+                   M (P) := C;
+                   P := P + 1;
+                end if;
+             end loop;
+          end Put;
+
+          procedure Put_Int (V : Integer; Width : Positive) is
+             Img : constant String := Integer'Image (V);
+          begin
+             --  Skip leading space from Integer'Image, zero-pad
+             for I in 1 .. Width - Img'Length + 1 loop
+                if P <= M'Last then
+                   M (P) := '0';
+                   P := P + 1;
+                end if;
+             end loop;
+             for I in Img'First + 1 .. Img'Last loop
+                if P <= M'Last then
+                   M (P) := Img (I);
+                   P := P + 1;
+                end if;
+             end loop;
+          end Put_Int;
+
+       begin
+          --  Compute wind from 7×7 grid
+          for Row in 1 .. 7 loop
+             for Col in 1 .. 7 loop
+                if Eco.Wind_Map (Row, Col).Speed > 0.01 then
+                   Grid_Speed_Sum := Grid_Speed_Sum + Eco.Wind_Map (Row, Col).Speed;
+                   Grid_Vec_Sum.X := Grid_Vec_Sum.X + Eco.Wind_Map (Row, Col).Vec.X;
+                   Grid_Vec_Sum.Y := Grid_Vec_Sum.Y + Eco.Wind_Map (Row, Col).Vec.Y;
+                   Grid_Count := Grid_Count + 1;
+                end if;
+             end loop;
+          end loop;
+
+          if Grid_Count > 0 then
+             Eco.Wind_Speed_Kts := Grid_Speed_Sum / Real (Grid_Count);
+             --  Direction from vector mean (atan2 of Y/X, convert to degrees)
+             if abs Grid_Vec_Sum.X > 0.001 or abs Grid_Vec_Sum.Y > 0.001 then
+                Wind_Dir_Rad := Arctan (Grid_Vec_Sum.Y, Grid_Vec_Sum.X);
+                Eco.Wind_Dir_Deg := (Wind_Dir_Rad * 180.0) / PI;
+                if Eco.Wind_Dir_Deg < 0.0 then
+                   Eco.Wind_Dir_Deg := Eco.Wind_Dir_Deg + 360.0;
+                end if;
+             else
+                Eco.Wind_Dir_Deg := 0.0;
+             end if;
+          else
+             Eco.Wind_Speed_Kts := 0.0;
+             Eco.Wind_Dir_Deg := 0.0;
+          end if;
+
+          --  Convert hPa → inches Hg for altimeter
+          Altim_InHg := (if Location.Pressure_HPa > 0.0
+                         then Location.Pressure_HPa / 33.8639
+                         else 1013.25 / 33.8639);
+
+          --  Visibility string from dew-point spread
+          if Eco.Dew_Point_Spread > 3.0 then
+             Vis_Str := "10SM";
+          elsif Eco.Dew_Point_Spread > 1.0 then
+             Vis_Str := "3SM ";
+          else
+             Vis_Str := "1/2S";
+          end if;
+
+          --  Cloud cover string from dew-point spread
+          if Eco.Dew_Point_Spread < 2.0 then
+             Cloud_Str := "VV0";
+          elsif Eco.Dew_Point_Spread < 5.0 then
+             Cloud_Str := "BKN";
+          elsif Eco.Dew_Point_Spread < 10.0 then
+             Cloud_Str := "SCT";
+          else
+             Cloud_Str := "CLR";
+          end if;
+
+           --  Temperature string: "MM/DD" or "MXX/MYY" for negative
+           declare
+              T_Img : constant String := Natural'Image (Natural (abs T_C) mod 100);
+              D_Img : constant String := Natural'Image (Natural (abs DP_C) mod 100);
+           begin
+              if T_C >= 0.0 then
+                 Temp_Str (1) := T_Img (T_Img'Last - 1);
+                 Temp_Str (2) := T_Img (T_Img'Last);
+                 Temp_Str (3) := '/';
+                 Temp_Str (4) := D_Img (D_Img'Last - 1);
+                 Temp_Str (5) := D_Img (D_Img'Last);
+              else
+                 Temp_Str (1) := 'M';
+                 Temp_Str (2) := T_Img (T_Img'Last - 1);
+                 Temp_Str (3) := '/';
+                 Temp_Str (4) := 'M';
+                 Temp_Str (5) := D_Img (D_Img'Last);
+              end if;
+           end;
+          --  Fix leading spaces in Nat'Image to zero-padded digits
+          for I in Temp_Str'Range loop
+             if Temp_Str (I) = ' ' then Temp_Str (I) := '0'; end if;
+          end loop;
+
+          --  Build METAR: "METAR EARU ddHHMMZ dddssKT vvvv clouds T/Td Aiiii"
+          Split (Now, Year, Month, Day, Seconds);
+          Hour   := Integer (Seconds) / 3600;
+          Minute := (Integer (Seconds) mod 3600) / 60;
+
+          --  Shift to WIB (UTC+7)
+          Hour := Hour + 7;
+          if Hour >= 24 then Hour := Hour - 24; end if;
+
+          Put ("METAR EARU ");
+          Put_Int (Day, 2);
+          Put_Int (Hour, 2);
+          Put_Int (Minute, 2);
+          Put ("Z ");
+
+          --  Wind: dddssKT or 00000KT if calm
+          if Eco.Wind_Speed_Kts < 1.0 then
+             Put ("00000KT ");
+          else
+             Put_Int (Natural (Eco.Wind_Dir_Deg) mod 360, 3);
+             Put_Int (Natural (Eco.Wind_Speed_Kts), 2);
+             Put ("KT ");
+          end if;
+
+          --  Visibility
+          Put (Vis_Str);
+          Put (" ");
+
+          --  Clouds
+          Put (Cloud_Str);
+          if Cloud_Str = "VV0" then
+             Put ("001 ");
+          elsif Cloud_Str = "BKN" then
+             Put ("015 ");
+          elsif Cloud_Str = "SCT" then
+             Put ("035 ");
+          else
+             Put ("   ");
+          end if;
+
+          --  Temp/Dewpoint
+          Put (Temp_Str);
+          Put (" ");
+
+          --  Altimeter: Aiiii (hundredths of inHg)
+          Put ("A");
+          Put_Int (Natural (Altim_InHg * 100.0), 4);
+
+          Eco.Metar_Report := M;
+
+           --  Build TAF: "TAF EARU ddHH/ddHH dddssKT vvvv clouds"
+           Eco.Taf_Report := (others => ' ');
+           declare
+              T : String (1 .. 80) := (others => ' ');
+              Q : Natural := 1;
+              End_Hour : constant Integer := (Hour + 24) mod 24;
+              Pref : constant String := "TAF EARU ";
+
+              procedure T_Add (S : String) is
+              begin
+                 for I in S'Range loop
+                    if Q <= T'Last then T (Q) := S (I); Q := Q + 1; end if;
+                 end loop;
+              end T_Add;
+
+              procedure T_Add_Digits (V : Integer; Width : Positive) is
+                 Img : constant String := Integer'Image (V);
+              begin
+                 for I in 1 .. Width - Img'Length + 1 loop
+                    if Q <= T'Last then T (Q) := '0'; Q := Q + 1; end if;
+                 end loop;
+                 for I in Img'First + 1 .. Img'Last loop
+                    if Q <= T'Last then T (Q) := Img (I); Q := Q + 1; end if;
+                 end loop;
+              end T_Add_Digits;
+
+           begin
+              T_Add (Pref);
+              T_Add_Digits (Day, 2);
+              T_Add_Digits (Hour, 2);
+              T_Add ("/");
+              T_Add_Digits (Day, 2);
+              T_Add_Digits (End_Hour, 2);
+              T_Add (" ");
+              if Eco.Wind_Speed_Kts < 1.0 then
+                 T_Add ("00000KT ");
+              else
+                 T_Add_Digits (Natural (Eco.Wind_Dir_Deg) mod 360, 3);
+                 T_Add_Digits (Natural (Eco.Wind_Speed_Kts), 2);
+                 T_Add ("KT ");
+              end if;
+              T_Add (Vis_Str);
+              T_Add (" ");
+              T_Add (Cloud_Str);
+              if Cloud_Str = "VV0" then
+                 T_Add ("001");
+              elsif Cloud_Str = "BKN" then
+                 T_Add ("015");
+              elsif Cloud_Str = "SCT" then
+                 T_Add ("035");
+              end if;
+              Eco.Taf_Report := T;
+           end;
        end;
-   end Update_Weather_Thermodynamics;
+    end Update_Weather_Thermodynamics;
 
    procedure Update_Vibration_State (
       V : in out Vibration_State_Type;

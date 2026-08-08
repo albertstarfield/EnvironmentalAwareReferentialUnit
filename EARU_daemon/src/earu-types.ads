@@ -129,6 +129,11 @@ package Earu.Types is
 
    type Ecosystem_Weather_Type is record
       Category              : aliased String (1 .. 32) := (others => ' ');
+      --  Condition_Icon: short display token computed by the daemon from
+      --  the same thresholds as Category.  The viewer reads this instead
+      --  of duplicating the classification locally.
+      --  Valid values: "SHINY", "CLOUDY", "FOGGY", "RAINING", "SNOWING"
+      Condition_Icon        : aliased String (1 .. 12) := (others => ' ');
       Dew_Point_K           : aliased Real := 273.15;
       Dew_Point_Spread      : aliased Real := 0.0;
       Humidity_Pct          : aliased Real := 50.0;
@@ -137,6 +142,14 @@ package Earu.Types is
       API_Humidity_Pct      : aliased Real := 50.0;
       Hum_Offset            : aliased Real := 0.0;
       SMC_P_Offset_HPa      : aliased Real := 0.0;
+      --  METAR/TAF: synoptic aviation weather strings computed by earu-math.adb
+      --  from the same sensor data used for Category/Condition_Icon.
+      --  Axiom: [ICAO Doc 8585] METAR format:  Station ddHHMMZ wind vis clouds temp/dp altim.
+      --  Axiom: [WMO-No. 49 Vol I] TAF format: Station ddHH/ddHH wind vis clouds.
+      Metar_Report          : aliased String (1 .. 80) := (others => ' ');
+      Taf_Report            : aliased String (1 .. 80) := (others => ' ');
+      Wind_Speed_Kts        : aliased Real := 0.0;
+      Wind_Dir_Deg          : aliased Real := 0.0;
       Wind_Map              : aliased Wind_Grid := (others => (others => (0.0, (0.0, 0.0, 0.0), 1013.25, 293.15)));
       Stats                 : aliased Stats_Type := (others => <>);
    end record;
@@ -287,7 +300,7 @@ package Earu.Types is
          Total_Network_Bandwidth_Down_Kbps : aliased Real := 0.0;
       end record;
 
-   type Electron_Travel_Type is record
+   type Interaction_Responsiveness_Type is record
       T_CPU_ns               : aliased Long_Long_Integer := 0;
       T_RTC_ns               : aliased Long_Long_Integer := 0;
       T_GPU_ns               : aliased Long_Long_Integer := 0;
@@ -394,7 +407,7 @@ package Earu.Types is
       Seismic_Activity    : aliased Seismic_Activity_Type := (others => <>);
       System              : aliased System_Stats_Type := (others => <>);
       SMC                 : aliased SMC_Type := (others => <>);
-      Electron_Travel     : aliased Electron_Travel_Type := (others => <>);
+      Interaction_Responsiveness : aliased Interaction_Responsiveness_Type := (others => <>);
       ALS                 : aliased ALS_Type := (others => <>);
       User_Entity         : aliased User_Detection_Type := (others => <>);
       Pedometer           : aliased Pedometer_State_Type := (others => <>);

@@ -16,6 +16,7 @@
 #include <mach/vm_page_size.h>
 #include <mach/vm_map.h>
 #include <mach/mach_time.h>
+#include <mach/clock.h>
 
 /* ---------- CPU Usage (delta-based) ---------- */
 
@@ -134,4 +135,57 @@ double get_uptime_sec(void) {
         return (double)(now - boottime.tv_sec);
     }
     return 0.0;
+}
+
+/* ---------- Hardware Clocks ---------- */
+
+/*
+ * Returns monotonic time in nanoseconds via mach_absolute_time().
+ * This is the high-resolution monotonic clock (analogous to
+ * time.perf_counter_ns() in Python).
+ */
+long long get_monotonic_ns(void) {
+    uint64_t abs_time = mach_absolute_time();
+    mach_timebase_info_data_t info;
+    mach_timebase_info(&info);
+    return (long long)(abs_time * info.numer / info.denom);
+}
+
+/*
+ * Returns wall-clock time in nanoseconds (time.time_ns() equivalent).
+ */
+long long get_wallclock_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
+}
+
+/*
+ * Fills year, month, day, hour, min, sec with current wall-clock
+ * date/time fields (local time).  Used for day/month reset logic.
+ * Returns 1 on success, 0 on failure.
+ */
+int get_datetime_fields(int *year, int *month, int *day,
+                        int *hour, int *min, int *sec) {
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    if (tm == NULL) return 0;
+    *year  = tm->tm_year + 1900;
+    *month = tm->tm_mon + 1;
+    *day   = tm->tm_mday;
+    *hour  = tm->tm_hour;
+    *min   = tm->tm_min;
+    *sec   = tm->tm_sec;
+    return 1;
+}
+
+/*
+ * Returns seconds since midnight (local time).  Used to compute
+ * remaining_hours_until_midnight for est_today power prediction.
+ */
+double get_seconds_since_midnight(void) {
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    if (tm == NULL) return 0.0;
+    return (double)(tm->tm_hour * 3600 + tm->tm_min * 60 + tm->tm_sec);
 }
