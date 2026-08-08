@@ -8,27 +8,23 @@
 with Earu.Types; use Earu.Types;
 with Earu.IO;
 with Earu.State_Store;
-with Interfaces.C;
 with Ada.Text_IO;
-with Ada.Real_Time;
+with Ada.Real_Time; use Ada.Real_Time;
 with Ada.Numerics.Generic_Elementary_Functions;
 
 package body Earu.System_Bridge is
-
-   use type Interfaces.C.int;
-   use type Interfaces.C.double;
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
    use Real_Funcs;
 
    --  Constants for task timing
-   POLL_INTERVAL : constant Ada.Real_Time.Duration := Ada.Real_Time.Seconds (2);
+   POLL_INTERVAL : constant Time_Span := Seconds (2);
    --  Battery details (design/energy/full/health) refresh every 60 seconds
-   BATT_DETAIL_INTERVAL : constant Ada.Real_Time.Duration := Ada.Real_Time.Seconds (60);
+   BATT_DETAIL_INTERVAL : constant Time_Span := Seconds (60);
    --  Power tracking refresh every 5 seconds
-   POWER_TRACK_INTERVAL : constant Ada.Real_Time.Duration := Ada.Real_Time.Seconds (5);
+   POWER_TRACK_INTERVAL : constant Time_Span := Seconds (5);
    --  SMC power management keys refresh every 10 seconds
-   SMC_KEYS_INTERVAL : constant Ada.Real_Time.Duration := Ada.Real_Time.Seconds (10);
+   SMC_KEYS_INTERVAL : constant Time_Span := Seconds (10);
 
    --  Read a single-value sensor file (temperature, fan RPM, etc.)
    function Read_Sensor (Filename : String) return Real is
@@ -238,7 +234,6 @@ package body Earu.System_Bridge is
 
    --  Main task body: polls system metrics and updates state store.
    task body System_Metrics_Task is
-      use Ada.Real_Time;
 
       Next_Batt_Detail_Time : Time := Clock + BATT_DETAIL_INTERVAL;
       Next_Power_Track_Time : Time := Clock + POWER_TRACK_INTERVAL;

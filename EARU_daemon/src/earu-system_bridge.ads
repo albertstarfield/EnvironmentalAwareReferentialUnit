@@ -5,7 +5,6 @@
 --  HID idle time, and power tracking data.  Writes directly to the state store,
 --  eliminating the need for Stats_SHM and the Python sidecar for system metrics.
 --
-with Earu.Types; use Earu.Types;
 with Interfaces.C;
 
 package Earu.System_Bridge is
