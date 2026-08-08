@@ -1,5 +1,3 @@
-with Earu.Types; use Earu.Types;
-
 package Earu.Math.BlueMarble is
    -- Calculate solar time anchors (dawn, noon, dusk, etc.)
    function Calculate_Time_Anchors (

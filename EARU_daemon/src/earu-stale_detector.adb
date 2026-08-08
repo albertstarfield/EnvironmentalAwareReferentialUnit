@@ -1,6 +1,5 @@
 with Ada.Text_IO;
 with Interfaces.C;
-with Earu.State_Store;
 with Earu.Types;
 
 package body Earu.Stale_Detector is
@@ -17,7 +16,6 @@ package body Earu.Stale_Detector is
    function C_System (Cmd : Interfaces.C.char_array) return Interfaces.C.int;
    pragma Import (C, C_System, "system");
 
-   use type Interfaces.C.int;
    use type Interfaces.Unsigned_64;
 
    -- Cross-check battery via independent pmset invocation
@@ -59,24 +57,6 @@ package body Earu.Stale_Detector is
             return False;
       end;
    end Cross_Check_Battery;
-
-   -- Parse battery percent from pmset string stored in state
-   function Parse_Pmset_Pct (S : String) return Integer is
-   begin
-      for I in S'Range loop
-         if S (I) = '%' and I > S'First then
-            declare
-               Start_Idx : Integer := I - 1;
-            begin
-               while Start_Idx > S'First and then S (Start_Idx - 1) in '0' .. '9' loop
-                  Start_Idx := Start_Idx - 1;
-               end loop;
-               return Integer'Value (S (Start_Idx .. I - 1));
-            end;
-         end if;
-      end loop;
-      return -1;
-   end Parse_Pmset_Pct;
 
    task body Watchdog is
       Running       : Boolean := False;
@@ -127,11 +107,12 @@ package body Earu.Stale_Detector is
             declare
                Pct     : aliased Interfaces.C.int;
                St      : aliased Interfaces.C.int;
-               Pm_Buf  : Interfaces.C.char_array (0 .. 1023);
+                Pm_Buf  : Interfaces.C.char_array (0 .. 1023) := (others => Interfaces.C.nul);
                Cur_Pct : Integer;
                Cross_Pct : Integer;
             begin
                C_Get_Battery (Pct'Access, St'Access, Pm_Buf, 1024);
+               pragma Unreferenced (Pm_Buf);
                Cur_Pct := Integer (Pct);
 
                if Last_Batt_Pct >= 0 then

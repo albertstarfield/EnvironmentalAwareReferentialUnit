@@ -14,6 +14,43 @@ package body Earu.Math is
 
    PI : constant Real := 3.14159265358979323846;
 
+   --  ─────────────────────────────────────────────────────────────────────
+   --  Multi-Time-Scale Pressure Tendency Tracker
+   --  ─────────────────────────────────────────────────────────────────────
+   --  The monitor task ticks at ~10 Hz (0.1 s per tick). Each Stat_Bucket
+   --  in Eco.Stats holds a smoothed pressure derivative (HPa/s) computed
+   --  via an Exponential Moving Average (EMA) over a different time window:
+   --
+   --    S_0_1   → 0.1 s window  (raw, α = 1.0)        — immediate response
+   --    S_1_0   → 1.0 s window  (α = 2/(10+1))        — short-term
+   --    S_10_0  → 10.0 s window (α = 2/(100+1))       — medium-term
+   --    S_100_0 → 100.0 s window (α = 2/(1000+1))     — long-term / trend
+   --
+   --  EMA formula:  EMA_new = α · x + (1 − α) · EMA_old
+   --
+   --  State classification (based on |smoothed dP/dt|):
+   --    'N' (Nominal):  |dP/dt| < 0.05 HPa/s   (stable barometric)
+   --    'W' (Warning):  0.05 ≤ |dP/dt| < 0.2    (moderate pressure change)
+   --    'C' (Critical): |dP/dt| ≥ 0.2            (rapid change / storm)
+   --
+   --  Direction (Dir):
+   --    "↑" rising,  "↓" falling,  "↔" stable (|dP/dt| < 0.01)
+   --  ─────────────────────────────────────────────────────────────────────
+   Prev_Pressure_HPa  : Real := 0.0;
+   Prev_Time_S        : Real := 0.0;
+   Stats_Initialized  : Boolean := False;
+
+   --  EMA smoothing factors for 10 Hz tick rate
+   Alpha_0_1 : constant Real := 1.0;      -- no smoothing (raw)
+   Alpha_1_0 : constant Real := 0.1818;   -- 2 / (10  + 1)
+   Alpha_10  : constant Real := 0.0198;   -- 2 / (100 + 1)
+   Alpha_100 : constant Real := 0.002;    -- 2 / (1000 + 1)
+
+   --  State thresholds (HPa/s)
+   Warn_Thresh  : constant Real := 0.05;
+   Crit_Thresh  : constant Real := 0.2;
+   Dir_Thresh   : constant Real := 0.01;
+
    function Haversine (Lat1, Lon1, Lat2, Lon2 : Real) return Real is
       DLat : constant Real := (Lat2 - Lat1) * (PI / 180.0);
       DLon : constant Real := (Lon2 - Lon1) * (PI / 180.0);
@@ -208,43 +245,124 @@ package body Earu.Math is
        -- Use calculated values from Ecosystem_Weather record
        if Eco.Dew_Point_Spread > 4.0 then
           -- Clear conditions, excellent visibility
-          Eco.Category (1 .. 15) := "Clear / Good Visibility";
+           Eco.Category (1 .. 23) := "Clear / Good Visibility";
        elsif Eco.Dew_Point_Spread > 2.0 and Eco.Dew_Point_Spread <= 4.0 then
           -- Moderate humidity, fair visibility
           Eco.Category (1 .. 17) := "Moderate Humidity";
        elsif Eco.Dew_Point_Spread > 1.0 and Eco.Dew_Point_Spread <= 2.0 then
           -- Elevated humidity, potential fog risk
-          Eco.Category (1 .. 17) := "Humid / Low Visibility Risk";
+           Eco.Category (1 .. 27) := "Humid / Low Visibility Risk";
        elsif Eco.Dew_Point_Spread > 0.5 and Eco.Dew_Point_Spread <= 1.0 then
           -- High humidity with very low spread = fog conditions
           if Eco.Humidity_Pct > 90.0 then
              Eco.Category (1 .. 16) := "Moist / Fog Risk";
           else
-             Eco.Category (1 .. 17) := "Foggy Conditions";
+              Eco.Category (1 .. 16) := "Foggy Conditions";
           end if;
        elsif Eco.Dew_Point_Spread <= 0.5 and Eco.Humidity_Pct > 95.0 then
           -- Saturated with very low spread = active fog/heavy moisture
-          Eco.Category (1 .. 20) := "Dense Fog / High Moisture";
+           Eco.Category (1 .. 25) := "Dense Fog / High Moisture";
        else
           -- Low humidity, clear conditions
-          Eco.Category (1 .. 8) := "Stable / Dry";
+           Eco.Category (1 .. 12) := "Stable / Dry";
        end if;
        
        -- Check for precipitation tendency based on pressure changes
        if Eco.Pressure_Tendency_HPa < -0.5 then
           -- Falling pressure = approaching storm/rain system
           if not (Eco.Dew_Point_Spread <= 0.5 and Eco.Humidity_Pct > 95.0) then
-             Eco.Category (1 .. 22) := "Unstable / Approaching Precipitation";
+               Eco.Category (1 .. 27) := "Unstable / Approaching Rain";
           end if;
        end if;
        
        -- Check temperature for seasonal classification
        TC := Ambient_Temp_K - 273.15;
        if TC < 0.0 and Eco.Dew_Point_Spread <= 1.0 then
-          Eco.Category (1 .. 12) := "Winter / Freezing Fog Risk";
+           Eco.Category (1 .. 26) := "Winter / Freezing Fog Risk";
        elsif TC > 300.0 then -- ~26.8°C
-          Eco.Category (1 .. 17) := "Warm / Summer Conditions";
+           Eco.Category (1 .. 24) := "Warm / Summer Conditions";
        end if;
+
+       --  ──────────────────────────────────────────────────────────────────
+       --  5. Multi-Time-Scale Pressure Tendency Tracker
+       --  ──────────────────────────────────────────────────────────────────
+       --  Computes the first derivative of barometric pressure (dP/dt in
+       --  HPa/s) and applies four parallel Exponential Moving Averages at
+       --  different time horizons.  Each bucket in Eco.Stats is populated
+       --  with the smoothed tendency, its state classification, trend
+       --  direction, and drift (change from previous tick).
+       --
+       --  The 10-second window value is also written to
+       --  Eco.Pressure_Tendency_HPa for the storm classification logic
+       --  above (section 4).
+       --
+       --  On the very first tick we seed Prev_Pressure and skip the
+       --  derivative to avoid a spurious spike.
+       --  ──────────────────────────────────────────────────────────────────
+       declare
+          Cur_Pressure : constant Real := Location.Pressure_HPa;
+          Cur_Time     : constant Real := Real (C_Time (System.Null_Address));
+          DT_P         : Real;
+          Raw_DPDt     : Real;  -- raw pressure derivative (HPa/s)
+          Abs_DPDt     : Real;  -- |dP/dt|
+          function Classify_State (V : Real) return Character is
+          begin
+             if V >= Crit_Thresh then return 'C';
+             elsif V >= Warn_Thresh then return 'W';
+             else return 'N';
+             end if;
+          end Classify_State;
+           function Trend_Dir (V : Real) return String is
+           begin
+              --  ASCII-safe direction markers (UTF-8 arrows not supported
+              --  by GNAT in string literals).  The JSON viewer interprets
+              --  these as rising/falling/stable indicators.
+              if V > Dir_Thresh  then return "^^^";
+              elsif V < -Dir_Thresh then return "vvv";
+              else return "---";
+              end if;
+           end Trend_Dir;
+          procedure Update_Bucket (
+             Bkt     : in out Stat_Bucket;
+             Alpha   : in     Real;
+             Raw     : in     Real
+          ) is
+             Old_Val : constant Real := Bkt.Val;
+          begin
+             --  EMA update:  new = α · raw + (1 − α) · old
+             Bkt.Val   := Alpha * Raw + (1.0 - Alpha) * Old_Val;
+             Abs_DPDt  := (if Bkt.Val < 0.0 then -Bkt.Val else Bkt.Val);
+             Bkt.State := Classify_State (Abs_DPDt);
+             Bkt.Dir   := Trend_Dir (Bkt.Val);
+             Bkt.Drift := Bkt.Val - Old_Val;
+          end Update_Bucket;
+       begin
+          if not Stats_Initialized then
+             --  First tick: seed previous values, skip derivative
+             Prev_Pressure_HPa := Cur_Pressure;
+             Prev_Time_S       := Cur_Time;
+             Stats_Initialized := True;
+          else
+             DT_P := Cur_Time - Prev_Time_S;
+             if DT_P > 0.0 then
+                --  Raw pressure derivative in HPa/s
+                Raw_DPDt := (Cur_Pressure - Prev_Pressure_HPa) / DT_P;
+
+                --  Update each time-scale bucket with its own α
+                Update_Bucket (Eco.Stats.S_0_1,   Alpha_0_1, Raw_DPDt);
+                Update_Bucket (Eco.Stats.S_1_0,   Alpha_1_0, Raw_DPDt);
+                Update_Bucket (Eco.Stats.S_10_0,  Alpha_10,  Raw_DPDt);
+                Update_Bucket (Eco.Stats.S_100_0, Alpha_100, Raw_DPDt);
+
+                --  Expose the 10-second tendency for storm classification
+                Eco.Pressure_Tendency_HPa := Eco.Stats.S_10_0.Val;
+             end if;
+
+             --  Advance state for next tick
+             Prev_Pressure_HPa := Cur_Pressure;
+             Prev_Time_S       := Cur_Time;
+          end if;
+       end;
    end Update_Weather_Thermodynamics;
 
    procedure Update_Vibration_State (
@@ -254,6 +372,7 @@ package body Earu.Math is
       Triggered : out Boolean;
       Trigger_Ratio : out Real
    ) is
+      pragma Unreferenced (FS);
       E : constant Real := Mag * Mag;
       Ratio : Real;
       STA_N : constant array (1 .. 3) of Real := (3.0, 15.0, 50.0);
@@ -295,6 +414,7 @@ package body Earu.Math is
       Amp : Real;
       NSrc : Integer
    ) return Event_Type is
+      pragma Unreferenced (Ratio);
       Ev : Event_Type;
    begin
       Ev.Time := 0.0; -- Set by caller
@@ -305,8 +425,8 @@ package body Earu.Math is
       if NSrc >= 4 and Amp > 0.05 then
          Ev.Sev := (others => ' '); Ev.Sev (1 .. 11) := "CHOC_MAJEUR";
          -- UTF-8 for ⚠️ (U+26A0 U+FE0F)
-         Ev.Sym := (others => ' '); 
-         Ev.Sym (1 .. 6) := (Character'Val (16#E2#), Character'Val (16#9A#), Character'Val (16#A0#), 
+         Ev.Sym := (others => ' ');
+         Ev.Sym (1 .. 6) := (Character'Val (16#E2#), Character'Val (16#9A#), Character'Val (16#A0#),
                              Character'Val (16#EF#), Character'Val (16#B8#), Character'Val (16#8F#));
          Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 5) := "MAJOR";
       elsif NSrc >= 3 and Amp > 0.02 then
@@ -317,14 +437,17 @@ package body Earu.Math is
       elsif Amp > 0.003 then
          Ev.Sev := (others => ' '); Ev.Sev (1 .. 9) := "VIBRATION";
          -- UTF-8 for ● (U+25CF)
-         Ev.Sym := (others => ' '); 
+         Ev.Sym := (others => ' ');
          Ev.Sym (1 .. 3) := (Character'Val (16#E2#), Character'Val (16#97#), Character'Val (16#8F#));
+         Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 6) := "vibrtn";
       else
          Ev.Sev := (others => ' '); Ev.Sev (1 .. 9) := "MICRO_VIB";
          -- UTF-8 for .
          Ev.Sym := (others => ' '); Ev.Sym (1 .. 1) := ".";
          Ev.Lbl := (others => ' '); Ev.Lbl (1 .. 9) := "micro-vib";
       end if;
+      -- Always set source label
+      Ev.Src := (others => ' '); Ev.Src (1 .. 3) := "SPU";
       return Ev;
    end Classify_Event;
 
@@ -342,7 +465,7 @@ package body Earu.Math is
       G_Const : constant Real := 9.80665;
       W : Vector3;
       A_Dyn_Mag : Real;
-      Is_Moving_Type : Boolean;
+      Is_Moving_Type : Boolean := False;
       Raw_Mag : Real;
       Damping : Real;
       FS : constant Real := (if DT > 0.0 then 1.0 / DT else 800.0);
@@ -360,6 +483,9 @@ package body Earu.Math is
       Sound_Product : Real;
       Speed_Of_Sound : Real;
    begin
+      -- Compute motion classification first (used by stationary detection below)
+      Is_Moving_Type := not (Motion_Type (Motion_Type'First .. Motion_Type'First + 9) = "Stationary" or else Motion_Type (Motion_Type'First .. Motion_Type'First + 16) = "Stowed / Passive ");
+
       -- Stationary Detection and Bias Estimation (AI-IMU-DR enhancement)
       -- When stationary, estimate gyro/accel biases and apply zero-velocity constraints
       if Gyro_Mag < 0.5 and then not Is_Moving_Type then
@@ -474,7 +600,7 @@ package body Earu.Math is
       end;
       
       -- 5. Dynamic Velocity Damping (Advanced ZUPT)
-      Is_Moving_Type := not (Motion_Type (1 .. 10) = "Stationary" or else Motion_Type (1 .. 17) = "Stowed / Passive ");
+      -- Is_Moving_Type already computed at procedure start
       
       declare
          Damping_V : Real;
@@ -583,7 +709,6 @@ package body Earu.Math is
       -- If altitude is at or below Dead Sea level (-430m) with high sinking rate (> 500 fpm),
       -- or if we are below Earth's maximum depth (-10994m), trigger INOP red flag state.
       declare
-         use type C.long;
          Now_T : constant Real := Real (C_Time (System.Null_Address));
       begin
          if not Loc.Alt_Inop then

@@ -3,7 +3,6 @@ with Ada.Numerics.Generic_Elementary_Functions;
 package body Earu.Math.BlueMarble is
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
-   use Real_Funcs;
 
    PI : constant Real := 3.14159265358979323846;
    Deg2Rad : constant Real := PI / 180.0;

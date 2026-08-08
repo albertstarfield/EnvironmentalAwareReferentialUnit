@@ -1,5 +1,3 @@
-with Earu.Types; use Earu.Types;
-
 package Earu.Ntrip is
    pragma SPARK_Mode (Off);
 

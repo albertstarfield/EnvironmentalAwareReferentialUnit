@@ -26,15 +26,14 @@ package body Earu.Shm is
 
    function Map_Generic (Name : String; Size : size_t) return System.Address is
       C_Name : chars_ptr := New_String (Name);
-      FD : int := shm_open (C_Name, O_RDONLY, 0);
-      Addr : System.Address;
+      FD : constant int := shm_open (C_Name, O_RDONLY, 0);
+      Addr : constant System.Address := mmap (System.Null_Address, Size, PROT_READ, MAP_SHARED, FD, 0);
    begin
       Free (C_Name);
       if FD < 0 then
          return System.Null_Address;
       end if;
 
-      Addr := mmap (System.Null_Address, Size, PROT_READ, MAP_SHARED, FD, 0);
       if Addr = To_Address (Integer_Address (16#FFFFFFFFFFFFFFFF#)) then
          return System.Null_Address;
       end if;
@@ -43,42 +42,42 @@ package body Earu.Shm is
    end Map_Generic;
 
    function Open_IMU_SHM (Name : String) return IMU_SHM_Ptr is
-      Addr : System.Address := Map_Generic (Name, size_t (IMU_SHM'Max_Size_In_Storage_Elements));
+      Addr : constant System.Address := Map_Generic (Name, size_t (IMU_SHM'Max_Size_In_Storage_Elements));
    begin
       if Addr = System.Null_Address then return null; end if;
       return IMU_SHM_Ptr (IMU_Conv.To_Pointer (Addr));
    end Open_IMU_SHM;
 
    function Open_Weather_SHM (Name : String) return Weather_SHM_Ptr is
-      Addr : System.Address := Map_Generic (Name, size_t (Weather_SHM'Max_Size_In_Storage_Elements));
+      Addr : constant System.Address := Map_Generic (Name, size_t (Weather_SHM'Max_Size_In_Storage_Elements));
    begin
       if Addr = System.Null_Address then return null; end if;
       return Weather_SHM_Ptr (Weather_Conv.To_Pointer (Addr));
    end Open_Weather_SHM;
 
    function Open_ML_SHM (Name : String) return ML_SHM_Ptr is
-      Addr : System.Address := Map_Generic (Name, size_t (ML_SHM'Max_Size_In_Storage_Elements));
+      Addr : constant System.Address := Map_Generic (Name, size_t (ML_SHM'Max_Size_In_Storage_Elements));
    begin
       if Addr = System.Null_Address then return null; end if;
       return ML_SHM_Ptr (ML_Conv.To_Pointer (Addr));
    end Open_ML_SHM;
 
    function Open_Stats_SHM (Name : String) return Stats_SHM_Ptr is
-      Addr : System.Address := Map_Generic (Name, size_t (Stats_SHM'Max_Size_In_Storage_Elements));
+      Addr : constant System.Address := Map_Generic (Name, size_t (Stats_SHM'Max_Size_In_Storage_Elements));
    begin
       if Addr = System.Null_Address then return null; end if;
       return Stats_SHM_Ptr (Stats_Conv.To_Pointer (Addr));
    end Open_Stats_SHM;
 
    function Open_Lid_SHM (Name : String) return Lid_SHM_Ptr is
-      Addr : System.Address := Map_Generic (Name, 12);
+      Addr : constant System.Address := Map_Generic (Name, 12);
    begin
       if Addr = System.Null_Address then return null; end if;
       return Lid_SHM_Ptr (Lid_Data_Conv.To_Pointer (Addr));
    end Open_Lid_SHM;
 
    function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr is
-      Addr : System.Address := Map_Generic (Name, 130);
+      Addr : constant System.Address := Map_Generic (Name, 130);
    begin
       if Addr = System.Null_Address then return null; end if;
       return ALS_SHM_Record_Ptr (ALS_Data_Conv.To_Pointer (Addr + Storage_Offset (28)));
@@ -86,7 +85,7 @@ package body Earu.Shm is
 
    function Create_And_Map_Generic (Name : String; Size : size_t) return System.Address is
       C_Name : chars_ptr := New_String (Name);
-      FD : int := shm_open (C_Name, 514, 8#666#);
+      FD : constant int := shm_open (C_Name, 514, 8#666#);
       Addr : System.Address;
       Ret : int;
       pragma Unreferenced (Ret);
@@ -109,21 +108,21 @@ package body Earu.Shm is
    end Create_And_Map_Generic;
 
    function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr is
-      Addr : System.Address := Create_And_Map_Generic (Name, size_t (IMU_SHM'Max_Size_In_Storage_Elements));
+      Addr : constant System.Address := Create_And_Map_Generic (Name, size_t (IMU_SHM'Max_Size_In_Storage_Elements));
    begin
       if Addr = System.Null_Address then return null; end if;
       return IMU_SHM_Ptr (IMU_Conv.To_Pointer (Addr));
    end Create_IMU_SHM;
 
    function Create_Lid_SHM (Name : String) return Lid_SHM_Ptr is
-      Addr : System.Address := Create_And_Map_Generic (Name, 12);
+      Addr : constant System.Address := Create_And_Map_Generic (Name, 12);
    begin
       if Addr = System.Null_Address then return null; end if;
       return Lid_SHM_Ptr (Lid_Data_Conv.To_Pointer (Addr));
    end Create_Lid_SHM;
 
    function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr is
-      Addr : System.Address := Create_And_Map_Generic (Name, 130);
+      Addr : constant System.Address := Create_And_Map_Generic (Name, 130);
    begin
       if Addr = System.Null_Address then return null; end if;
       return ALS_SHM_Record_Ptr (ALS_Data_Conv.To_Pointer (Addr + Storage_Offset (28)));
@@ -132,7 +131,7 @@ package body Earu.Shm is
    package DR_Conv is new System.Address_To_Access_Conversions (DR_SHM);
 
    function Create_DR_SHM (Name : String) return DR_SHM_Ptr is
-      Addr : System.Address := Create_And_Map_Generic (Name, size_t (DR_SHM'Max_Size_In_Storage_Elements));
+      Addr : constant System.Address := Create_And_Map_Generic (Name, size_t (DR_SHM'Max_Size_In_Storage_Elements));
    begin
       if Addr = System.Null_Address then return null; end if;
       return DR_SHM_Ptr (DR_Conv.To_Pointer (Addr));

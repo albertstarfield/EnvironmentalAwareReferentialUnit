@@ -1,4 +1,3 @@
-with Earu.Types; use Earu.Types;
 with Earu.Math;
 with Ada.Numerics.Generic_Elementary_Functions;
 
@@ -7,7 +6,7 @@ package body Earu.Bridge is
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
 
    procedure Update_Structural_Fatigue (State : in out Earu_State) is
-      use Earu.Math;
+
       -- --- Structural Health Monitoring (SHM) Pipeline ---
       -- This procedure integrates real-time sensor data into a cumulative damage model.
       
@@ -29,7 +28,7 @@ package body Earu.Bridge is
       
       Thermal_Stress : Real := 1.0;
       Humidity_Stress : Real := 1.0;
-      Pressure_Stress : Real := 1.0;
+      Pressure_Stress : constant Real := 1.0;
       
       TCMz : constant Real := State.SMC.Temps.TCMz - 273.15;
       RH : constant Real := State.SMC.Humidity_Pct;

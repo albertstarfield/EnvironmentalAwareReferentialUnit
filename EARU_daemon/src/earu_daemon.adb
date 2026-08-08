@@ -1,12 +1,10 @@
 with Earu.Math;
 with Earu.Math.BlueMarble;
 with Earu.Shm;
-with System;
 with Earu.Types;
 with Earu.IO;
 with Earu.State_Store;
 with Earu.Bridge;
-with Earu.Ntrip;
 with Ada.Text_IO;
 with Interfaces.C;
 with Ada.Exceptions;
@@ -20,6 +18,7 @@ with Earu.Network_Status;
 with Ada.Strings.Fixed;
 with Earu.Weather_Fetcher;
 with Earu.Stale_Detector;
+with Earu.System_Bridge;
 
 -- Main entry point for the EARU daemon.
 -- Sets up RAM disk, loads persistent state, spawns Python sidecars,
@@ -30,8 +29,6 @@ procedure Earu_Daemon is
    use Earu.Network_Status;
    use Interfaces;
    use type Interfaces.C.int;
-   use type Interfaces.Unsigned_32;
-   use type Interfaces.Unsigned_64;
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
    use Real_Funcs;
@@ -112,15 +109,13 @@ procedure Earu_Daemon is
    end Start_System_Bridge;
 
    -- Health check watchdog for Python sidecars. Uses pgrep to check if
-   -- earu_ml_bridge.py and earu_adb_mock.py are alive; relaunches dead ones.
+   -- earu_ml_bridge.py, earu_adb_mock.py, and earu_system_bridge.py are
+   -- alive; relaunches dead ones.
    procedure Ensure_Sidecars_Running is
       Ret : Interfaces.C.int;
       pragma Unreferenced (Ret);
    begin
        -- Check if earu_ml_bridge.py is alive via pgrep
-       -- (stats_worker runs as a child of ml_bridge, no separate system_bridge)
-       -- NOTE: system_bridge.py is NOT monitored here. If Start_System_Bridge
-       -- is used, Ensure_Sidecars_Running should also pgrep it.
       Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
          "pgrep -f earu_ml_bridge.py > /dev/null 2>&1 || " &
          "(echo '[!] ml_bridge.py dead, relaunching' && " &
@@ -131,6 +126,12 @@ procedure Earu_Daemon is
          "pgrep -f earu_adb_mock.py > /dev/null 2>&1 || " &
          "(echo '[!] adb_mock.py dead, relaunching' && " &
          "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_adb_mock.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/adb_mock.log 2>&1 &)"
+      )));
+      -- Check if earu_system_bridge.py is alive via pgrep
+      Ret := C_System (Interfaces.C.To_C (Earu.IO.Wrap_Background (
+         "pgrep -f earu_system_bridge.py > /dev/null 2>&1 || " &
+         "(echo '[!] system_bridge.py dead, relaunching' && " &
+         "/opt/homebrew/anaconda3/bin/python3 -u /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/earu_system_bridge.py > /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/system_bridge.log 2>&1 &)"
       )));
    end Ensure_Sidecars_Running;
 
@@ -441,8 +442,32 @@ procedure Earu_Daemon is
                                end;
                             end if;
 
-                           Earu.State_Store.State_Buffer.Update_Pedometer (Ped);
-                           Earu.State_Store.State_Buffer.Update_Location (Loc);
+                            Earu.State_Store.State_Buffer.Update_Pedometer (Ped);
+
+                            -- Compute compass direction string from heading
+                            declare
+                               H : constant Real := Loc.Heading;
+                            begin
+                               Loc.Compass_Dir := (others => ' ');
+                               if H >= 337.5 or H < 22.5 then
+                                  Loc.Compass_Dir (1 .. 1) := "N";
+                               elsif H < 67.5 then
+                                  Loc.Compass_Dir (1 .. 2) := "NE";
+                               elsif H < 112.5 then
+                                  Loc.Compass_Dir (1 .. 1) := "E";
+                               elsif H < 157.5 then
+                                  Loc.Compass_Dir (1 .. 2) := "SE";
+                               elsif H < 202.5 then
+                                  Loc.Compass_Dir (1 .. 1) := "S";
+                               elsif H < 247.5 then
+                                  Loc.Compass_Dir (1 .. 2) := "SW";
+                               elsif H < 292.5 then
+                                  Loc.Compass_Dir (1 .. 1) := "W";
+                               else
+                                  Loc.Compass_Dir (1 .. 2) := "NW";
+                               end if;
+                            end;
+                            Earu.State_Store.State_Buffer.Update_Location (Loc);
                         end;
 
                         Earu.Math.Update_Vibration_State (Vib, Sqrt(Local_Accel.X**2 + Local_Accel.Y**2 + Local_Accel.Z**2), 800.0, Triggered, Ratio);
@@ -526,10 +551,9 @@ procedure Earu_Daemon is
     -- System log watcher task. Polls macOS system log every 60s for errors.
    -- Sets the Log_Error flag in state if errors are detected. Used to trigger
    -- INTERFERENCE warnings in the master caution/warning system.
-   task body System_Log_Watcher_Task is
-       Ret : Interfaces.C.int;
-       pragma Unreferenced (Ret);
-    begin
+    task body System_Log_Watcher_Task is
+        Ret : Interfaces.C.int;
+     begin
        delay 10.0;
        loop
           -- Check for any system errors in the last 60 seconds using the recommended filter.
@@ -555,6 +579,7 @@ procedure Earu_Daemon is
    -- - Machine life runtime and SSD life updates
    task body Monitor_Task is
       Last_W, Last_ML, Last_S : Unsigned_32 := 0;
+      pragma Unreferenced (Last_ML);
       Last_Machine_Life_Update : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 301.0);
       Last_NVRAM_Sync_Hour     : Integer := -1;
       Last_Sidecar_Check       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 31.0);
@@ -670,7 +695,7 @@ procedure Earu_Daemon is
                 Earu.State_Store.State_Buffer.Update_Weather (W, L);
                 Earu.State_Store.State_Buffer.Update_Ecosystem (Eco);
                 Earu.State_Store.State_Buffer.Update_SMC (SMC);
-                Earu.State_Store.State_Buffer.Update_Parity (L.Pressure_HPa, L.Pressure_HPa, 0.0);
+                Earu.State_Store.State_Buffer.Update_Parity (L.Pressure_HPa, L.Pressure_HPa, Earu.IO.Read_Fan_Pressure_Est);
                 Last_W := Weather_SHM.Header.Update_Count;
              end;
           else
@@ -757,7 +782,8 @@ procedure Earu_Daemon is
          declare
             Batt_Percent : aliased Interfaces.C.int;
             Batt_State   : aliased Interfaces.C.int;
-            Pmset_Buf    : aliased Interfaces.C.char_array (0 .. 1023);
+            Pmset_Buf    : aliased Interfaces.C.char_array (0 .. 1023) := (others => Interfaces.C.nul);
+            pragma Warnings (Off, Pmset_Buf);
             use type Interfaces.C.char;
          begin
             Get_Battery_State (Batt_Percent'Access, Batt_State'Access, Pmset_Buf, 1024);
@@ -1214,6 +1240,7 @@ begin
 
      Start_ML_Bridge;
      Start_ADB_Mock;
+     Start_System_Bridge;
    Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
    Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
    Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");

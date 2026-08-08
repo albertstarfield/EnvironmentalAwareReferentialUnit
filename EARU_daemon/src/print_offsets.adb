@@ -1,10 +1,11 @@
 with Ada.Text_IO; use Ada.Text_IO;
 with Earu.Shm; use Earu.Shm;
-with Interfaces;
 
 procedure Print_Offsets is
+   pragma Warnings (Off);
    S : Stats_SHM;
    W : Weather_SHM;
+   pragma Warnings (On);
 begin
    Put_Line ("Stats_SHM Total Size: " & S'Size'Img);
    Put_Line ("Header offset: " & S.Header'Position'Img);
@@ -16,7 +17,7 @@ begin
    Put_Line ("HID_Idle_ns offset: " & S.HID_Idle_ns'Position'Img);
    Put_Line ("TS_ISO offset: " & S.TS_ISO'Position'Img);
    Put_Line ("PMSET_Info offset: " & S.PMSET_Info'Position'Img);
-   
+
    Put_Line ("Weather_SHM Total Size: " & W'Size'Img);
    Put_Line ("Grid offset: " & W.Grid'Position'Img);
    Put_Line ("Meteo_JSON offset: " & W.Meteo_JSON'Position'Img);

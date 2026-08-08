@@ -39,6 +39,10 @@ package Earu.IO is
    procedure Write_NVRAM_Real (Name : String; Value : Earu.Types.Real);
    function Execute_And_Read_Real (Command : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real;
 
+   --  Reads the fan-RPM-based internal pressure estimation from
+   --  smcFanPressurehPaDetection (key-value format, EST_HPA field).
+   function Read_Fan_Pressure_Est return Earu.Types.Real;
+
    --  Wraps a shell command so it executes under `taskpolicy -b`
    --  (PRIO_DARWIN_BG): throttled I/O, low scheduling priority, reduced
    --  power draw. All children of the spawned shell inherit the policy.

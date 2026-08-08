@@ -3,16 +3,10 @@ with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Exceptions;
-with Interfaces.C;
 with Interfaces.C.Strings;
-with System;
 with GNAT.SHA256;
-with Earu.Types;
 
-with Earu.Shm;
-with Interfaces;
-with Ada.Numerics.Generic_Elementary_Functions;
-
+with System;
 
    -- =========================================================================
    -- TECHNICAL NOTE: Telemetry Integrity and Hashing Fixes (2026-05-28)
@@ -25,8 +19,6 @@ with Ada.Numerics.Generic_Elementary_Functions;
 
 package body Earu.IO is
    use Earu.Types;
-   use Earu.Shm;
-   use type Interfaces.Unsigned_32;
    use type System.Address;
    use Ada.Strings.Unbounded;
 
@@ -45,8 +37,8 @@ package body Earu.IO is
          Last := S'Last;
          while Last > S'First and then S (Last) = ' ' loop Last := Last - 1; end loop;
          declare
-            Str : String := Ada.Strings.Fixed.Trim (S (S'First .. Last), Ada.Strings.Both);
-            Dot : Natural := 0;
+             Str : constant String := Ada.Strings.Fixed.Trim (S (S'First .. Last), Ada.Strings.Both);
+             Dot : Natural := 0;
          begin
             for I in Str'Range loop
                if Str(I) = '.' then Dot := I; exit; end if;
@@ -64,13 +56,14 @@ package body Earu.IO is
          Last := S'Last;
          while Last > S'First and then S (Last) = ' ' loop Last := Last - 1; end loop;
          declare
-            Str : String := Ada.Strings.Fixed.Trim (S (S'First .. Last), Ada.Strings.Both);
-         begin
-            for I in Str'Range loop
-               if Str(I) = 'E' then Str(I) := 'e'; end if;
-            end loop;
-            return Str;
-         end;
+             Trimmed : constant String := Ada.Strings.Fixed.Trim (S (S'First .. Last), Ada.Strings.Both);
+             Str     : String (Trimmed'Range) := Trimmed;
+          begin
+             for I in Str'Range loop
+                if Str(I) = 'E' then Str(I) := 'e'; end if;
+             end loop;
+             return Str;
+          end;
       end if;
    end F;
 
@@ -96,48 +89,6 @@ package body Earu.IO is
       end loop;
       if Last < Str'First then return ""; else return Str (Str'First .. Last); end if;
    end Trim_Null;
-
-   function Calculate_Hinge_Airflow (State : in Earu_State) return Real is
-      package Math is new Ada.Numerics.Generic_Elementary_Functions (Real);
-      Avg_Fan : constant Real := (State.SMC.Fan_RPMs (1) + State.SMC.Fan_RPMs (2)) / 2.0;
-      Lid_Rad : constant Real := State.Lid_Angle * 3.141592653589793 / 180.0;
-      Sin_Val : constant Real := Math.Sin (Lid_Rad);
-      Airflow : Real;
-   begin
-      if Sin_Val < 0.0 then
-         Airflow := 0.0;
-      else
-         Airflow := 15.0 * (Avg_Fan / 6000.0) * Sin_Val;
-      end if;
-      return Airflow;
-   end Calculate_Hinge_Airflow;
-
-   function Calculate_Outflow_Mass_Flow (State : in Earu_State) return Real is
-      package Math is new Ada.Numerics.Generic_Elementary_Functions (Real);
-      Avg_Fan : constant Real := (State.SMC.Fan_RPMs (1) + State.SMC.Fan_RPMs (2)) / 2.0;
-      Lid_Rad : constant Real := State.Lid_Angle * 3.141592653589793 / 180.0;
-      Sin_Val : constant Real := Math.Sin (Lid_Rad);
-      Mass_Flow : Real;
-   begin
-      if Sin_Val < 0.0 then
-         Mass_Flow := 0.0;
-      else
-         Mass_Flow := 0.003 * (Avg_Fan / 6000.0) * Sin_Val;
-      end if;
-      return Mass_Flow;
-   end Calculate_Outflow_Mass_Flow;
-
-   function Calculate_Outflow_Heatflux (State : in Earu_State) return Real is
-      Mass_Flow : constant Real := Calculate_Outflow_Mass_Flow (State);
-      Delta_T : Real := State.SMC.Airflow_Outlet_K - State.SMC.Airflow_Inlet_K;
-      Heatflux : Real;
-   begin
-      if Delta_T < 0.0 then
-         Delta_T := 0.0;
-      end if;
-      Heatflux := Mass_Flow * 1005.0 * Delta_T;
-      return Heatflux;
-   end Calculate_Outflow_Heatflux;
 
    function C_System (Command : Interfaces.C.char_array) return Interfaces.C.int;
    pragma Import (C, C_System, "system");
@@ -172,9 +123,10 @@ package body Earu.IO is
       File : Ada.Text_IO.File_Type;
       Line : Unbounded_String;
    begin
-      Ret := C_System (Interfaces.C.To_C (Command));
-      begin
-         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Tmp_File);
+       Ret := C_System (Interfaces.C.To_C (Command));
+       pragma Unreferenced (Ret);
+       begin
+          Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Tmp_File);
          if not Ada.Text_IO.End_Of_File (File) then
             Line := To_Unbounded_String (Ada.Text_IO.Get_Line (File));
          end if;
@@ -192,8 +144,9 @@ package body Earu.IO is
       Value_Str : constant String := F (Value);
       Command : constant String := Wrap_Background ("nvram " & Name & "=" & Value_Str);
    begin
-      Ret := C_System (Interfaces.C.To_C (Command));
-   end Write_NVRAM_Real;
+       Ret := C_System (Interfaces.C.To_C (Command));
+       pragma Unreferenced (Ret);
+    end Write_NVRAM_Real;
 
    function C_Popen (Command : Interfaces.C.char_array; Mode : Interfaces.C.char_array) return System.Address;
    pragma Import (C, C_Popen, "popen");
@@ -236,13 +189,14 @@ package body Earu.IO is
 
       N_Read := C_Fread (Buf (0)'Address, 1, 1024, Stream);
       Ret := C_Pclose (Stream);
+      pragma Unreferenced (Ret);
 
       if N_Read = 0 then
          return Default;
       end if;
 
       --  Convert the raw bytes to a trimmed String
-      for I in 0 .. size_t (N_Read - 1) loop
+      for I in 0 .. N_Read - 1 loop
          Line (Integer (I) + 1) := Character (Buf (I));
       end loop;
       Last := Integer (N_Read);
@@ -267,7 +221,6 @@ package body Earu.IO is
    function S (Str : String) return String is
       Result : Unbounded_String;
       I : Positive := Str'First;
-      use Interfaces;
    begin
       Append (Result, """");
       while I <= Str'Last loop
@@ -285,88 +238,10 @@ package body Earu.IO is
       return To_String (Result);
    end S;
 
-   function Base64_Encode (Data : String) return String is
-      Table : constant String := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      Result : Unbounded_String;
-      Tri : Natural;
-      Val : Natural;
-   begin
-      if Data'Length = 0 then return ""; end if;
-      for I in 0 .. (Data'Length / 3) - 1 loop
-         Tri := Character'Pos(Data(Data'First + I*3)) * 65536 +
-                Character'Pos(Data(Data'First + I*3 + 1)) * 256 +
-                Character'Pos(Data(Data'First + I*3 + 2));
-         Append (Result, Table (Tri / 262144 + 1));
-         Append (Result, Table ((Tri / 4096) mod 64 + 1));
-         Append (Result, Table ((Tri / 64) mod 64 + 1));
-         Append (Result, Table (Tri mod 64 + 1));
-      end loop;
-      declare
-         Rem_Len : constant Integer := Data'Length mod 3;
-         Base_Idx : constant Integer := (Data'Length / 3) * 3;
-      begin
-         if Rem_Len = 1 then
-            Val := Character'Pos(Data(Data'First + Base_Idx)) * 65536;
-            Append (Result, Table (Val / 262144 + 1));
-            Append (Result, Table ((Val / 4096) mod 64 + 1));
-            Append (Result, "==");
-         elsif Rem_Len = 2 then
-            Val := Character'Pos(Data(Data'First + Base_Idx)) * 65536 + 
-                   Character'Pos(Data(Data'First + Base_Idx + 1)) * 256;
-            Append (Result, Table (Val / 262144 + 1));
-            Append (Result, Table ((Val / 4096) mod 64 + 1));
-            Append (Result, Table ((Val / 64) mod 64 + 1));
-            Append (Result, "=");
-         end if;
-      end;
-      return To_String (Result);
-   end Base64_Encode;
-
    function Hash (Input : String) return String is
    begin
       return GNAT.SHA256.Digest (Input);
    end Hash;
-
-   function Base64_Decode (Data : String) return String is
-      Alphabet : constant String := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      function Char_To_Val (C : Character) return Integer is
-      begin
-         for I in 1 .. 64 loop
-            if Alphabet (I) = C then return I - 1; end if;
-         end loop;
-         return 0;
-      end Char_To_Val;
-      Result : String (1 .. Data'Length);
-      Len    : Natural := 0;
-      I      : Integer := Data'First;
-      Triple : Interfaces.Unsigned_32;
-      C1, C2, C3, C4 : Character;
-      V1, V2, V3, V4 : Integer;
-   begin
-      if Data'Length = 0 then return ""; end if;
-      while I <= Data'Last - 3 loop
-         C1 := Data (I); C2 := Data (I + 1); C3 := Data (I + 2); C4 := Data (I + 3);
-         V1 := Char_To_Val (C1); V2 := Char_To_Val (C2); V3 := Char_To_Val (C3); V4 := Char_To_Val (C4);
-         Triple := Interfaces.Shift_Left (Interfaces.Unsigned_32 (V1), 18) or
-                   Interfaces.Shift_Left (Interfaces.Unsigned_32 (V2), 12) or
-                   Interfaces.Shift_Left (Interfaces.Unsigned_32 (V3), 6) or
-                   Interfaces.Unsigned_32 (V4);
-         Len := Len + 1;
-         Result (Len) := Character'Val (Interfaces.Shift_Right (Triple, 16) and 16#FF#);
-         if C3 /= '=' then
-            Len := Len + 1;
-            Result (Len) := Character'Val (Interfaces.Shift_Right (Triple, 8) and 16#FF#);
-         end if;
-         if C4 /= '=' then
-            Len := Len + 1;
-            Result (Len) := Character'Val (Triple and 16#FF#);
-         end if;
-         I := I + 4;
-      end loop;
-      return Result (1 .. Len);
-   exception
-      when others => return "";
-   end Base64_Decode;
 
    procedure Load_Initial_State (
       Path                 : String;
@@ -475,14 +350,9 @@ package body Earu.IO is
          AP (Key, B (Val), Comma);
       end ABool;
 
-      --  Append a 64-byte String field (hash / parity strings stored in State)
-      function Trim64 (Str : String) return String is
-      begin
-         return Trim_Null (Str);
-      end Trim64;
-
    begin
       Append (Buf, "{");
+      pragma Unreferenced (Weather);
 
       --  ── time ─────────────────────────────────────────────────────────────
       AP ("time", F (State.Time));
@@ -847,7 +717,7 @@ package body Earu.IO is
          Pre_Parity : constant String := To_String (Buf) & "}";
          P_Hash     : constant String := Hash (Pre_Parity);
       begin
-         Append (Buf, ", ""parity"": """ & P_Hash & """");
+         Append (Buf, """parity"": """ & P_Hash & """");
       end;
       Append (Buf, "}");
 
@@ -872,6 +742,7 @@ package body Earu.IO is
             C_Tmp  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Tmp_Path);
             C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
             Ret    : Interfaces.C.int := rename (C_Tmp, C_Path);
+            pragma Unreferenced (Ret);
          begin
             Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
          end;
@@ -932,18 +803,18 @@ package body Earu.IO is
 
       -- Fallback 2: Handle prefix mismatch (SMC vs TEMP)
       if not Read_Success then
-         if Filename'Length > 11 and then Filename (1 .. 11) = "sensor_smc_" then
-            declare
-               Fallback_Name : constant String := "sensor_temp_" & Filename (12 .. Filename'Last);
+      if Filename'Length > 11 and then Filename (Filename'First .. Filename'First + 10) = "sensor_smc_" then
+             declare
+                Fallback_Name : constant String := "sensor_temp_" & Filename (Filename'First + 11 .. Filename'Last);
             begin
                Read_Success := Try_Read ("/Volumes/EARU_dataIO/" & Fallback_Name);
                if not Read_Success then
                   Read_Success := Try_Read ("/usr/local/EnvironmentalAwareReferentialUnit/" & Fallback_Name);
                end if;
             end;
-         elsif Filename'Length > 12 and then Filename (1 .. 12) = "sensor_temp_" then
-             declare
-               Fallback_Name : constant String := "sensor_smc_" & Filename (13 .. Filename'Last);
+      elsif Filename'Length > 12 and then Filename (Filename'First .. Filename'First + 11) = "sensor_temp_" then
+              declare
+                Fallback_Name : constant String := "sensor_smc_" & Filename (Filename'First + 12 .. Filename'Last);
             begin
                Read_Success := Try_Read ("/Volumes/EARU_dataIO/" & Fallback_Name);
                if not Read_Success then
@@ -1054,5 +925,51 @@ package body Earu.IO is
          end if;
          return Cache_Turbo;
    end Read_Sensor_Integer;
+
+   Cache_Fan_Pressure : Real := 0.0;
+
+   function Read_Fan_Pressure_Est return Earu.Types.Real is
+      use Ada.Text_IO;
+      File : File_Type;
+      Line_Buf : String (1 .. 256);
+      Last     : Natural;
+      Path     : constant String := "/Volumes/EARU_dataIO/smcFanPressurehPaDetection";
+   begin
+      begin
+         Open (File, In_File, Path);
+      exception
+         when Name_Error | Use_Error =>
+            -- Fallback: check symlinked local copy
+            begin
+               Open (File, In_File, "smcFanPressurehPaDetection");
+            exception
+               when others => return Cache_Fan_Pressure;
+            end;
+      end;
+
+      while not End_Of_File (File) loop
+         Get_Line (File, Line_Buf, Last);
+         declare
+            L : constant String := Line_Buf (1 .. Last);
+         begin
+            if Last >= 8 and then L (1 .. 8) = "EST_HPA:" then
+               -- Extract value after "EST_HPA:" — trim leading spaces
+               declare
+                  Val_Str : constant String := Ada.Strings.Fixed.Trim (L (9 .. Last), Ada.Strings.Both);
+               begin
+                  Cache_Fan_Pressure := Real'Value (Val_Str);
+               end;
+               exit;
+            end if;
+         end;
+      end loop;
+
+      Close (File);
+      return Cache_Fan_Pressure;
+   exception
+      when others =>
+         if Is_Open (File) then Close (File); end if;
+         return Cache_Fan_Pressure;
+   end Read_Fan_Pressure_Est;
 
 end Earu.IO;

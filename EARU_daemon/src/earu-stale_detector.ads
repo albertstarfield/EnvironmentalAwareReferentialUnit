@@ -1,5 +1,3 @@
-with Earu.Types;
-
 package Earu.Stale_Detector is
 
    task type Watchdog is

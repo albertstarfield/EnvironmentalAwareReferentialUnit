@@ -1,6 +1,3 @@
-with AWS.Client;
-with AWS.Response;
-
 package Earu.Weather_Fetcher is
 
    task type Fetcher is

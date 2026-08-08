@@ -138,8 +138,6 @@ package body Earu.Ntrip is
    end Make_RTCM_1005;
 
    function NTRIP_Callback (Request : in AWS.Status.Data) return AWS.Response.Data is
-      use AWS.Status;
-      use AWS.Response;
       use AWS.Messages;
       
       URI : constant String := AWS.Status.URI (Request);
