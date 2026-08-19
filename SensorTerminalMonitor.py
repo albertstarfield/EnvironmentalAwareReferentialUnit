@@ -74,12 +74,14 @@ if __name__ == "__main__":
         sys.exit(1)
 
 def generate_avionics_chimes() -> None:
-    """Generates professional avionics-style chimes with exponential release."""
+    """Generates professional avionics-style chimes with linear fade release."""
     def write_chime(filename: str, freqs: list[float], pulses: int):
         path = os.path.join(os.path.dirname(__file__), filename)
 
         sample_rate = 44100
-        duration_per_pulse = 0.20 # Slightly longer for release
+        sustain_duration = 0.20  # Full volume for 0.2s
+        fade_duration = 0.30     # Linear fade from 0.2s to 0.5s
+        duration_per_pulse = sustain_duration + fade_duration  # Total 0.50s
         gap_duration = 0.05
 
         with wave.open(path, 'w') as f:
@@ -88,12 +90,16 @@ def generate_avionics_chimes() -> None:
             f.setframerate(sample_rate)
 
             num_samples = int(duration_per_pulse * sample_rate)
+            sustain_samples = int(sustain_duration * sample_rate)
+            fade_samples = int(fade_duration * sample_rate)
             for _ in range(pulses):
-                # Tone with exponential release
                 for i in range(num_samples):
                     t = i / sample_rate
-                    # Exponential release envelope: start at 1.0, decay to ~0.01
-                    envelope = math.exp(-4.5 * i / num_samples)
+                    # Sustain at full volume, then linear fade to silence
+                    if i < sustain_samples:
+                        envelope = 1.0
+                    else:
+                        envelope = 1.0 - (i - sustain_samples) / fade_samples
                     val = 0.0
                     for f_val in freqs:
                         val += math.sin(2 * math.pi * f_val * t)
@@ -104,10 +110,10 @@ def generate_avionics_chimes() -> None:
                 for _ in range(int(gap_duration * sample_rate)):
                     f.writeframes(struct.pack('<h', 0))
     try:
-        # Master Warning: High-pitched triple chime (Harmonic 1000Hz + 2000Hz)
-        write_chime("warning_chime.wav", [1000.0, 2000.0], 3)
-        # Master Caution: Lower-pitched double chime (Harmonic 600Hz + 1200Hz)
-        write_chime("caution_chime.wav", [600.0, 1200.0], 2)
+        # Master Warning: High-pitched triple chime (3 harmonics)
+        write_chime("warning_chime.wav", [1000.0, 2000.0, 3000.0], 3)
+        # Master Caution: Lower-pitched double chime (3 harmonics)
+        write_chime("caution_chime.wav", [600.0, 1200.0, 1800.0], 2)
     except Exception: pass
 
 def play_chime(chime_type: str) -> None:
@@ -501,6 +507,7 @@ class PrimaryFlightDisplay:
         self.clim_zoom: int = 0 # 0: Full, 1: 30d, 2: 7d, 3: 24h, 4: Forecast
         self._graph_zones: list[dict[str, Any]] = []  # hover lookup for weather graphs
         self._graph_hover_tag: str = "_ghover"
+        self._wind_zones: list[dict[str, Any]] = []  # hover lookup for wind grid cells
 
         # Navigation Search & Destination State
         self.dest_marker: Any = None
@@ -1365,6 +1372,7 @@ class PrimaryFlightDisplay:
     def draw_glass_cockpit(self) -> None:
         self.canvas.delete("all")
         self._graph_zones = []  # reset hover lookup each frame
+        self._wind_zones = []  # reset wind grid hover lookup each frame
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
         if w < 100: w, h = 1000, 800
         cx, cy = w/2, h/2
@@ -1530,9 +1538,15 @@ class PrimaryFlightDisplay:
                 y += 30
 
     def on_canvas_hover(self, event: tk.Event) -> None:
-        """Show tooltip overlay with time+value when hovering over weather graphs."""
+        """Show tooltip overlay when hovering over weather graphs or wind grid cells."""
         self.canvas.delete(self._graph_hover_tag)
         mx, my = float(event.x), float(event.y)
+        # --- Check wind grid zones first ---
+        for wz in self._wind_zones:
+            if wz["x"] <= mx <= wz["x"] + wz["w"] and wz["y"] <= my <= wz["y"] + wz["h"]:
+                self._draw_wind_tooltip(wz, mx, my)
+                return
+        # --- Check weather graph zones ---
         hit = None
         for z in self._graph_zones:
             if z["x"] <= mx <= z["x"] + z["w"] and z["y"] <= my <= z["y"] + z["h"]:
@@ -1583,6 +1597,57 @@ class PrimaryFlightDisplay:
                                 fill="#ccc", font=("Monaco", 7), tags=self._graph_hover_tag)
         self.canvas.create_text(tip_x + 8, tip_y + 38, anchor="nw", text=f"\u25b2 {val_str}",
                                 fill="white", font=("Monaco", 9, "bold"), tags=self._graph_hover_tag)
+
+    def _draw_wind_tooltip(self, wz: dict[str, Any], mx: float, my: float) -> None:
+        """Draw hover tooltip for a wind grid cell showing status + initial vector."""
+        tag = self._graph_hover_tag
+        # Highlight cell border
+        self.canvas.create_rectangle(wz["x"] + 1, wz["y"] + 1,
+                                     wz["x"] + wz["w"] - 1, wz["y"] + wz["h"] - 1,
+                                     outline="white", width=2, tags=tag)
+        # Compute direction string from velocity vector
+        vx, vy = wz["vx"], wz["vy"]
+        speed = math.sqrt(vx**2 + vy**2)
+        if speed > 0.01:
+            dir_deg = (math.degrees(math.atan2(vy, vx)) + 360) % 360
+            dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+            dir_str = dirs[int((dir_deg + 11.25) / 22.5) % 16]
+        else:
+            dir_deg = 0.0; dir_str = "CALM"
+        # Temperature K→C
+        tc = wz["temperature"] - 273.15
+        dp = wz["pressure"] - 1013.25
+        # Tooltip box
+        tip_w, tip_h = 200, 95
+        tip_x = mx + 14
+        tip_y = my - tip_h - 8
+        cw = float(self.canvas.winfo_width())
+        ch = float(self.canvas.winfo_height())
+        if tip_x + tip_w > cw: tip_x = mx - tip_w - 14
+        if tip_y < 0: tip_y = my + 14
+        if tip_y + tip_h > ch: tip_y = ch - tip_h - 4
+        self.canvas.create_rectangle(tip_x, tip_y, tip_x + tip_w, tip_y + tip_h,
+                                     fill="#0a0a0a", outline="#00ffff", width=2, tags=tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 6, anchor="nw",
+                                text=f"CELL [{wz['row']},{wz['col']}]",
+                                fill="#00ffff", font=("Monaco", 9, "bold"), tags=tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 22, anchor="nw",
+                                text=f"INTENSITY: {wz['intensity']:.2f} m/s",
+                                fill="white", font=("Monaco", 8), tags=tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 36, anchor="nw",
+                                text=f"VECTOR: {speed:.2f} m/s {dir_str} ({dir_deg:.0f} deg)",
+                                fill="#aaa", font=("Monaco", 7), tags=tag)
+        p_color = "#ff4444" if dp > 0 else "#4488ff" if dp < 0 else "#888"
+        self.canvas.create_text(tip_x + 8, tip_y + 50, anchor="nw",
+                                text=f"PRESSURE: {wz['pressure']:.2f} hPa ({dp:+.2f})",
+                                fill=p_color, font=("Monaco", 7), tags=tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 64, anchor="nw",
+                                text=f"TEMP: {tc:.1f} C ({wz['temperature']:.1f} K)",
+                                fill="#ff8844", font=("Monaco", 7), tags=tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 78, anchor="nw",
+                                text=f"VX:{vx:.2f}  VY:{vy:.2f}",
+                                fill="#666", font=("Monaco", 6), tags=tag)
 
     def draw_energy_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ENERGY & POWER MANAGEMENT", fill="yellow", font=("Monaco", 20, "bold"))
@@ -3603,14 +3668,57 @@ class PrimaryFlightDisplay:
             grid = wind_map_data if isinstance(wind_map_data, list) else []
         if not grid: self.canvas.create_text(w/2, h/2, text="NO WIND GRID", fill="red"); return
         gs, cs = 7, min(w, h) // 12; sx, sy = w/2-(gs*cs)/2, h/2-(gs*cs)/2
+        # Summary bar: average wind speed & direction
+        avg_spd = 0.0; cnt = 0
+        for r in range(min(gs, len(grid))):
+            for c in range(min(gs, len(grid[r]))):
+                sp = grid[r][c][0] if len(grid[r][c]) > 0 else 0.0
+                if sp > 0.01: avg_spd += sp; cnt += 1
+        if cnt > 0: avg_spd /= cnt
+        self.canvas.create_text(w/2, 70, text=f"AVG INTENSITY: {avg_spd:.2f} m/s  |  GRID: {gs}x{gs}  |  HOVER FOR DETAILS",
+                                 fill="#aaa", font=("Monaco", 9))
         for r in range(gs):
             for c in range(gs):
                 if r < len(grid) and c < len(grid[r]):
-                    intensity, vel = grid[r][c][0], grid[r][c][1]; vx, vy = vel[0], vel[1]; x, y = sx+c*cs+cs/2, sy+r*cs+cs/2
-                    cv = min(255, int(intensity*10)); self.canvas.create_rectangle(x-cs/2,y-cs/2,x+cs/2,y+cs/2,fill=f"#{cv:02x}{int(cv*0.5):02x}44",outline="#222")
-                    if abs(vx)>0.1 or abs(vy)>0.1:
-                        ml, ang = min(cs/2, math.sqrt(vx**2+vy**2)*2), math.atan2(vy, vx)
-                        self.canvas.create_line(x,y,x+ml*math.cos(ang),y+ml*math.sin(ang),fill="white",arrow=tk.LAST)
+                    cell = grid[r][c]
+                    intensity = cell[0] if len(cell) > 0 else 0.0
+                    vel = cell[1] if len(cell) > 1 else [0.0, 0.0, 0.0]
+                    press = cell[2] if len(cell) > 2 else 1013.25
+                    temp = cell[3] if len(cell) > 3 else 293.15
+                    vx, vy = vel[0], vel[1]
+                    x, y = sx+c*cs+cs/2, sy+r*cs+cs/2
+                    # Color: intensity-based green→cyan→magenta gradient
+                    cv = min(255, int(intensity * 10))
+                    cr = cv if intensity > 5.0 else int(cv * 0.3)
+                    cg = min(255, cv + 40)
+                    cb = min(255, int(cv * 0.7) + 80)
+                    fill_hex = f"#{cr:02x}{cg:02x}{cb:02x}"
+                    self.canvas.create_rectangle(x-cs/2, y-cs/2, x+cs/2, y+cs/2,
+                                                  fill=fill_hex, outline="#333", width=1)
+                    # Pressure deviation from standard atmosphere
+                    dp = press - 1013.25
+                    if abs(dp) > 0.01:
+                        dp_color = "#ff4444" if dp > 0 else "#4488ff"
+                        self.canvas.create_text(x, y - 6, text=f"{dp:+.1f}",
+                                                 fill=dp_color, font=("Monaco", 6))
+                    # Temperature in Kelvin → Celsius
+                    tc = temp - 273.15
+                    self.canvas.create_text(x, y + 6, text=f"{tc:.0f}C",
+                                             fill="#ccc", font=("Monaco", 6))
+                    # Velocity arrow
+                    if abs(vx) > 0.1 or abs(vy) > 0.1:
+                        ml = min(cs/2 - 4, math.sqrt(vx**2 + vy**2) * 2)
+                        ang = math.atan2(vy, vx)
+                        self.canvas.create_line(x, y, x + ml*math.cos(ang), y + ml*math.sin(ang),
+                                                 fill="white", arrow=tk.LAST, width=2)
+                    # Store hover zone
+                    self._wind_zones.append({
+                        'x': x - cs/2, 'y': y - cs/2, 'w': cs, 'h': cs,
+                        'row': r, 'col': c,
+                        'intensity': intensity, 'vel': vel,
+                        'vx': vx, 'vy': vy,
+                        'pressure': press, 'temperature': temp,
+                    })
 
     def draw_weather_page(self, w: float, h: float) -> None:
         sub_t = ["SUMMARY & TRENDS", "SURFACE & SOIL", "SOLAR RADIATION", "AVIATION & STABILITY", "HUMIDITY & VAPOUR"]
