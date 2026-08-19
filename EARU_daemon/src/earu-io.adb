@@ -119,7 +119,7 @@ package body Earu.IO is
 
    function Read_NVRAM_Real (Name : String; Default : Earu.Types.Real := 0.0) return Earu.Types.Real is
       Ret : Interfaces.C.int;
-      Tmp_File : constant String := "/tmp/earu_nvram_" & Name & ".txt";
+       Tmp_File : constant String := Run_Dir & "/earu_nvram_" & Name & ".txt";
       Command : constant String := Wrap_Background ("nvram " & Name & " 2>/dev/null | awk '{print $2}' > " & Tmp_File);
       File : Ada.Text_IO.File_Type;
       Line : Unbounded_String;

@@ -5,6 +5,10 @@ with Interfaces.C;
 package Earu.IO is
    pragma SPARK_Mode (Off);
 
+   --  Centralized run directory for ephemeral runtime artifacts (NVRAM caches,
+   --  battery cross-checks, etc.).  Replaces scattered /tmp/ paths.
+   Run_Dir : constant String := "/usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/run";
+
    procedure Configure_Realtime (Period_Ms, Computation_Ms, Constraint_Ms : Interfaces.C.int);
    pragma Import (C, Configure_Realtime, "configure_realtime");
 

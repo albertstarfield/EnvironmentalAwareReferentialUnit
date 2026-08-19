@@ -680,6 +680,25 @@ procedure Earu_Daemon is
                     L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
                  end if;
                  L.Pressure_HPa := Real (Weather_SHM.Pressure_HPa);
+
+                 --  Copy 7x7 wind grid from SHM (populated by Python sidecar)
+                 --  into Ecosystem_Weather.Wind_Map so earu-math wind averaging
+                 --  and earu-io serialization see real values.
+                 for Row in 1 .. 7 loop
+                    for Col in 1 .. 7 loop
+                       declare
+                          SHM_Cell : constant Wind_Point_C := Weather_SHM.Grid (Row, Col);
+                       begin
+                          Eco.Wind_Map (Row, Col).Speed := Real (SHM_Cell.Speed);
+                          Eco.Wind_Map (Row, Col).Vec.X := Real (SHM_Cell.Vec_X);
+                          Eco.Wind_Map (Row, Col).Vec.Y := Real (SHM_Cell.Vec_Y);
+                          Eco.Wind_Map (Row, Col).Vec.Z := Real (SHM_Cell.Vec_Z);
+                          Eco.Wind_Map (Row, Col).Press := Real (SHM_Cell.Press);
+                          Eco.Wind_Map (Row, Col).Temp  := Real (SHM_Cell.Temp);
+                       end;
+                    end loop;
+                 end loop;
+
                 Earu.Math.Update_Weather_Thermodynamics (Eco, SMC, L, W, SMC.Ambient_Temp_K);
                 Earu.State_Store.State_Buffer.Update_Weather (W, L);
                 Earu.State_Store.State_Buffer.Update_Ecosystem (Eco);
@@ -1043,6 +1062,14 @@ procedure Earu_Daemon is
 begin
    Earu.IO.Configure_Realtime (2, 1, 2);
    Setup_Ramdisk;
+   --  Ensure the centralized run directory exists for NVRAM caches, battery
+   --  cross-checks, and other ephemeral runtime artifacts.
+   declare
+      Ret2 : Interfaces.C.int;
+      pragma Unreferenced (Ret2);
+   begin
+      Ret2 := C_System (Interfaces.C.To_C ("mkdir -p " & Earu.IO.Run_Dir));
+   end;
    Earu.State_Store.State_Buffer.Initialize_State;
    Weather_Fetcher_Task.Start;
 

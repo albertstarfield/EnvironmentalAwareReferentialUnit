@@ -13,3 +13,4 @@ build_err.txt
 b~*
 b__*
 .cache.sqlite*
+/run/

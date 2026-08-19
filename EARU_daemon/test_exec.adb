@@ -1,13 +1,14 @@
 with Ada.Text_IO; use Ada.Text_IO;
 with Interfaces.C;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Earu.IO;
 
 procedure Test_Exec is
    function C_System (Command : Interfaces.C.char_array) return Interfaces.C.int;
    pragma Import (C, C_System, "system");
 
    function Execute_And_Read_Real (Command : String) return Float is
-      Tmp_File : constant String := "/tmp/earu_test_cmd_out.txt";
+      Tmp_File : constant String := Earu.IO.Run_Dir & "/earu_test_cmd_out.txt";
       Full_Cmd : constant String := Command & " > " & Tmp_File & " 2>/dev/null";
       Ret : Interfaces.C.int;
       File : File_Type;

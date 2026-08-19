@@ -1,6 +1,7 @@
 with Ada.Text_IO;
 with Interfaces.C;
 with Earu.Types;
+with Earu.IO;
 
 package body Earu.Stale_Detector is
 
@@ -24,7 +25,7 @@ package body Earu.Stale_Detector is
    begin
       Cross_Pct := -1;
       Ret := C_System (Interfaces.C.To_C (
-         "/bin/sh -c 'pmset -g batt' > /tmp/earu_batt_crosscheck.txt 2>&1"));
+         "/bin/sh -c 'pmset -g batt' > " & Earu.IO.Run_Dir & "/earu_batt_crosscheck.txt 2>&1"));
       pragma Unreferenced (Ret);
       declare
          use Ada.Text_IO;
@@ -32,7 +33,7 @@ package body Earu.Stale_Detector is
          Line : String (1 .. 256);
          Last  : Natural;
       begin
-         Open (F, In_File, "/tmp/earu_batt_crosscheck.txt");
+         Open (F, In_File, Earu.IO.Run_Dir & "/earu_batt_crosscheck.txt");
          while not End_of_File (F) loop
             Get_Line (F, Line, Last);
             for I in 1 .. Last loop

@@ -3,7 +3,7 @@
 --  Open-Meteo API fetcher for EARU weather data.
 --
 --  Architecture:
---    Fetcher task  ──►  curl subprocess  ──►  /tmp/earu_meteo.json
+--    Fetcher task  ──►  curl subprocess  ──►  /Volumes/EARU_dataIO/EARU_meteo.dat
 --    │                                        │
 --    └──── read file ◄────────────────────────┘
 --    │
