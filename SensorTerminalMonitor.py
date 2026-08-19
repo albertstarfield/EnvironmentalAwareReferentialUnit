@@ -388,6 +388,7 @@ class PrimaryFlightDisplay:
         self.canvas = tk.Canvas(self.content_frame, bg='black', highlightthickness=0)
         self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
         self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<Motion>", self.on_canvas_hover)
 
         self.opengl_pfd = None
         if HAS_OPENGL:
@@ -498,6 +499,8 @@ class PrimaryFlightDisplay:
         self.full_data: dict[str, Any] = {}
         self.clim_subpage: int = 0
         self.clim_zoom: int = 0 # 0: Full, 1: 30d, 2: 7d, 3: 24h, 4: Forecast
+        self._graph_zones: list[dict[str, Any]] = []  # hover lookup for weather graphs
+        self._graph_hover_tag: str = "_ghover"
 
         # Navigation Search & Destination State
         self.dest_marker: Any = None
@@ -1082,6 +1085,9 @@ class PrimaryFlightDisplay:
                 if line:
                     # Clean up any residual recovery info if it somehow ended up on the same line
                     if "[RECOVERY" in line: line = line.split("[RECOVERY")[0]
+                    # Skip obviously truncated payloads (daemon startup race — file contains only '{')
+                    if len(line) < 50:
+                        return
                     try:
                         data = json.loads(line)
                     except json.JSONDecodeError as e:
@@ -1358,6 +1364,7 @@ class PrimaryFlightDisplay:
 
     def draw_glass_cockpit(self) -> None:
         self.canvas.delete("all")
+        self._graph_zones = []  # reset hover lookup each frame
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
         if w < 100: w, h = 1000, 800
         cx, cy = w/2, h/2
@@ -1521,6 +1528,61 @@ class PrimaryFlightDisplay:
                     self.switch_page_view()
                     return
                 y += 30
+
+    def on_canvas_hover(self, event: tk.Event) -> None:
+        """Show tooltip overlay with time+value when hovering over weather graphs."""
+        self.canvas.delete(self._graph_hover_tag)
+        mx, my = float(event.x), float(event.y)
+        hit = None
+        for z in self._graph_zones:
+            if z["x"] <= mx <= z["x"] + z["w"] and z["y"] <= my <= z["y"] + z["h"]:
+                hit = z
+                break
+        if hit is None:
+            return
+        clean, times, n = hit["clean"], hit.get("times"), len(hit["clean"])
+        if n == 0:
+            return
+        # Map mouse X to nearest data index
+        frac = (mx - hit["x"]) / max(1.0, hit["w"])
+        frac = max(0.0, min(1.0, frac))
+        idx = round(frac * (n - 1))
+        idx = max(0, min(n - 1, idx))
+        val = clean[idx]
+        # Compute data Y for crosshair
+        d_min, d_max = hit["d_min"], hit["d_max"]
+        data_y = hit["y"] + hit["h"] - ((val - d_min) / max(1e-9, d_max - d_min)) * hit["h"]
+        tx = hit["x"] + (idx / max(1, n - 1)) * hit["w"]
+        # Crosshair lines
+        self.canvas.create_line(tx, hit["y"], tx, hit["y"] + hit["h"],
+                                fill=hit["color"], dash=(3, 3), width=1, tags=self._graph_hover_tag)
+        self.canvas.create_line(hit["x"], data_y, hit["x"] + hit["w"], data_y,
+                                fill=hit["color"], dash=(3, 3), width=1, tags=self._graph_hover_tag)
+        # Glowing dot on the data point
+        self.canvas.create_oval(tx - 5, data_y - 5, tx + 5, data_y + 5,
+                                fill="white", outline=hit["color"], width=2, tags=self._graph_hover_tag)
+        # Tooltip box
+        if times and idx < len(times):
+            dt = datetime.datetime.fromtimestamp(times[idx])
+            time_str = dt.strftime("%d/%m %Y %H:%M")
+        else:
+            time_str = f"index {idx}"
+        val_str = f"{val:.2f}"
+        tip_w, tip_h = 160, 55
+        # Position tooltip: prefer right side, flip if too close to edge
+        tip_x = tx + 12
+        tip_y = data_y - tip_h - 8
+        cw = float(self.canvas.winfo_width())
+        if tip_x + tip_w > cw: tip_x = tx - tip_w - 12
+        if tip_y < 0: tip_y = data_y + 12
+        self.canvas.create_rectangle(tip_x, tip_y, tip_x + tip_w, tip_y + tip_h,
+                                     fill="#111111", outline=hit["color"], width=2, tags=self._graph_hover_tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 6, anchor="nw", text=hit["label"],
+                                fill=hit["color"], font=("Monaco", 8, "bold"), tags=self._graph_hover_tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 22, anchor="nw", text=time_str,
+                                fill="#ccc", font=("Monaco", 7), tags=self._graph_hover_tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 38, anchor="nw", text=f"\u25b2 {val_str}",
+                                fill="white", font=("Monaco", 9, "bold"), tags=self._graph_hover_tag)
 
     def draw_energy_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="ENERGY & POWER MANAGEMENT", fill="yellow", font=("Monaco", 20, "bold"))
@@ -2555,15 +2617,51 @@ class PrimaryFlightDisplay:
             self.canvas.create_text(mx, y+h+5, anchor="n", text="NOW", fill="yellow", font=("Monaco", 7))
 
         if times and len(times) == n:
-            num = 8; idxs = sorted(list(set([int(i * (n-1) / (num-1)) for i in range(num)] + ([mark_idx] if mark_idx is not None else []))))
+            # Find peaks, valleys, and transition start points
+            feat = set()
+            if n >= 3:
+                for i in range(1, n - 1):
+                    if clean[i] > clean[i-1] and clean[i] > clean[i+1]: feat.add(i)  # peak
+                    if clean[i] < clean[i-1] and clean[i] < clean[i+1]: feat.add(i)  # valley
+                # Transitions: where slope sign flips
+                for i in range(2, n):
+                    d_prev = clean[i-1] - clean[i-2]
+                    d_curr = clean[i] - clean[i-1]
+                    if d_prev * d_curr < 0: feat.add(i)
+            # Always include first, last, and NOW
+            if n > 0: feat.add(0); feat.add(n-1)
+            if mark_idx is not None and 0 <= mark_idx < n: feat.add(mark_idx)
+            idxs = sorted(feat)
             for idx in idxs:
                 if 0 <= idx < n:
-                    tx = x + (idx / max(1, n-1)) * w; dt = datetime.datetime.fromtimestamp(times[idx])
-                    anchor = "nw" if idx == 0 else ("ne" if idx == n-1 else "n")
-                    self.canvas.create_line(tx, y+h, tx, y+h+5, fill="#666")
-                    self.canvas.create_text(tx, y+h+8, anchor=anchor, text=dt.strftime("%d/%m %Hh"), fill="#999", font=("Monaco", 7))
+                    tx = x + (idx / max(1, n-1)) * w
+                    # Compute Y position on the actual data line
+                    data_y = y + h - ((clean[idx] - d_min) / (d_max - d_min)) * h
+                    dt = datetime.datetime.fromtimestamp(times[idx])
+                    is_peak = idx > 0 and idx < n-1 and clean[idx] > clean[idx-1] and clean[idx] > clean[idx+1]
+                    is_valley = idx > 0 and idx < n-1 and clean[idx] < clean[idx-1] and clean[idx] < clean[idx+1]
+                    # Vertical guide line from data point to bottom axis
+                    self.canvas.create_line(tx, data_y, tx, y + h, fill="#555", dash=(2, 3), width=1)
+                    # Big prominent dot placed ON the data line
+                    r = 9  # prominent radius
+                    if is_peak:
+                        self.canvas.create_oval(tx-r, data_y-r, tx+r, data_y+r, fill="white", outline=color, width=3)
+                    elif is_valley:
+                        self.canvas.create_oval(tx-r, data_y-r, tx+r, data_y+r, fill=color, outline="white", width=3)
+                    elif idx == mark_idx:
+                        r = 11
+                        self.canvas.create_oval(tx-r, data_y-r, tx+r, data_y+r, fill="yellow", outline="white", width=3)
+                    else:
+                        self.canvas.create_oval(tx-r, data_y-r, tx+r, data_y+r, fill=color, outline="#666", width=2)
+                    # Diagonal rotated time label below axis with dark background pill
+                    lbl_txt = dt.strftime("%d/%m %Hh")
+                    lx, ly = tx, y + h + 18
+                    self.canvas.create_rectangle(lx-22, ly-5, lx+22, ly+10, fill="#111", outline="#333", width=1)
+                    self.canvas.create_text(lx, ly+2, anchor="center", text=lbl_txt, fill="#ddd", font=("Monaco", 8, "bold"), angle=-45)
         self.canvas.create_text(x-5, y, anchor="ne", text=f"{d_max:.1f}", fill="white", font=("Monaco", 7))
         self.canvas.create_text(x-5, y+h, anchor="se", text=f"{d_min:.1f}", fill="white", font=("Monaco", 7))
+        # Store zone for hover tooltip lookup
+        self._graph_zones.append({"x": x, "y": y, "w": w, "h": h, "clean": clean, "times": times, "label": label, "color": color, "d_min": d_min, "d_max": d_max})
 
     def project_3d(self, lat_deg: float, lon_deg: float, roll_rad: float, pitch_rad: float, yaw_rad: float, radius: float) -> tuple[float, float, float]:
         lat, lon = math.radians(lat_deg), math.radians(lon_deg)
