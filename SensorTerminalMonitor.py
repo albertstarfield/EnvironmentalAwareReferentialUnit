@@ -89,12 +89,13 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    # === macOS Wake Lock (IOKit Power Assertion) ===
-    # Prevent the system from sleeping while the viewer is active.
-    # Uses IOPMAssertionCreateWithName — the same API that QuickTime and
-    # AVFoundation use during video playback to hold a power assertion.
-    # The assertion is automatically released at interpreter exit via atexit.
+    # === macOS Wake Lock (IOKit Power Assertions) ===
+    # Hold two IOKit assertions to prevent system sleep while the viewer is active:
+    #   1. PreventUserIdleSystemSleep — prevents idle sleep (same as QuickTime/AVFoundation)
+    #   2. AudioPlayback — tells macOS audio is active, prevents sleep during playback
+    # Both are released at interpreter exit via atexit.
     _WAKELOCK_ID = ctypes.c_uint32(0)
+    _AUDIOLOCK_ID = ctypes.c_uint32(0)
     if sys.platform == "darwin":
         try:
             _IOKit = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/IOKit.framework/IOKit")
@@ -119,30 +120,48 @@ if __name__ == "__main__":
             _IOKit.IOPMAssertionRelease.argtypes = [ctypes.c_uint32]
 
             _kCFStringEncodingUTF8 = 0x08000100
-            _cfstr_type = _CF.CFStringCreateWithCString(
+
+            # Assertion 1: PreventUserIdleSystemSleep (video/display wakelock)
+            _cfstr_idle_type = _CF.CFStringCreateWithCString(
                 None, b"PreventUserIdleSystemSleep", _kCFStringEncodingUTF8
             )
-            _cfstr_name = _CF.CFStringCreateWithCString(
+            _cfstr_idle_name = _CF.CFStringCreateWithCString(
                 None, b"EARU SensorTerminalMonitor", _kCFStringEncodingUTF8
             )
-            # kIOPMAssertionLevelOn = 255
             _IOKit.IOPMAssertionCreateWithName(
-                _cfstr_type, ctypes.c_uint32(255), _cfstr_name,
+                _cfstr_idle_type, ctypes.c_uint32(255), _cfstr_idle_name,
                 ctypes.byref(_WAKELOCK_ID)
             )
-            _CF.CFRelease(_cfstr_type)
-            _CF.CFRelease(_cfstr_name)
+            _CF.CFRelease(_cfstr_idle_type)
+            _CF.CFRelease(_cfstr_idle_name)
+
+            # Assertion 2: AudioPlayback (audio wakelock)
+            _cfstr_audio_type = _CF.CFStringCreateWithCString(
+                None, b"AudioPlayback", _kCFStringEncodingUTF8
+            )
+            _cfstr_audio_name = _CF.CFStringCreateWithCString(
+                None, b"EARU SensorTerminalMonitor Audio", _kCFStringEncodingUTF8
+            )
+            _IOKit.IOPMAssertionCreateWithName(
+                _cfstr_audio_type, ctypes.c_uint32(255), _cfstr_audio_name,
+                ctypes.byref(_AUDIOLOCK_ID)
+            )
+            _CF.CFRelease(_cfstr_audio_type)
+            _CF.CFRelease(_cfstr_audio_name)
         except Exception:
             pass
 
     import atexit as _atexit
-    def _release_wakelock():
-        if _WAKELOCK_ID.value != 0 and sys.platform == "darwin":
+    def _release_wakelocks():
+        if sys.platform == "darwin":
             try:
-                _IOKit.IOPMAssertionRelease(_WAKELOCK_ID)
+                if _WAKELOCK_ID.value != 0:
+                    _IOKit.IOPMAssertionRelease(_WAKELOCK_ID)
+                if _AUDIOLOCK_ID.value != 0:
+                    _IOKit.IOPMAssertionRelease(_AUDIOLOCK_ID)
             except Exception:
                 pass
-    _atexit.register(_release_wakelock)
+    _atexit.register(_release_wakelocks)
 
 def generate_avionics_chimes() -> None:
     """Generates professional avionics-style chimes with linear fade release."""
