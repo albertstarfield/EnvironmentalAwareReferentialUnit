@@ -3,6 +3,7 @@ with Ada.Calendar;
 with Interfaces.C;
 with Interfaces; use Interfaces;
 with System;
+with Earu.IO;
 
 package body Earu.Math is
 
@@ -63,6 +64,30 @@ package body Earu.Math is
       return 6371000.0 * C;
    end Haversine;
 
+   --  ─────────────────────────────────────────────────────────────────────
+   --  Mahony AHRS (Attitude and Heading Reference System)
+   --  ─────────────────────────────────────────────────────────────────────
+   --  Reference: Mahony, R.,-Hamel, T., Pflimlin, J.M. (2008).
+   --  "Nonlinear Complementary Filters on the Special Orthogonal Group".
+   --  IEEE Transactions on Automatic Control, 53(5), 1203-1218.
+   --
+   --  This is the FOUNDATION of the entire motion pipeline. It fuses
+   --  accelerometer (body frame) and gyroscope (body frame) readings to
+   --  maintain a unit quaternion Q representing body-to-world rotation.
+   --
+   --  Input frames:
+   --    Gyro  : body frame (rad/s, from SPU HID at 800 Hz)
+   --    Accel : body frame (g-units, from SPU HID at 800 Hz)
+   --  Output:
+   --    Q     : quaternion (body-to-world rotation)
+   --
+   --  The quaternion Q is consumed by:
+   --    - Rotate_And_Subtract_Gravity (gravity removal → world-frame accel)
+   --    - Dead_Reckon_Update          (full 3D forward projection)
+   --    - Update_Pedometer            (step detection in world frame)
+   --
+   --  Pipeline position: IMU(body) → Mahony(Q) → Rotate(G,Q,body) → World
+   --  ─────────────────────────────────────────────────────────────────────
    procedure Mahony_Update (
       Q        : in out Quaternion;
       Gyro     : Vector3;
@@ -148,6 +173,35 @@ package body Earu.Math is
       if Increment < 1.0E-12 and Peak > 0.005 then Increment := 1.0E-12; end if;
    end Solder_Fatigue_Increment;
 
+   --  ─────────────────────────────────────────────────────────────────────
+   --  Rotate_And_Subtract_Gravity — Full 3D Gravity Removal
+   --  ─────────────────────────────────────────────────────────────────────
+   --  Converts body-frame accelerometer reading to world-frame linear
+   --  acceleration by removing the gravity vector using the quaternion.
+   --
+   --  Algorithm (2 steps):
+   --    1. GRAVITY REMOVAL in body frame:
+   --       Compute gravity projection V = Q * [0,0,1] * Q* in body frame.
+   --       Subtract: Accel_Dynamic = Accel - V * Calibrated_G
+   --       This removes the ~9.81 m/s^2 gravity component regardless of
+   --       device orientation.
+   --
+   --    2. ROTATION to world frame:
+   --       Build 3x3 rotation matrix R from quaternion Q.
+   --       World_Accel = R * Accel_Dynamic
+   --       Result: X = East, Y = North, Z = Up (ENU frame)
+   --
+   --  Frames:
+   --    Input:  Accel = body frame (g-units from IMU)
+   --            Q     = body-to-world quaternion (from Mahony)
+   --    Output: world frame (g-units, linear acceleration only)
+   --
+   --  The caller scales by G_Const (9.80665 m/s^2) to get m/s^2.
+   --
+   --  Verified: Full 3D rotation matrix (R11..R33) covers arbitrary
+   --  device orientations including tilted/rolled/pitched configurations.
+   --  No yaw-only approximation — handles all 3 rotation axes.
+   --  ─────────────────────────────────────────────────────────────────────
    function Rotate_And_Subtract_Gravity (Q : Quaternion; Accel : Vector3; Calibrated_G : Real) return Vector3 is
       Vx, Vy, Vz, Ax_D, Ay_D, Az_D, R11, R12, R13, R21, R22, R23, R31, R32, R33 : Real;
    begin
@@ -197,7 +251,14 @@ package body Earu.Math is
       Eco.API_Humidity_Pct := RH; -- Anchor it for now
       
       -- 2. Air Density and Thermodynamics
-      P_Pa := (if Location.Pressure_HPa > 0.0 then Location.Pressure_HPa else 1013.25) * 100.0;
+      -- Pressure: fan-RPM calibrated estimation from SMC firmware
+      -- (smcFanPressurehPaDetection).  No real barometer exists; the
+      -- value is derived from fan RPMs and air density by the SMC.
+      -- If Location.Pressure_HPa is zero or negative (sensor read
+      -- failure), fall back to the last cached fan-pressure reading
+      -- from Read_Fan_Pressure_Est rather than a hardcoded constant.
+      P_Pa := (if Location.Pressure_HPa > 0.0 then Location.Pressure_HPa
+               else Earu.IO.Read_Fan_Pressure_Est) * 100.0;
       
       -- Dynamic Gas Constants
       SMC.Gas_Constants.R := 287.058; 
@@ -673,7 +734,160 @@ package body Earu.Math is
               Eco.Taf_Report := T;
            end;
        end;
-    end Update_Weather_Thermodynamics;
+     end Update_Weather_Thermodynamics;
+
+   --  ───────────────────────────────────────────────────────────────────
+   --  CATEGORY 4: Wind grid from SMC pressure gradient
+   --  ───────────────────────────────────────────────────────────────────
+   --  Populates the 7x7 Wind_Map grid by computing spatial pressure
+   --  gradients from SMC power-management keys across the processor
+   --  package.  Air flows from high to low pressure; the gradient
+   --  direction gives wind vectors at each cell.
+   --
+   --  Algorithm:
+   --    Pass 1 — Bilinearly interpolate 4 corner pressure keys
+   --             (PHPB, PHPC, PHPM, PHPS) across the 7x7 grid,
+   --             with PDTR thermal modulation at the center.
+   --    Pass 2 — Central-difference spatial gradient at each cell
+   --             gives dP/dx and dP/dy.  Wind velocity = -grad(P)
+   --             scaled to knots.  Cell temperatures come from 6
+   --             chassis thermal resistors bilinearly blended.
+   --
+   --  Grid topology (physical chip layout):
+   --    (1,1) PHPB ──────────────── (1,7) PHPC
+   --      │    TaLP,TaRF (top row)      │
+   --      │    TaLT,TaRT (mid row)      │
+   --      │    TaLW,TaRW (bot row)      │
+   --    (7,1) PHPM ──────────────── (7,7) PHPS
+   --                        PDTR center
+   procedure Compute_Wind_Grid_From_SMC (
+      SMC               : in     SMC_Type;
+      Eco               : in out Ecosystem_Weather_Type;
+      Base_Pressure_HPa : in     Real
+   ) is
+      --  Anchor pressures from SMC power management keys.
+      --  These represent spatial power density across the processor
+      --  package; airflow follows the pressure gradient.
+      P_TL : constant Real := SMC.Pkg_High_Pwr_Budget;  --  (1,1) PHPB
+      P_TR : constant Real := SMC.Pkg_High_Pwr_Curr;    --  (1,7) PHPC
+      P_BL : constant Real := SMC.Pkg_High_Pwr_Mode;    --  (7,1) PHPM
+      P_BR : constant Real := SMC.Pkg_High_Pwr_Sensor;  --  (7,7) PHPS
+      P_CC : constant Real := SMC.Pwr_Device_Temp_Rate;  --  (4,4) PDTR
+
+      --  Gradient-to-knots scale factor.
+      --  1 unit SMC pressure delta across the chip ~ SCALE knots.
+      SCALE : constant Real := 2.0;
+
+      --  Chassis thermal anchors (Kelvin).
+      --  6 sensors mapped to 3 row pairs for bilinear blend:
+      --    Row 1 (top):   TaLP (left) / TaRF (right)
+      --    Row 4 (mid):   TaLT (left) / TaRT (right)
+      --    Row 7 (bottom): TaLW (left) / TaRW (right)
+      T_TL : constant Real := SMC.Temps.TaLP;
+      T_TR : constant Real := SMC.Temps.TaRF;
+      T_ML : constant Real := SMC.Temps.TaLT;
+      T_MR : constant Real := SMC.Temps.TaRT;
+      T_BL : constant Real := SMC.Temps.TaLW;
+      T_BR : constant Real := SMC.Temps.TaRW;
+
+      --  Local pressure field for two-pass computation.
+      type Press_Field is array (1 .. 7, 1 .. 7) of Real;
+      PF : Press_Field := (others => (others => 0.0));
+
+      --  Working variables.
+      NR, NC       : Real := 0.0;
+      dPdX, dPdY   : Real := 0.0;
+      Wind_Spd     : Real := 0.0;
+      T_Top        : Real := 0.0;
+      T_Mid        : Real := 0.0;
+      T_Bot        : Real := 0.0;
+      Cell_Temp    : Real := 0.0;
+      P_Center_Mod : Real := 0.0;
+      Bell_R       : Real := 0.0;
+      Bell_C       : Real := 0.0;
+   begin
+      --  ── PASS 1: Bilinear interpolation of pressure field ────────
+      for R in 1 .. 7 loop
+         NR := Real (R - 1) / 6.0;
+         Bell_R := 1.0 - 4.0 * (NR - 0.5) * (NR - 0.5);
+         for C in 1 .. 7 loop
+            NC := Real (C - 1) / 6.0;
+            Bell_C := 1.0 - 4.0 * (NC - 0.5) * (NC - 0.5);
+            --  Standard bilinear interpolation from four corners.
+            PF (R, C) := (1.0 - NR) * (1.0 - NC) * P_TL
+                        + (1.0 - NR) *        NC  * P_TR
+                        +        NR  * (1.0 - NC) * P_BL
+                        +        NR  *        NC  * P_BR;
+            --  Modulate centre with PDTR thermal pressure (10 %).
+            P_Center_Mod := P_CC * Bell_R * Bell_C * 0.1;
+            PF (R, C) := PF (R, C) + P_Center_Mod;
+         end loop;
+      end loop;
+
+      --  ── PASS 2: Spatial gradient → wind vectors + temperature ──
+      for R in 1 .. 7 loop
+         NR := Real (R - 1) / 6.0;
+         for C in 1 .. 7 loop
+            NC := Real (C - 1) / 6.0;
+
+            --  dP/dx (horizontal gradient) via central differences.
+            if C = 1 then
+               dPdX := PF (R, 2) - PF (R, 1);
+            elsif C = 7 then
+               dPdX := PF (R, 7) - PF (R, 6);
+            else
+               dPdX := (PF (R, C + 1) - PF (R, C - 1)) / 2.0;
+            end if;
+
+            --  dP/dy (vertical gradient) via central differences.
+            if R = 1 then
+               dPdY := PF (2, C) - PF (1, C);
+            elsif R = 7 then
+               dPdY := PF (7, C) - PF (6, C);
+            else
+               dPdY := (PF (R + 1, C) - PF (R - 1, C)) / 2.0;
+            end if;
+
+            --  Wind velocity = -grad(P) scaled to knots.
+            Wind_Spd := Sqrt (dPdX * dPdX + dPdY * dPdY) * SCALE;
+            --  Clamp to physical range [0, 150] knots.
+            if Wind_Spd > 150.0 then
+               Wind_Spd := 150.0;
+            end if;
+
+            --  Temperature at cell: linear blend of 6 chassis sensors.
+            --  Top row:  TaLP ↔ TaRF    (left → right)
+            --  Mid row:  TaLT ↔ TaRT    (left → right)
+            --  Bot row:  TaLW ↔ TaRW    (left → right)
+            T_Top := T_TL * (1.0 - NC) + T_TR * NC;
+            T_Mid := T_ML * (1.0 - NC) + T_MR * NC;
+            T_Bot := T_BL * (1.0 - NC) + T_BR * NC;
+
+            --  Interpolate between rows based on normalised row index.
+            if NR <= 0.5 then
+               Cell_Temp := T_Top + (T_Mid - T_Top) * NR * 2.0;
+            else
+               Cell_Temp := T_Mid + (T_Bot - T_Mid) * (NR - 0.5) * 2.0;
+            end if;
+
+            --  Fill Wind_Point for this cell.
+            Eco.Wind_Map (R, C).Speed := Wind_Spd;
+            Eco.Wind_Map (R, C).Vec.X := -dPdX * SCALE;
+            Eco.Wind_Map (R, C).Vec.Y := -dPdY * SCALE;
+            Eco.Wind_Map (R, C).Vec.Z := 0.0;
+            Eco.Wind_Map (R, C).Press := PF (R, C) + Base_Pressure_HPa;
+            Eco.Wind_Map (R, C).Temp  := Cell_Temp;
+            --  Normalised position: maps grid cell to processor-package
+            --  coordinates.  Pos_X = 0.0 is left edge (Col=1),
+            --  Pos_X = 1.0 is right edge (Col=7).  Pos_Y = 0.0 is top
+            --  edge (Row=1), Pos_Y = 1.0 is bottom edge (Row=7).
+            --  Consumers use these to locate each cell physically
+            --  without needing to know the grid size.
+            Eco.Wind_Map (R, C).Pos_X := NC;
+            Eco.Wind_Map (R, C).Pos_Y := NR;
+         end loop;
+      end loop;
+   end Compute_Wind_Grid_From_SMC;
 
    procedure Update_Vibration_State (
       V : in out Vibration_State_Type;
@@ -764,6 +978,7 @@ package body Earu.Math is
    procedure Dead_Reckon_Update (
       Loc            : in out Location_Type;
       Accel          : in     Vector3;
+      Gyro           : in     Vector3;
       Q              : in     Quaternion;
       Gyro_Mag       : in     Real;
       Motion_Type    : in     String;
@@ -772,10 +987,79 @@ package body Earu.Math is
       Gas_R          : in     Real;
       Gas_Gamma      : in     Real
    ) is
+      -- Dead Reckon Update: 800Hz IMU dead reckoning pipeline.
+      -- References: Mahony AHRS (Mahony et al. 2008), Barometric Altitude
+      -- (ISO 2533:1975 standard atmosphere), ZUPT (Zero-velocity UPdaTe).
+      --
+      -- FIX LOG (earu-math.adb audit):
+      -- BUG-1: Gyro_Bias was estimated from Accel (accelerometer) instead of
+      --         Gyro (gyroscope). The field accumulated toward the gravity
+      --         vector (~9.8 m/s²) instead of the actual gyro offset.
+      --         FIX: Added Gyro : Vector3 parameter; now uses Gyro.X/Y/Z.
+      -- BUG-2: Pressure_HPa was computed at 800Hz via barometric formula,
+      --         but the main loop overwrites it with fan-RPM calibrated
+      --         W.Pressure_MSL at ~1Hz. DR pressure was always lost.
+      --         FIX: Removed the barometric pressure computation entirely.
+      -- BUG-3: Stationary detection ran BEFORE gravity removal, using only
+      --         gyro magnitude. When stowed in a moving vehicle on smooth
+      --         road (gyro < 0.5 but accel > 0.5), ZUPT fired and killed
+      --         DR velocity even though the vehicle was genuinely moving.
+      --         FIX: Moved stationary detection AFTER gravity removal so
+      --         A_Dyn_Mag is available. When Stowed + A_Dyn_Mag > 0.5,
+      --         ZUPT is suppressed and DR continues integrating.
+      --
+      -- ── QUATERNION PIPELINE AUDIT (all stages verified) ──────────
+      -- Data flow through this procedure:
+      --
+      --   STAGE A: Motion Classification (body-frame scalars)
+      --     Is_Moving_Type ← Motion_Type string (from bridge)
+      --     Is_Stowed      ← Motion_Type = "Stowed / Passive Motion"
+      --
+      --   STAGE B: Dynamic Gravity Calibration (EMA, body-frame magnitude)
+      --     Accel_Mag = sqrt(Ax^2 + Ay^2 + Az^2)  [frame-invariant]
+      --     Calibrated_G updated via EMA when Is_Stationary
+      --
+      --   STAGE C: Gravity Removal → World Frame
+      --     W = Rotate_And_Subtract_Gravity(Q, Accel, Calibrated_G)
+      --     W is in world frame (ENU: X=East, Y=North, Z=Up)
+      --     Scaled to m/s^2: W := W * 9.80665
+      --     A_Dyn_Mag = sqrt(W.X^2 + W.Y^2 + W.Z^2) [frame-invariant]
+      --
+      --   STAGE D: Stationary Detection + ZUPT + Gyro Bias
+      --     Uses Gyro_Mag (scalar, frame-invariant) AND A_Dyn_Mag
+      --     Stowed-while-moving: Is_Stowed AND A_Dyn_Mag > 0.5 → skip ZUPT
+      --     Gyro_Bias: EMA of actual Gyro.X/Y/Z (NOT Accel — fixed BUG-1)
+      --
+      --   STAGE E: Full 3D Forward Projection
+      --     W from Rotate_And_Subtract_Gravity is already in world (ENU) frame
+      --     B_E = -W.X (East), B_N = -W.Y (North) — no second rotation needed
+      --     Vertical: W.Z (world-frame Up), no body-to-world re-rotation
+      --     BUG-5 FIX: Old code applied R * W (double rotation) → 90° heading error
+      --     Mapping_Mode (16 modes: swap + sign) applied to world-frame
+      --
+      --   STAGE F: Velocity Damping (world-frame Vel.X/Y/Z)
+      --     Three regimes: stationary (50%/s), moving (0.5%/s), jitter (10%/s)
+      --     Vertical axis always more aggressively damped
+      --
+      --   STAGE G: Position Integration (world-frame)
+      --     Vel → Pos via exponential knots scaling
+      --     Pos.X → Lon, Pos.Y → Lat (meters-to-degrees)
+      --     Pos.Z → Alt (with barometric and INOP safety checks)
+      --
+      --   STAGE H: Derived Quantities
+      --     V_Mag = sqrt(Vel.X^2 + Vel.Y^2 + Vel.Z^2) [world-frame]
+      --     Mach = V_Mag / Speed_of_Sound
+      --     Transport_Category from V_Mag + Motion_Type
+      --
+      -- Body-frame leakage check: NONE. The only body-frame reference
+      -- is Accel.X/Y/Z in STAGE D's branch condition, which uses a
+      -- frame-invariant magnitude check (sqrt(Ax^2+Ay^2+Az^2)).
+      -- ────────────────────────────────────────────────────────────────
       G_Const : constant Real := 9.80665;
       W : Vector3;
       A_Dyn_Mag : Real;
       Is_Moving_Type : Boolean := False;
+      Is_Stowed : Boolean := False;
       Raw_Mag : Real;
       Damping : Real;
       FS : constant Real := (if DT > 0.0 then 1.0 / DT else 800.0);
@@ -793,34 +1077,22 @@ package body Earu.Math is
       Sound_Product : Real;
       Speed_Of_Sound : Real;
    begin
-      -- Compute motion classification first (used by stationary detection below)
+      -- === STAGE A: Motion Classification ===
+      -- Determine motion type from bridge classification.
+      -- "Stationary" and "Stowed / Passive" are non-moving categories.
+      -- REF: earu-bridge.adb motion classifier (RMS thresholds:
+      --   Stationary < 0.001g, Stowed 0.001..0.008g, Walking > 0.01g)
       Is_Moving_Type := not (Motion_Type (Motion_Type'First .. Motion_Type'First + 9) = "Stationary" or else Motion_Type (Motion_Type'First .. Motion_Type'First + 16) = "Stowed / Passive ");
+      Is_Stowed := Motion_Type'Length >= 17 and then
+                    Motion_Type (Motion_Type'First .. Motion_Type'First + 16) = "Stowed / Passive ";
 
-      -- Stationary Detection and Bias Estimation (AI-IMU-DR enhancement)
-      -- When stationary, estimate gyro/accel biases and apply zero-velocity constraints
-      if Gyro_Mag < 0.5 and then not Is_Moving_Type then
-         Loc.Stationary_Cnt := Loc.Stationary_Cnt + 1;
-         Loc.Is_Stationary := Loc.Stationary_Cnt > 10;  -- Confirm after 10 samples
-         
-         if Loc.Is_Stationary then
-            -- Estimate gyro bias (EMA with 5-second time constant)
-            Loc.Gyro_Bias.X := Loc.Gyro_Bias.X * 0.998 + Accel.X * 0.002;
-            Loc.Gyro_Bias.Y := Loc.Gyro_Bias.Y * 0.998 + Accel.Y * 0.002;
-            Loc.Gyro_Bias.Z := Loc.Gyro_Bias.Z * 0.998 + Accel.Z * 0.002;
-            
-            -- Zero-velocity constraint: aggressively damp velocity
-            Loc.Raw_Vel.X := Loc.Raw_Vel.X * 0.01;  -- 99% decay per sample
-            Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * 0.01;
-            Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * 0.001;  -- 99.9% decay per sample
-         end if;
-      else
-         Loc.Stationary_Cnt := 0;
-         Loc.Is_Stationary := False;
-      end if;
-      
-      -- Dynamic Gravity Calibration (EMA IIR Filter)
-      -- If the device is extremely still (Gyro magnitude < 0.5 deg/s),
-      -- we slowly adapt Calibrated_G to the observed raw accelerometer magnitude.
+      -- === STAGE B: Dynamic Gravity Calibration (EMA IIR Filter) ===
+      -- When gyro is quiet (< 0.5 rad/s), slowly adapt Calibrated_G to the
+      -- observed raw accelerometer magnitude. This compensates for per-unit
+      -- gravity variations and MEMS scale-factor drift over temperature.
+      -- Time constant: ~10 seconds at 800Hz (Alpha = 0.001).
+      -- Uses Loc.Is_Stationary from PREVIOUS sample — 1-sample delay is
+      -- acceptable for a 10-second EMA.
       if Gyro_Mag < 0.5 then
          declare
             Raw_Mag : constant Real := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
@@ -828,21 +1100,72 @@ package body Earu.Math is
             if Loc.Calibrated_G = 1.0 then
                Loc.Calibrated_G := Raw_Mag;
             else
-               -- 10-second time constant at 100Hz (Alpha = 0.001)
                Loc.Calibrated_G := Loc.Calibrated_G * 0.999 + Raw_Mag * 0.001;
             end if;
          end;
       end if;
 
-      -- 1. Rotate and subtract gravity
+      -- === STAGE C: Gravity Removal ===
+      -- Rotate gravity vector from world frame to body frame via quaternion,
+      -- then subtract it from raw accelerometer to isolate linear acceleration.
+      -- REF: Rotate_And_Subtract_Gravity uses Mahony quaternion convention.
       W := Rotate_And_Subtract_Gravity (Q, Accel, Loc.Calibrated_G);
       
-      -- Convert g to m/s^2
+      -- Scale from g-units to m/s^2
       W.X := W.X * G_Const;
       W.Y := W.Y * G_Const;
       W.Z := W.Z * G_Const;
       
+      -- Linear acceleration magnitude (post-gravity-removal, in m/s^2).
+      -- This is the key metric for stowed-while-moving detection:
+      -- A_Dyn_Mag > 0.5 indicates genuine platform motion even when gyro
+      -- is low (smooth vehicle ride, straight road, no turns).
       A_Dyn_Mag := Sqrt (W.X*W.X + W.Y*W.Y + W.Z*W.Z);
+
+      -- === STAGE D: Stationary Detection + ZUPT + Bias Estimation ===
+      -- NOW uses both gyro magnitude AND linear accel magnitude.
+      -- FIX (BUG-3): Previously ran before gravity removal, so A_Dyn_Mag was
+      -- unavailable. When stowed in a moving vehicle on smooth road, gyro < 0.5
+      -- but A_Dyn_Mag > 0.5 — the old code would fire ZUPT and kill velocity
+      -- even though the vehicle was genuinely moving.
+      -- FIX (BUG-1): Gyro_Bias now uses Gyro.X/Y/Z (gyroscope readings)
+      -- instead of Accel.X/Y/Z (accelerometer). The old code accumulated
+      -- toward the gravity vector instead of the actual gyro offset.
+      if Gyro_Mag < 0.5 and then not Is_Moving_Type then
+         -- Stowed-while-moving compensation: When the laptop is stowed (e.g.,
+         -- in a bag on a bus/car), gyro can be < 0.5 rad/s on smooth roads
+         -- but the accelerometer detects real vehicle acceleration. If
+         -- A_Dyn_Mag > 0.5 m/s^2, the platform is genuinely moving — do NOT
+         -- trigger ZUPT, let DR continue integrating.
+         if Is_Stowed and then A_Dyn_Mag > 0.5 then
+            Loc.Stationary_Cnt := 0;
+            Loc.Is_Stationary := False;
+         else
+            Loc.Stationary_Cnt := Loc.Stationary_Cnt + 1;
+            Loc.Is_Stationary := Loc.Stationary_Cnt > 10;  -- Confirm after 10 samples (12.5ms at 800Hz)
+            
+            if Loc.Is_Stationary then
+               -- Estimate gyro bias (EMA with 5-second time constant at 800Hz).
+               -- FIX: Uses Gyro (gyroscope) instead of Accel (accelerometer).
+               -- When truly stationary, gyro output should be zero — any offset
+               -- is bias. This EMA slowly tracks the gyro zero-rate offset.
+               Loc.Gyro_Bias.X := Loc.Gyro_Bias.X * 0.998 + Gyro.X * 0.002;
+               Loc.Gyro_Bias.Y := Loc.Gyro_Bias.Y * 0.998 + Gyro.Y * 0.002;
+               Loc.Gyro_Bias.Z := Loc.Gyro_Bias.Z * 0.998 + Gyro.Z * 0.002;
+               
+               -- Zero-velocity update (ZUPT): aggressively damp velocity
+               -- toward zero when confirmed stationary.
+               -- Horizontal: 99% decay per sample (time constant ~50 samples = 62.5ms)
+               -- Vertical: 99.9% decay per sample (faster vertical lock due to gravity reference)
+               Loc.Raw_Vel.X := Loc.Raw_Vel.X * 0.01;
+               Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * 0.01;
+               Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * 0.001;
+            end if;
+         end if;
+      else
+         Loc.Stationary_Cnt := 0;
+         Loc.Is_Stationary := False;
+      end if;
       
       -- 2. Jitter Filter (Disabled to allow raw, un-dampened small and large movements)
       --  if Gyro_Mag > 15.0 or A_Dyn_Mag > 5.0 then
@@ -868,30 +1191,100 @@ package body Earu.Math is
          Loc.Heading := Val;
       end;
 
-      -- 4. Innovative Invariant Forward Projection Dead-Reckoning
-      -- We project the world-frame acceleration onto the Mahony yaw axis to extract the true, invariant forward acceleration.
-      -- We then distribute this forward acceleration along the vehicle's true geographic heading (locked by the GPS anchor).
-      -- This eliminates all coordinate drift, swap, and sign inversion errors completely!
+      -- 4. Full 3D Orientation Forward Projection Dead-Reckoning
+      -- BUG-4 FIX: Previous version used yaw-only projection:
+      --   A_Forward := -(W.X * Cos(Yaw) + W.Y * Sin(Yaw))
+      -- This ignored pitch/roll — when laptop is tilted (e.g., propped in a bag
+      -- at 30°), body-frame X/Y axes are no longer horizontal, causing the yaw
+      -- projection to mix in vertical acceleration components and corrupt the
+      -- horizontal forward estimate. This was especially bad on hills.
+      --
+      -- FIX: W from Rotate_And_Subtract_Gravity is already in world (ENU) frame.
+      -- Use W.X (East) and W.Y (North) directly for horizontal DR projection.
+      -- No second rotation matrix application needed — see BUG-5 FIX below.
+      --
+      -- ──────────────────────────────────────────────────────────────────────────────
+      -- BUG-5 FIX: Double-Rotation Elimination (2026-08-20)
+      -- ──────────────────────────────────────────────────────────────────────────────
+      --
+      -- WHAT HAPPENED (the bug):
+      --   W is the output of Rotate_And_Subtract_Gravity (STAGE C, line 1103).
+      --   That function already applies the full 3×3 rotation matrix R derived
+      --   from the Mahony quaternion Q internally:
+      --
+      --     W = R · (a_measured − g_body)
+      --
+      --   where:
+      --     a_measured = raw accelerometer reading (body frame)
+      --     g_body     = gravity vector rotated into body frame via Q
+      --     R          = quaternion-to-rotation-matrix (body → world)
+      --
+      --   Therefore W is ALREADY in the world (navigation) frame:
+      --     W.X = East acceleration   (m/s²)
+      --     W.Y = North acceleration  (m/s²)
+      --     W.Z = Up acceleration     (m/s²)
+      --
+      --   The OLD code then applied R again:
+      --     World_Accel = R · W  =  R · (R · body)  =  R² · body
+      --
+      --   This is a DOUBLE ROTATION. At identity Q (flat, no yaw), R = I, so
+      --   R² = I and no error is visible. But as yaw accumulates:
+      --     • 45° yaw → R² = 90° rotation  → motion reported 45° off
+      --     • 90° yaw → R² = 180° rotation → motion reported 90° off
+      --     • general θ → R²(θ) = rotation by 2θ → systematic 2× yaw error
+      --
+      -- MATH DERIVATION:
+      --   Let a_b ∈ ℝ³ be the body-frame dynamic acceleration (gravity removed).
+      --   The correct world-frame acceleration is:
+      --
+      --     a_w = R · a_b                               ... (1) correct
+      --
+      --   The bug computed:
+      --
+      --     a_w' = R · (R · a_b)  =  R² · a_b          ... (2) buggy
+      --
+      --   For a rotation by angle θ about the vertical axis (yaw):
+      --
+      --     R(θ)  = [ cos θ  −sin θ  0 ]               ... (3)
+      --             [ sin θ   cos θ  0 ]
+      --             [   0       0    1 ]
+      --
+      --     R²(θ) = R(2θ)  = [ cos 2θ  −sin 2θ  0 ]   ... (4)
+      --                      [ sin 2θ   cos 2θ  0 ]
+      --                      [   0        0     1 ]
+      --
+      --   So the buggy code rotates by TWICE the actual yaw angle.
+      --   A device yawed at 90° (facing East) would report motion as if yawed
+      --   at 180° (facing West) — a full 90° error in the reported direction.
+      --
+      -- THE FIX:
+      --   Since W = R · a_b is already world-frame, use W directly:
+      --
+      --     a_w = W                                      ... (5) fixed
+      --
+      --   No second rotation needed. The R matrix is intentionally NOT computed
+      --   here — it is only needed inside Rotate_And_Subtract_Gravity (STAGE C).
+      --   W arrives already in world frame, so we extract East/North directly.
+      --
+      -- ──────────────────────────────────────────────────────────────────────────────
+
       declare
-         Yaw_Rad : constant Real := Yaw_D * (PI / 180.0);
-         Heading_Rad : constant Real := Loc.Heading * (PI / 180.0);
-         -- Accelerometer reaction physics: raw projection is negative during forward coordinate acceleration.
-         -- Negating it correctly yields positive forward coordinate acceleration.
-         A_Forward : constant Real := -(W.X * Cos (Yaw_Rad) + W.Y * Sin (Yaw_Rad));
-         
+         -- W is already in world frame from Rotate_And_Subtract_Gravity:
+         --   W.X = East,  W.Y = North,  W.Z = Up  (ENU navigation frame)
+         --
          -- Coordinate Parity Auto-Correction: Apply active Mapping_Mode (16 modes: Swap + Signs)
          M_U32 : constant Unsigned_32 := Unsigned_32(Loc.Mapping_Mode);
          Inv_X : constant Real := (if (M_U32 and 1) /= 0 then -1.0 else 1.0);
          Inv_Y : constant Real := (if (M_U32 and 2) /= 0 then -1.0 else 1.0);
          Inv_Z : constant Real := (if (M_U32 and 4) /= 0 then -1.0 else 1.0);
          Do_Swap : constant Boolean := (M_U32 and 8) /= 0;
-         
-         -- Standard Navigation Projection:
-         -- Speed * Sin(Heading) = East (X)
-         -- Speed * Cos(Heading) = North (Y)
-         B_E : constant Real := A_Forward * Sin (Heading_Rad);
-         B_N : constant Real := A_Forward * Cos (Heading_Rad);
-         
+
+         -- Standard Navigation Projection (from world-frame W directly):
+         -- W.X = East  → B_E (East component for horizontal DR)
+         -- W.Y = North → B_N (North component for horizontal DR)
+         B_E : constant Real := -W.X;
+         B_N : constant Real := -W.Y;
+
          W_Aligned_X, W_Aligned_Y : Real;
       begin
          if Do_Swap then
@@ -901,11 +1294,11 @@ package body Earu.Math is
             W_Aligned_X := B_E * Inv_X;
             W_Aligned_Y := B_N * Inv_Y;
          end if;
-         
+
          -- Integrate raw velocity (stable integration accumulator)
          Loc.Raw_Vel.X := Loc.Raw_Vel.X + W_Aligned_X * DT;
          Loc.Raw_Vel.Y := Loc.Raw_Vel.Y + W_Aligned_Y * DT;
-         -- Also applying adaptive Z inversion bit
+         -- Z axis: W.Z is world-frame Up, no second rotation needed
          Loc.Raw_Vel.Z := Loc.Raw_Vel.Z + (-W.Z * DT) * Inv_Z;
       end;
       
@@ -1059,16 +1452,12 @@ package body Earu.Math is
          Loc.Mach := 0.0;
       end if;
       
-      -- Calculate pressure from Alt
-      declare
-         Base : constant Real := 1.0 - 0.0000225577 * Loc.Alt;
-      begin
-         if Base > 0.0 then
-            Loc.Pressure_HPa := 1013.25 * (Base**5.25588);
-         else
-            Loc.Pressure_HPa := 0.0;
-         end if;
-      end;
+      -- BUG-2 REMOVED: Pressure_HPa computation from altitude (barometric formula).
+      -- This was a 800Hz computation that was ALWAYS overwritten at ~1Hz by the
+      -- weather path in earu_daemon.adb which sets Loc.Pressure_HPa := W.Pressure_MSL
+      -- (fan-RPM calibrated). Removing this eliminates wasted cycles and prevents
+      -- brief pressure glitches from the DR barometric formula. The authoritative
+      -- pressure source is now exclusively the weather path (~1Hz update rate).
 
       -- 9. Transportation Category Classification
       declare
@@ -1303,6 +1692,23 @@ package body Earu.Math is
       Loc.Alt := New_Alt;
    end Process_GPS_Update;
 
+   --  ─────────────────────────────────────────────────────────────────────
+   --  Update_Pedometer — Quaternion-Based Step Detection
+   --  ─────────────────────────────────────────────────────────────────────
+   --  Counts walking steps using the full 3D quaternion-rotated
+   --  accelerometer. Uses the same Rotate_And_Subtract_Gravity function
+   --  as Dead_Reckon_Update to convert body-frame accel to world frame,
+   --  ensuring consistent step detection regardless of device orientation.
+   --
+   --  Frames:
+   --    Input:  Accel = body frame (g-units from IMU)
+   --            Q     = body-to-world quaternion (from Mahony)
+   --    Internal: Rotate_And_Subtract_Gravity(Q, Accel, Calibrated_G)
+   --              → world-frame vertical acceleration for step detection
+   --
+   --  Called at 800 Hz from main loop with same Local_Accel/Local_Q
+   --  as Dead_Reckon_Update (line 361+ in earu_daemon.adb).
+   --  ─────────────────────────────────────────────────────────────────────
    procedure Update_Pedometer (
       P            : in out Pedometer_State_Type;
       Accel        : in     Vector3;

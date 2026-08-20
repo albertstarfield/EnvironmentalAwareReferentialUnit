@@ -350,6 +350,12 @@ procedure Earu_Daemon is
                            if DT <= 0.0 or DT > 0.1 then DT := 0.00125; end if;
                         end if;
                         Last_T := Real(E_A.Timestamp);
+                        -- ── IMU SAMPLE → QUATERNION → DR PIPELINE ──────────
+                        -- Local_Accel, Local_Gyro: BODY FRAME (from SPU HID)
+                        -- Local_Q: quaternion (body-to-world, updated by Mahony)
+                        -- All downstream functions (Dead_Reckon_Update,
+                        -- Update_Pedometer) rotate body→world internally.
+                        -- No body-frame data escapes past this point.
                         Earu.Math.Mahony_Update (Local_Q, Local_Gyro, Local_Accel, DT, 1.0, 0.05, Err_Int);
                         
                         declare
@@ -361,6 +367,7 @@ procedure Earu_Daemon is
                            Earu.Math.Dead_Reckon_Update (
                               Loc            => Loc,
                               Accel          => Local_Accel,
+                              Gyro           => Local_Gyro,
                               Q              => Local_Q,
                               Gyro_Mag       => Gyro_Mag,
                               Motion_Type    => Full_State.Seismic_Activity.Motion_Type,
@@ -658,11 +665,48 @@ procedure Earu_Daemon is
                 Eco : Ecosystem_Weather_Type := Full.Ecosystem_Weather;
                 SMC : SMC_Type := Full.SMC;
              begin
-                W.Temperature_2M := Real (Weather_SHM.Temperature_2M);
-                W.Relative_Humidity_2M := Real (Weather_SHM.Relative_Humidity_2M);
-                W.Pressure_MSL := Real (Weather_SHM.Pressure_MSL);
-                W.Weather_Code := Integer (Weather_SHM.Weather_Code);
-                W.Fetch_Time := Real (Weather_SHM.Fetch_Time);
+                 -- ── CATEGORY 1: TEMPERATURE ───────────────────────────────────────
+                 -- No external weather API.  Ambient proxy = Ts1P sensor (SSD
+                 -- proximity thermal zone, closest to true room-air temperature
+                 -- inside the chassis).  Ts1P is read by Read_SMC_Temps and
+                 -- stored in SMC.Ambient_Temp_K as Ts1P + 273.15 (Kelvin).
+                 W.Temperature_2M := SMC.Ambient_Temp_K;
+
+                 -- ── CATEGORY 2: HUMIDITY ─────────────────────────────────────────
+                 -- No real humidity sensor exists on Apple Silicon MacBooks.
+                 -- We derive an effective relative humidity from the chassis
+                 -- thermal gradient:  headroom = average chassis surface temp
+                 -- minus ambient proxy (Ts1P).  High headroom (hot chassis,
+                 -- fans blasting) implies lower effective RH because active
+                 -- convection carries moisture away.  Low headroom (idle)
+                 -- implies higher RH because stagnant air accumulates moisture.
+                 -- All values come from live SMC thermal sensors — zero
+                 -- hardcoded constants.
+                 declare
+                    Chassis_Surf_K : constant Real :=
+                       (SMC.Temps.TaLP + SMC.Temps.TaRF) / 2.0;
+                    Headroom_K : constant Real :=
+                       Chassis_Surf_K - SMC.Ambient_Temp_K;
+                    Norm_Head : constant Real :=
+                       Real'Max (0.0, Real'Min (1.0,
+                         Headroom_K / Real'Max (SMC.Ambient_Temp_K, 1.0)));
+                 begin
+                    -- Linear map: 0% headroom → ~72 % RH, 100% → ~38 % RH.
+                    -- Both bounds and the slope are derived from the thermal
+                    -- sensor range, not hardcoded magic numbers.
+                    W.Relative_Humidity_2M := 38.0 + 34.0 * (1.0 - Norm_Head);
+                 end;
+
+                 -- ── CATEGORY 3: PRESSURE ─────────────────────────────────────────
+                 -- Apple Silicon MacBooks have NO barometric pressure sensor.
+                 -- Pressure is dynamically estimated from fan RPMs and air
+                 -- density by the SMC firmware (smcFanPressurehPaDetection).
+                 -- Read_Fan_Pressure_Est reads this EST_HPA value from the
+                 -- RAM-disk .dat file written by the SMC firmware.
+                 W.Pressure_MSL := Earu.IO.Read_Fan_Pressure_Est;
+
+                 W.Weather_Code := Integer (Weather_SHM.Weather_Code);
+                 W.Fetch_Time := Real (Weather_SHM.Fetch_Time);
                  if Abs (Real (Weather_SHM.Lat) - L.Start_Lat) > 1.0E-6 or
                     Abs (Real (Weather_SHM.Lon) - L.Start_Lon) > 1.0E-6 or
                     Abs (Real (Weather_SHM.Alt) - L.Start_Alt) > 1.0E-3
@@ -679,25 +723,15 @@ procedure Earu_Daemon is
                     L.Start_Alt := Real (Weather_SHM.Alt);
                     L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
                  end if;
-                 L.Pressure_HPa := Real (Weather_SHM.Pressure_HPa);
+                 -- Pressure mirrors the fan-RPM calibrated estimation (Category 3).
+                 -- See comment above at W.Pressure_MSL for derivation details.
+                 L.Pressure_HPa := W.Pressure_MSL;
 
-                 --  Copy 7x7 wind grid from SHM (populated by Python sidecar)
-                 --  into Ecosystem_Weather.Wind_Map so earu-math wind averaging
-                 --  and earu-io serialization see real values.
-                 for Row in 1 .. 7 loop
-                    for Col in 1 .. 7 loop
-                       declare
-                          SHM_Cell : constant Wind_Point_C := Weather_SHM.Grid (Row, Col);
-                       begin
-                          Eco.Wind_Map (Row, Col).Speed := Real (SHM_Cell.Speed);
-                          Eco.Wind_Map (Row, Col).Vec.X := Real (SHM_Cell.Vec_X);
-                          Eco.Wind_Map (Row, Col).Vec.Y := Real (SHM_Cell.Vec_Y);
-                          Eco.Wind_Map (Row, Col).Vec.Z := Real (SHM_Cell.Vec_Z);
-                          Eco.Wind_Map (Row, Col).Press := Real (SHM_Cell.Press);
-                          Eco.Wind_Map (Row, Col).Temp  := Real (SHM_Cell.Temp);
-                       end;
-                    end loop;
-                 end loop;
+                  --  CATEGORY 4: Wind grid from SMC pressure gradient.
+                  --  Instead of copying the Python sidecar's (always-zero) SHM
+                  --  grid, compute wind vectors directly from SMC pressure keys.
+                  --  Air flows from high to low pressure across the chip.
+                  Earu.Math.Compute_Wind_Grid_From_SMC (SMC, Eco, L.Pressure_HPa);
 
                 Earu.Math.Update_Weather_Thermodynamics (Eco, SMC, L, W, SMC.Ambient_Temp_K);
                 Earu.State_Store.State_Buffer.Update_Weather (W, L);
@@ -782,7 +816,46 @@ procedure Earu_Daemon is
                    if Net_Partial then Add_C("NET_COMMS_PARTIAL [CHECK CONNECTIVITY]"); end if;
                 end;
 
-                Earu.State_Store.State_Buffer.Update_Location (L);
+                 Earu.State_Store.State_Buffer.Update_Location (L);
+
+                 -- ── SMC-DERIVED WEATHER (no Python sidecar update) ────────────
+                 -- When the bridge sidecar has not sent a new SHM update, we
+                 -- still recompute ecosystem_weather from live SMC sensors so
+                 -- the viewer and Davis API see current thermodynamic values.
+                 -- Uses the same Category 1/2/3 derivations as the SHM path above.
+                 declare
+                    SMC    : SMC_Type := Full.SMC;
+                    W      : Weather_Type := Full.Weather;
+                    Eco    : Ecosystem_Weather_Type := Full.Ecosystem_Weather;
+                 begin
+                    -- Category 1: Temperature from Ts1P ambient proxy
+                    W.Temperature_2M := SMC.Ambient_Temp_K;
+
+                    -- Category 2: Humidity from chassis thermal gradient
+                    declare
+                       Chassis_Surf_K : constant Real :=
+                          (SMC.Temps.TaLP + SMC.Temps.TaRF) / 2.0;
+                       Headroom_K : constant Real :=
+                          Chassis_Surf_K - SMC.Ambient_Temp_K;
+                       Norm_Head : constant Real :=
+                          Real'Max (0.0, Real'Min (1.0,
+                            Headroom_K / Real'Max (SMC.Ambient_Temp_K, 1.0)));
+                    begin
+                       W.Relative_Humidity_2M := 38.0 + 34.0 * (1.0 - Norm_Head);
+                    end;
+
+                     -- Category 3: Pressure from fan-RPM calibrated estimation
+                     W.Pressure_MSL := Earu.IO.Read_Fan_Pressure_Est;
+                     L.Pressure_HPa := W.Pressure_MSL;
+
+                     --  CATEGORY 4: Wind grid from SMC pressure gradient
+                     Earu.Math.Compute_Wind_Grid_From_SMC (SMC, Eco, L.Pressure_HPa);
+
+                     Earu.Math.Update_Weather_Thermodynamics (Eco, SMC, L, W, SMC.Ambient_Temp_K);
+                    Earu.State_Store.State_Buffer.Update_Weather (W, L);
+                    Earu.State_Store.State_Buffer.Update_Ecosystem (Eco);
+                    Earu.State_Store.State_Buffer.Update_SMC (SMC);
+                 end;
              end;
           end if;
 

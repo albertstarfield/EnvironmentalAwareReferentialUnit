@@ -570,6 +570,11 @@ package body Earu.IO is
       AP ("inOrderToSurviveDayMustHibernate", YN (State.SMC.Must_Hibernate));
       AP ("airflow_inlet_k",  F (State.SMC.Airflow_Inlet_K));
       AP ("airflow_outlet_k", F (State.SMC.Airflow_Outlet_K));
+      --  Airflow pair channels (dual-fan MacBook Pro 14" M2 Pro)
+      AP ("airflow_inlet_1_k",  F (State.SMC.Airflow_Inlet_1_K));   --  Pair 1: Ts1P ambient
+      AP ("airflow_outlet_1_k", F (State.SMC.Airflow_Outlet_1_K));  --  Pair 1: TaLP left exhaust
+      AP ("airflow_inlet_2_k",  F (State.SMC.Airflow_Inlet_2_K));   --  Pair 2: Ts1P ambient
+      AP ("airflow_outlet_2_k", F (State.SMC.Airflow_Outlet_2_K));  --  Pair 2: TaRF right exhaust
       AP ("talp_k",           F (State.SMC.TaLP_K));
       AP ("tarf_k",           F (State.SMC.TaRF_K));
       AI ("turbo",            State.SMC.Turbo);
@@ -656,7 +661,8 @@ package body Earu.IO is
             begin
                Append (Buf, "[" & F (WP.Speed) & ", [" &
                   F (WP.Vec.X) & ", " & F (WP.Vec.Y) & ", " & F (WP.Vec.Z) &
-                  "], " & F (WP.Press) & ", " & F (WP.Temp) & "]");
+                  "], " & F (WP.Press) & ", " & F (WP.Temp) &
+                  ", " & F (WP.Pos_X) & ", " & F (WP.Pos_Y) & "]");
                if Col < 7 then Append (Buf, ", "); end if;
             end;
          end loop;

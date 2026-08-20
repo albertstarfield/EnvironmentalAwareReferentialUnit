@@ -2,6 +2,7 @@
 # DO NOT USE THIS AS AN LAZY SHORTCUT FOR PROGRAMMING, USE ADA AND USE THIS ONLY AND ONLY FOR MACHINE LEARNING USING PYTHON AND TORCH AND COREML OTHER THAN THAT, PROGRAM ON ADA (ALL) OR C# IF IT'S SYSCALL
 # ALWAYS CHECK using Pyrefly and Ruff after finish modifying and fix all the issue
 # Version: Amaryllis Twilight Migratory
+import ctypes
 import os
 import sys
 import subprocess
@@ -72,6 +73,76 @@ if __name__ == "__main__":
     else:
         sys.stderr.write("Error: ruff dependency not found in environment.\n")
         sys.exit(1)
+
+    # === E-Core Scheduling Restriction ===
+    # This viewer is a passive data display (~15Hz render, file I/O only).
+    # Pin it to efficiency (E) cores via QOS_CLASS_BACKGROUND so it does not
+    # compete with the 800Hz EARU daemon or user foreground apps for P-core
+    # time. Equivalent to launching with `taskpolicy -b`, but self-contained.
+    # QOS_CLASS_BACKGROUND (0x09) = kernel schedules only on E-cores on Apple
+    # Silicon. Falls through silently on non-macOS or unsupported platforms.
+    if sys.platform == "darwin":
+        try:
+            _libc = ctypes.CDLL(None)  # libSystem.B.dylib
+            _QOS_CLASS_BACKGROUND = 0x09
+            _libc.pthread_set_qos_class_self_np(_QOS_CLASS_BACKGROUND, 0)
+        except Exception:
+            pass
+
+    # === macOS Wake Lock (IOKit Power Assertion) ===
+    # Prevent the system from sleeping while the viewer is active.
+    # Uses IOPMAssertionCreateWithName — the same API that QuickTime and
+    # AVFoundation use during video playback to hold a power assertion.
+    # The assertion is automatically released at interpreter exit via atexit.
+    _WAKELOCK_ID = ctypes.c_uint32(0)
+    if sys.platform == "darwin":
+        try:
+            _IOKit = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/IOKit.framework/IOKit")
+            _CF = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+
+            # --- CFStringCreateWithCString: (alloc, chars, encoding) -> CFStringRef ---
+            _CF.CFStringCreateWithCString.restype = ctypes.c_void_p
+            _CF.CFStringCreateWithCString.argtypes = [
+                ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32
+            ]
+            # --- IOPMAssertionCreateWithName: (type, level, name, id*) -> IOReturn ---
+            _IOKit.IOPMAssertionCreateWithName.restype = ctypes.c_int32
+            _IOKit.IOPMAssertionCreateWithName.argtypes = [
+                ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_uint32)
+            ]
+            # --- CFRelease: (cf) -> void ---
+            _CF.CFRelease.restype = None
+            _CF.CFRelease.argtypes = [ctypes.c_void_p]
+            # --- IOPMAssertionRelease: (id) -> IOReturn ---
+            _IOKit.IOPMAssertionRelease.restype = ctypes.c_int32
+            _IOKit.IOPMAssertionRelease.argtypes = [ctypes.c_uint32]
+
+            _kCFStringEncodingUTF8 = 0x08000100
+            _cfstr_type = _CF.CFStringCreateWithCString(
+                None, b"PreventUserIdleSystemSleep", _kCFStringEncodingUTF8
+            )
+            _cfstr_name = _CF.CFStringCreateWithCString(
+                None, b"EARU SensorTerminalMonitor", _kCFStringEncodingUTF8
+            )
+            # kIOPMAssertionLevelOn = 255
+            _IOKit.IOPMAssertionCreateWithName(
+                _cfstr_type, ctypes.c_uint32(255), _cfstr_name,
+                ctypes.byref(_WAKELOCK_ID)
+            )
+            _CF.CFRelease(_cfstr_type)
+            _CF.CFRelease(_cfstr_name)
+        except Exception:
+            pass
+
+    import atexit as _atexit
+    def _release_wakelock():
+        if _WAKELOCK_ID.value != 0 and sys.platform == "darwin":
+            try:
+                _IOKit.IOPMAssertionRelease(_WAKELOCK_ID)
+            except Exception:
+                pass
+    _atexit.register(_release_wakelock)
 
 def generate_avionics_chimes() -> None:
     """Generates professional avionics-style chimes with linear fade release."""
@@ -825,7 +896,7 @@ class PrimaryFlightDisplay:
             {"label": "PROGNOS", "page": 2, "rect": (float(15+2*btn_w), 5.0, float(15+3*btn_w), 55.0)},
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
-            {"label": "METAR", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
+            {"label": "SENSE", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
             {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
             {"label": "WEATHER", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
             {"label": "ENERGY", "page": 9, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
@@ -1634,7 +1705,7 @@ class PrimaryFlightDisplay:
         tc = wz["temperature"] - 273.15
         dp = wz["pressure"] - 1013.25
         # Tooltip box
-        tip_w, tip_h = 200, 95
+        tip_w, tip_h = 200, 110
         tip_x = mx + 14
         tip_y = my - tip_h - 8
         cw = float(self.canvas.winfo_width())
@@ -1661,6 +1732,9 @@ class PrimaryFlightDisplay:
                                 text=f"TEMP: {tc:.1f} C ({wz['temperature']:.1f} K)",
                                 fill="#ff8844", font=("Monaco", 7), tags=tag)
         self.canvas.create_text(tip_x + 8, tip_y + 78, anchor="nw",
+                                text=f"POS: X={wz['pos_x']:.3f}  Y={wz['pos_y']:.3f}",
+                                fill="#88ff88", font=("Monaco", 7), tags=tag)
+        self.canvas.create_text(tip_x + 8, tip_y + 92, anchor="nw",
                                 text=f"VX:{vx:.2f}  VY:{vy:.2f}",
                                 fill="#666", font=("Monaco", 6), tags=tag)
 
@@ -3588,7 +3662,7 @@ class PrimaryFlightDisplay:
         else:
             self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
 
-        self.canvas.create_text(w/2, 40, text=f"METAR/TAF - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
+        self.canvas.create_text(w/2, 40, text=f"SENSE - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
 
         # Parse dynamically compiled METAR and TAF from telemetry data
         metar_taf = weather.get('metar_taf', {})
@@ -3700,6 +3774,8 @@ class PrimaryFlightDisplay:
                     vel = cell[1] if len(cell) > 1 else [0.0, 0.0, 0.0]
                     press = cell[2] if len(cell) > 2 else 1013.25
                     temp = cell[3] if len(cell) > 3 else 293.15
+                    pos_x = cell[4] if len(cell) > 4 else c / 6.0
+                    pos_y = cell[5] if len(cell) > 5 else r / 6.0
                     vx, vy = vel[0], vel[1]
                     x, y = sx+c*cs+cs/2, sy+r*cs+cs/2
                     # Color: intensity-based green→cyan→magenta gradient
@@ -3733,6 +3809,7 @@ class PrimaryFlightDisplay:
                         'intensity': intensity, 'vel': vel,
                         'vx': vx, 'vy': vy,
                         'pressure': press, 'temperature': temp,
+                        'pos_x': pos_x, 'pos_y': pos_y,
                     })
 
     def draw_weather_page(self, w: float, h: float) -> None:

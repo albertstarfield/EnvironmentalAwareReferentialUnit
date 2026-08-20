@@ -101,7 +101,9 @@ package Earu.Types is
       CL_History    : aliased CL_History_Array := (others => (T => 0.0, Lat => 0.0, Lon => 0.0, Alt => 0.0, Pos => (others => 0.0)));
       CL_Count      : aliased Integer := 0;
       
-      -- IMU Bias Estimation (AI-IMU-DR enhancement)
+      -- IMU Bias Estimation (EMA of sensor readings when stationary)
+      -- NOTE: Gyro_Bias is estimated from Gyro.X/Y/Z (NOT Accel) since
+      -- the bug fix that corrected the wrong sensor source (BUG-1).
       Gyro_Bias     : aliased Vector3 := (others => <>);
       Accel_Bias    : aliased Vector3 := (others => <>);
       
@@ -124,6 +126,14 @@ package Earu.Types is
       Vec   : aliased Vector3 := (others => <>);
       Press : aliased Real := 1013.25;
       Temp  : aliased Real := 293.15;
+      --  Normalised position of this cell within the 7×7 grid.
+      --  Pos_X = (Col − 1) / 6   ∈ [0.0 .. 1.0]  (left → right)
+      --  Pos_Y = (Row − 1) / 6   ∈ [0.0 .. 1.0]  (top → bottom)
+      --  Allows consumers (Python viewer, Home Assistant, etc.) to map each
+      --  cell to a physical location on the processor package without needing
+      --  to know the grid dimensions or row/column order.
+      Pos_X : aliased Real := 0.0;
+      Pos_Y : aliased Real := 0.0;
    end record;
    type Wind_Grid is array (1 .. 7, 1 .. 7) of aliased Wind_Point;
 
@@ -150,7 +160,7 @@ package Earu.Types is
       Taf_Report            : aliased String (1 .. 80) := (others => ' ');
       Wind_Speed_Kts        : aliased Real := 0.0;
       Wind_Dir_Deg          : aliased Real := 0.0;
-      Wind_Map              : aliased Wind_Grid := (others => (others => (0.0, (0.0, 0.0, 0.0), 1013.25, 293.15)));
+      Wind_Map              : aliased Wind_Grid := (others => (others => (0.0, (0.0, 0.0, 0.0), 1013.25, 293.15, 0.0, 0.0)));
       Stats                 : aliased Stats_Type := (others => <>);
    end record;
 
@@ -188,7 +198,11 @@ package Earu.Types is
    end record;
 
    type SMC_Temps_Dict is record
-      PSTR : aliased Real := 293.15;
+      --  PSTR: Realtime System Power consumption in Watts (NOT temperature!).
+      --  Despite living in SMC_Temps_Dict, this is a power sensor read from
+      --  sensor_temp_PSTR.dat.  Used for power accumulation, heatflux, and
+      --  efficiency calculations.  Typical range: 5-80W on Apple Silicon.
+      PSTR : aliased Real := 0.0;
       TCMz : aliased Real := 293.15;
       TaLP : aliased Real := 293.15;
       TaLT : aliased Real := 293.15;
@@ -217,8 +231,19 @@ package Earu.Types is
       Temps               : aliased SMC_Temps_Dict := (others => 293.15);
       Fan_RPMs            : aliased Real_Array_2 := (others => 0.0);
       Fan_Targets         : aliased Real_Array_2 := (others => 0.0);
-      Airflow_Inlet_K     : aliased Real := 293.15;
-      Airflow_Outlet_K    : aliased Real := 293.15;
+      --  Airflow temperature pairs: MacBook Pro 14" M2 Pro has two cooling
+      --  channels (dual-fan).  Each channel has its own inlet/outlet pair:
+      --    Pair 1 (Left fan F0Ac):  Inlet_1 = Ts1P (ambient), Outlet_1 = TaLP (left exhaust)
+      --    Pair 2 (Right fan F1Ac): Inlet_2 = Ts1P (ambient), Outlet_2 = TaRF (right exhaust)
+      --  Both channels share the same ambient inlet sensor (Ts1P).
+      --  Airflow_Inlet_K / Airflow_Outlet_K are channel-averaged for backward
+      --  compatibility with downstream consumers that expect a single value.
+      Airflow_Inlet_K     : aliased Real := 293.15;  --  Channel-averaged inlet (K)
+      Airflow_Outlet_K    : aliased Real := 293.15;  --  Channel-averaged outlet (K)
+      Airflow_Inlet_1_K   : aliased Real := 293.15;  --  Pair 1 inlet: Ts1P ambient (K)
+      Airflow_Outlet_1_K  : aliased Real := 293.15;  --  Pair 1 outlet: TaLP left exhaust (K)
+      Airflow_Inlet_2_K   : aliased Real := 293.15;  --  Pair 2 inlet: Ts1P ambient (K)
+      Airflow_Outlet_2_K  : aliased Real := 293.15;  --  Pair 2 outlet: TaRF right exhaust (K)
       TaLP_K              : aliased Real := 293.15;
       TaRF_K              : aliased Real := 293.15;
       Turbo               : aliased Integer := 0;
@@ -241,7 +266,11 @@ package Earu.Types is
        Active_Perf_Mode    : aliased Real := 0.0;   --  aPMX: Active Performance Mode (write to SMC)
        Max_Turbo_Power_Lim : aliased Real := 0.0;   --  mTPL: Max Turbo Power Limit (write to SMC)
        Max_User_Turbo_Lim  : aliased Real := 0.0;   --  mUTL: Max User Turbo Limit (read)
-       Pkg_Power_Tracking  : aliased Real := 255.0;  --  xPPT: Max Package Power Tracking (255=none)
+       --  xPPT: Max Package Power Tracking limit in Watts (NOT realtime power!).
+       --  This is a CONFIGURATION VALUE set by the SMC firmware — the ceiling
+       --  for package power draw.  255 = unlimited/no cap.  For realtime power,
+       --  use SMC.Temps.PSTR (watts) or SMC.Power.
+       Pkg_Power_Tracking  : aliased Real := 255.0;
        Low_Power_Mode_Lim  : aliased Real := 0.0;   --  xLPM: Max Low Power Mode ceiling
        Pkg_High_Pwr_Budget : aliased Real := 0.0;   --  PHPB: Package High Power Budget (W)
        Pkg_High_Pwr_Mode   : aliased Real := 0.0;   --  PHPM: Package High Power Mode (util target)

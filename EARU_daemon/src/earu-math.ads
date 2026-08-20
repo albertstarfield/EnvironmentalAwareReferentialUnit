@@ -58,9 +58,20 @@ package Earu.Math is
       NSrc : Integer
    ) return Event_Type;
 
+   -- Dead_Reckon_Update: 800Hz IMU dead reckoning pipeline.
+   -- Inputs: raw accelerometer, quaternion from Mahony filter, full gyroscope
+   -- vector (for bias estimation), motion classification string, time step,
+   -- ambient temperature, and gas constants for Mach calculation.
+   -- FIX: Added Gyro parameter (full Vector3) to replace the previous bug
+   -- where Gyro_Bias was estimated from accelerometer data instead of gyro.
+   -- FIX: Stowed-while-moving compensation — when Stowed + Gyro < 0.5 but
+   -- A_Dyn_Mag > 0.5, ZUPT is suppressed so DR continues in moving vehicles.
+   -- FIX: Removed Pressure_HPa computation — weather path provides authoritative
+   -- fan-RPM calibrated pressure at ~1Hz; DR's barometric formula was always lost.
    procedure Dead_Reckon_Update (
       Loc            : in out Location_Type;
       Accel          : in     Vector3;
+      Gyro           : in     Vector3;
       Q              : in     Quaternion;
       Gyro_Mag       : in     Real;
       Motion_Type    : in     String;
@@ -84,6 +95,19 @@ package Earu.Math is
       Q            : in     Quaternion;
       Calibrated_G : in     Real;
       Timestamp    : in     Real
+   );
+
+   --  CATEGORY 4: Wind grid from SMC pressure gradient.
+   --  Populates the 7x7 Wind_Map grid by computing spatial pressure
+   --  gradients from SMC power-management keys (PHPB, PHPC, PHPM, PHPS)
+   --  across the processor package.  Air flows from high to low pressure;
+   --  the gradient direction gives wind vectors at each cell.
+   --  Cell temperatures come from chassis thermal resistors (TaLP, TaRF,
+   --  TaLT, TaRT, TaLW, TaRW) bilinearly blended across the grid.
+   procedure Compute_Wind_Grid_From_SMC (
+      SMC               : in     SMC_Type;
+      Eco               : in out Ecosystem_Weather_Type;
+      Base_Pressure_HPa : in     Real
    );
 
 end Earu.Math;

@@ -187,6 +187,9 @@ package body Earu.System_Bridge is
       SMC.Ambient_Temp_K := SMC.Temps.Ts1P + 273.15;
       SMC.TaLP_K := SMC.Temps.TaLP + 273.15;
       SMC.TaRF_K := SMC.Temps.TaRF + 273.15;
+      --  PSTR is REALTIME POWER in Watts, NOT a temperature sensor.
+      --  Despite living in SMC_Temps_Dict and being read from sensor_temp_PSTR.dat,
+      --  this is the system real-time power draw (5-80W typical on Apple Silicon).
       SMC.Power := SMC.Temps.PSTR;
       SMC.Power_Rate_Usage := SMC.Temps.PSTR;
    end Read_SMC_Temps;
@@ -217,6 +220,9 @@ package body Earu.System_Bridge is
       SMC.Active_Perf_Mode    := Read_SMC_Key ("sensor_smc_aPMX.dat");
       SMC.Max_Turbo_Power_Lim := Read_SMC_Key ("sensor_smc_mTPL.dat");
       SMC.Max_User_Turbo_Lim  := Read_SMC_Key ("sensor_smc_mUTL.dat");
+      --  xPPT: Package Power Tracking limit in Watts (CONFIGURATION, NOT realtime!).
+      --  This is the ceiling set by SMC firmware for package power draw. 255 = no cap.
+      --  For realtime power consumption, use SMC.Temps.PSTR or SMC.Power.
       SMC.Pkg_Power_Tracking  := Read_SMC_Key ("sensor_smc_xPPT.dat");
       SMC.Low_Power_Mode_Lim  := Read_SMC_Key ("sensor_smc_xLPM.dat");
       SMC.Pkg_High_Pwr_Budget := Read_SMC_Key ("sensor_smc_PHPB.dat");
@@ -280,13 +286,43 @@ package body Earu.System_Bridge is
       SMC.Est_Today_Power_Wh := Read_Sensor ("sensor_power_est_today_wh.dat");
       SMC.Accum_Power_Month_Wh := Read_Sensor ("sensor_power_month_wh.dat");
       SMC.Accum_Power_Meter_Wh := Read_Sensor ("sensor_power_meter_wh.dat");
-      SMC.Thrust_N := Read_Sensor ("sensor_power_thrust_n.dat");
+      --  Thrust_N: computed by Ada in Update_Weather_Thermodynamics
+      --  (from massflow * velocity).  Do NOT read from a .dat file here;
+      --  the file doesn't exist and Read_Sensor returns 0.0, clobbering
+      --  the Ada-computed value every 5 seconds.
       SMC.Power_Survival_W := Read_Sensor ("sensor_power_survival_w.dat");
       SMC.Pulse_Wake := Read_Sensor ("sensor_pulse_wake.dat");
       SMC.Pulse_Length := Read_Sensor ("sensor_pulse_length.dat");
-      SMC.Heatflux_J := Read_Sensor ("sensor_heatflux_j.dat");
-      SMC.Airflow_Inlet_K := Read_Sensor ("sensor_airflow_inlet_k.dat");
-      SMC.Airflow_Outlet_K := Read_Sensor ("sensor_airflow_outlet_k.dat");
+      --  Heatflux_J: computed by Ada in Update_Weather_Thermodynamics
+      --  (from air_density * V_Dot * Cp * Delta_T).  Do NOT read from a
+      --  .dat file here; the file doesn't exist and Read_Sensor returns
+      --  0.0, clobbering the Ada-computed value and killing cooling
+      --  efficiency to 0%.
+      --  CATEGORY: Airflow Temperature Derivation
+      --  ---------------------------------------------------------------
+      --  No .dat files exist for airflow_inlet_k / airflow_outlet_k.
+      --  Instead, derive from the MacBook Pro 14" M2 Pro dual-fan
+      --  cooling channels using real SMC thermal sensors:
+      --
+      --  Pair 1 (Left fan F0Ac):
+      --    Inlet_1  = Ts1P  (ambient proxy, SSD-proximity thermal zone)
+      --    Outlet_1 = TaLP  (left palm rest, near left fan exhaust vent)
+      --
+      --  Pair 2 (Right fan F1Ac):
+      --    Inlet_2  = Ts1P  (ambient proxy, shared — both fans draw from
+      --                       the same chassis air volume)
+      --    Outlet_2 = TaRF  (right front, near right fan exhaust vent)
+      --
+      --  Airflow_Inlet_K  = channel-averaged inlet  (both = Ts1P)
+      --  Airflow_Outlet_K = channel-averaged outlet  (TaLP + TaRF) / 2
+      --  ---------------------------------------------------------------
+      SMC.Airflow_Inlet_1_K  := SMC.Temps.Ts1P + 273.15;
+      SMC.Airflow_Outlet_1_K := SMC.Temps.TaLP + 273.15;
+      SMC.Airflow_Inlet_2_K  := SMC.Temps.Ts1P + 273.15;
+      SMC.Airflow_Outlet_2_K := SMC.Temps.TaRF + 273.15;
+      --  Channel-averaged values for downstream consumers
+      SMC.Airflow_Inlet_K  := SMC.Airflow_Inlet_1_K;  --  both channels share Ts1P
+      SMC.Airflow_Outlet_K := (SMC.Airflow_Outlet_1_K + SMC.Airflow_Outlet_2_K) / 2.0;
    end Read_Power_Tracking;
 
    --  -----------------------------------------------------------------------
