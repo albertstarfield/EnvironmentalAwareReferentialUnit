@@ -395,6 +395,7 @@ class PrimaryFlightDisplay:
         self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
         self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<Motion>", self.on_canvas_hover)
+        self.canvas.bind("<Leave>", self._on_canvas_leave)
 
         self.opengl_pfd = None
         if HAS_OPENGL:
@@ -508,6 +509,7 @@ class PrimaryFlightDisplay:
         self._graph_zones: list[dict[str, Any]] = []  # hover lookup for weather graphs
         self._graph_hover_tag: str = "_ghover"
         self._wind_zones: list[dict[str, Any]] = []  # hover lookup for wind grid cells
+        self._hover_pos: tuple[float, float] | None = None  # last mouse pos for persistent tooltip
 
         # Navigation Search & Destination State
         self.dest_marker: Any = None
@@ -1394,6 +1396,10 @@ class PrimaryFlightDisplay:
             self.canvas.create_rectangle(w/2 - 300, h - 130, w/2 + 300, h - 80, fill="#003311", outline="#00ff00", width=2)
             self.canvas.create_text(w/2, h - 105, text=self.sig_loc_message, fill="#00ff00", font=("Monaco", 10, "bold"))
 
+        # Re-fire hover tooltip so it persists even when mouse stops moving
+        if self._hover_pos is not None:
+            self._draw_hover_at(*self._hover_pos)
+
     def draw_warning_caution_buttons(self, w: float, h: float) -> None:
         import time
         # Determine which canvas to draw on
@@ -1539,8 +1545,17 @@ class PrimaryFlightDisplay:
 
     def on_canvas_hover(self, event: tk.Event) -> None:
         """Show tooltip overlay when hovering over weather graphs or wind grid cells."""
+        self._hover_pos = (float(event.x), float(event.y))
+        self._draw_hover_at(event.x, event.y)
+
+    def _on_canvas_leave(self, _event: tk.Event) -> None:
+        """Clear hover tooltip when mouse leaves the canvas."""
+        self._hover_pos = None
         self.canvas.delete(self._graph_hover_tag)
-        mx, my = float(event.x), float(event.y)
+
+    def _draw_hover_at(self, mx: float, my: float) -> None:
+        """Core hover drawing logic — called by on_canvas_hover and re-fired each frame."""
+        self.canvas.delete(self._graph_hover_tag)
         # --- Check wind grid zones first ---
         for wz in self._wind_zones:
             if wz["x"] <= mx <= wz["x"] + wz["w"] and wz["y"] <= my <= wz["y"] + wz["h"]:
