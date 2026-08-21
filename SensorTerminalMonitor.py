@@ -14,6 +14,7 @@ import urllib.request
 import urllib.parse
 import threading
 import tkinter as tk
+
 from collections import deque
 import datetime
 import numpy as np
@@ -507,6 +508,8 @@ class PrimaryFlightDisplay:
             self.root.bind("<KeyRelease>", self.on_key_release)
             self.map_widget.canvas.bind("<Button-1>", self.on_map_click, add="+")
             self.map_widget.canvas.bind("<Motion>", self.on_map_mouse_motion, add="+")
+            # Monkey-patch pre_cache for multi-zoom + motion-biased prefetch
+            self._patch_map_prefetch()
 
         # State Variables
         self.pitch: float = 0.0
@@ -599,6 +602,9 @@ class PrimaryFlightDisplay:
         self.caut_click_times: list[float] = []
         self.warning_muted: bool = False
         self.caution_muted: bool = False
+        # Canvas-based mute confirmation overlay (replaces messagebox popup)
+        self._mute_overlay_active: bool = False
+        self._mute_overlay_type: str = ''   # 'warning' or 'caution'
 
         self.simulated: bool = False
         self.raw_pitch: float = 0.0
@@ -624,6 +630,20 @@ class PrimaryFlightDisplay:
         self.road_path_coords: list[tuple[float, float]] = []
         self.is_fetching_road: bool = False
         self.last_road_update: float = 0.0
+        self._road_lock: threading.Lock = threading.Lock()
+        self.road_error_msg: Optional[str] = None
+        self.road_error_time: float = 0.0
+
+        # Multi-zoom prefetch state
+        self._prefetch_dir: tuple[float, float] = (0.0, 0.0)   # (d_lat, d_lon) from panning
+        self._prefetch_time: float = 0.0
+        self._prefetch_zoom_cache: int = -1                     # last zoom we triggered multi-zoom prefetch at
+        # Shared stats dict (read by GUI, written by pre_cache thread)
+        self._prefetch_stats: dict[str, Any] = {
+            'current_zoom': 15, 'cache_loaded': 0, 'cache_max': 10_000,
+            'adj_zoom_pending': '', 'motion_bias': 'IDLE', 'last_msg': '',
+            'queued_total': 0, 'adj_queued': 0,
+        }
 
         # Search UI
         self.search_frame = tk.Frame(self.content_frame, bg='#111')
@@ -928,15 +948,25 @@ class PrimaryFlightDisplay:
         self.pan_accel = min(12.0, self.pan_accel + 0.4)
         base_step = 0.0001 / max(1.0, self.map_zoom - 10.0)
         step = base_step * self.pan_accel
+        lat_correction = max(0.3, math.cos(math.radians(self.pan_lat)))  # Correct for latitude compression
 
         d_lat, d_lon = 0.0, 0.0
         if 'w' in self.panning_keys or 'Up' in self.panning_keys: d_lat += step
         if 's' in self.panning_keys or 'Down' in self.panning_keys: d_lat -= step
-        if 'a' in self.panning_keys or 'Left' in self.panning_keys: d_lon -= step
-        if 'd' in self.panning_keys or 'Right' in self.panning_keys: d_lon += step
+        if 'a' in self.panning_keys or 'Left' in self.panning_keys: d_lon -= step / lat_correction
+        if 'd' in self.panning_keys or 'Right' in self.panning_keys: d_lon += step / lat_correction
 
         if d_lat != 0.0 or d_lon != 0.0:
             self.pan_map(d_lat, d_lon)
+            # Track direction for motion-biased prefetch (exponential moving average)
+            self._prefetch_dir = (
+                self._prefetch_dir[0] * 0.7 + d_lat * 0.3,
+                self._prefetch_dir[1] * 0.7 + d_lon * 0.3,
+            )
+            self._prefetch_time = time.time()
+        elif time.time() - self._prefetch_time > 1.0:
+            # Decay direction when not panning
+            self._prefetch_dir = (self._prefetch_dir[0] * 0.9, self._prefetch_dir[1] * 0.9)
 
     def pan_map(self, d_lat: float, d_lon: float) -> None:
         self.set_auto_center(False)
@@ -949,6 +979,146 @@ class PrimaryFlightDisplay:
         self.map_zoom = max(1, min(20, self.map_zoom + delta))
         if self.map_widget:
             self.map_widget.set_zoom(self.map_zoom)
+        # Trigger multi-zoom prefetch for the new zoom level
+        self._prefetch_zoom_cache = -1
+
+    def _patch_map_prefetch(self) -> None:
+        """Monkey-patch tkintermapview's pre_cache thread to add multi-zoom
+        layer prefetching (zoom-1, zoom+1) and motion-direction bias.
+
+        The original pre_cache only loads tiles at the current zoom in
+        expanding rings (radius 1..8). This patch extends it to also
+        prefetch adjacent zoom levels at a smaller radius (2 tiles around
+        viewport center) and stretch the current-zoom ring ahead in the
+        direction of WASD panning.
+        """
+        if not self.map_widget:
+            return
+        earu = self  # capture for closure
+        _orig_pre_cache = self.map_widget.pre_cache.__func__
+
+        def _enhanced_pre_cache(wself: Any) -> None:  # type: ignore[no-untyped-def]
+            import sqlite3 as _sql
+            import time as _t
+
+            last_pos = None
+            radius = 1
+            zoom = round(wself.zoom)
+            last_log = 0.0          # throttle stdio to every 2 s
+            cycle_count = 0
+
+            if wself.database_path is not None:
+                db_conn = _sql.connect(wself.database_path)
+                db_cur = db_conn.cursor()
+            else:
+                db_cur = None
+
+            print("[PREFETCH] Enhanced pre-cache thread started", flush=True)
+
+            while wself.running:
+                cur_pos = wself.pre_cache_position
+                if last_pos != cur_pos:
+                    last_pos = cur_pos
+                    zoom = round(wself.zoom)
+                    radius = 1
+                    cycle_count += 1
+                    earu._prefetch_zoom_cache = -1  # force re-prefetch on move
+                    print(f"[PREFETCH] Position changed → cycle #{cycle_count}  "
+                          f"center=({cur_pos[0]},{cur_pos[1]}) zoom={zoom}", flush=True)
+
+                # --- current zoom (original logic with motion-bias) ---
+                queued_current = 0
+                if last_pos is not None and radius <= 8:
+                    # Motion-bias: stretch radius ahead in panning direction
+                    pd_lat, pd_lon = earu._prefetch_dir
+                    stretch_n = max(0, min(4, int(pd_lat * 8000)))
+                    stretch_s = max(0, min(4, int(-pd_lat * 8000)))
+                    stretch_e = max(0, min(4, int(pd_lon * 8000)))
+                    stretch_w = max(0, min(4, int(-pd_lon * 8000)))
+
+                    bias_label = 'IDLE'
+                    if stretch_n + stretch_s + stretch_e + stretch_w > 0:
+                        dirs = []
+                        if stretch_n: dirs.append(f'N+{stretch_n}')
+                        if stretch_s: dirs.append(f'S+{stretch_s}')
+                        if stretch_e: dirs.append(f'E+{stretch_e}')
+                        if stretch_w: dirs.append(f'W+{stretch_w}')
+                        bias_label = ' '.join(dirs)
+
+                    for x in range(wself.pre_cache_position[0] - radius - stretch_w,
+                                    wself.pre_cache_position[0] + radius + stretch_e + 1):
+                        ky_p = f"{zoom}{x}{wself.pre_cache_position[1] + radius + stretch_n}"
+                        ky_m = f"{zoom}{x}{wself.pre_cache_position[1] - radius - stretch_s}"
+                        if ky_p not in wself.tile_image_cache:
+                            wself.request_image(zoom, x, wself.pre_cache_position[1] + radius + stretch_n, db_cursor=db_cur)
+                            queued_current += 1
+                        if ky_m not in wself.tile_image_cache:
+                            wself.request_image(zoom, x, wself.pre_cache_position[1] - radius - stretch_s, db_cursor=db_cur)
+                            queued_current += 1
+
+                    for y in range(wself.pre_cache_position[1] - radius - stretch_s,
+                                    wself.pre_cache_position[1] + radius + stretch_n + 1):
+                        ky_p = f"{zoom}{wself.pre_cache_position[0] + radius + stretch_e}{y}"
+                        ky_m = f"{zoom}{wself.pre_cache_position[0] - radius - stretch_w}{y}"
+                        if ky_p not in wself.tile_image_cache:
+                            wself.request_image(zoom, wself.pre_cache_position[0] + radius + stretch_e, y, db_cursor=db_cur)
+                            queued_current += 1
+                        if ky_m not in wself.tile_image_cache:
+                            wself.request_image(zoom, wself.pre_cache_position[0] - radius - stretch_w, y, db_cursor=db_cur)
+                            queued_current += 1
+
+                    radius += 1
+
+                # --- adjacent zoom layers (zoom-1, zoom+1, radius 2) ---
+                queued_adj = 0
+                adj_label = ''
+                if last_pos is not None and earu._prefetch_zoom_cache != zoom:
+                    earu._prefetch_zoom_cache = zoom
+                    adj_radius = 2
+                    adj_z_list = [z for z in (zoom - 1, zoom + 1) if 1 <= z <= 20]
+                    adj_label = ','.join(str(z) for z in adj_z_list)
+                    for adj_z in adj_z_list:
+                        for dx in range(-adj_radius, adj_radius + 1):
+                            for dy in range(-adj_radius, adj_radius + 1):
+                                tx = wself.pre_cache_position[0] + dx
+                                ty = wself.pre_cache_position[1] + dy
+                                if f"{adj_z}{tx}{ty}" not in wself.tile_image_cache:
+                                    wself.request_image(adj_z, tx, ty, db_cursor=db_cur)
+                                    queued_adj += 1
+
+                else:
+                    _t.sleep(0.1)
+
+                # Cache cap (matches tkintermapview original: 10k images ~80 MB)
+                cache_len = len(wself.tile_image_cache)
+                if cache_len > 10_000:
+                    keys_del = list(wself.tile_image_cache.keys())[:cache_len - 10_000]
+                    for k in keys_del:
+                        del wself.tile_image_cache[k]
+                    cache_len = 10_000
+
+                # Update shared stats for GUI
+                earu._prefetch_stats['current_zoom'] = zoom
+                earu._prefetch_stats['cache_loaded'] = len(wself.tile_image_cache)
+                earu._prefetch_stats['motion_bias'] = bias_label if queued_current > 0 else earu._prefetch_stats.get('motion_bias', 'IDLE')
+                earu._prefetch_stats['adj_zoom_pending'] = adj_label
+                earu._prefetch_stats['queued_total'] = queued_current
+                earu._prefetch_stats['adj_queued'] = queued_adj
+
+                # Throttled stdio (every 2 s)
+                now = _t.time()
+                if now - last_log >= 2.0:
+                    last_log = now
+                    cache_pct = len(wself.tile_image_cache) / 10_000 * 100
+                    msg = (f"[PREFETCH] zoom={zoom} r={radius}  "
+                           f"cache={len(wself.tile_image_cache)}/{10_000} ({cache_pct:.0f}%)  "
+                           f"ring_q={queued_current}  adj_q={queued_adj} adj_z=[{adj_label}]  "
+                           f"bias={bias_label}  cycle=#{cycle_count}")
+                    print(msg, flush=True)
+                    earu._prefetch_stats['last_msg'] = msg
+
+        import types
+        self.map_widget.pre_cache = types.MethodType(_enhanced_pre_cache, self.map_widget)  # type: ignore[assignment]
 
     def set_auto_center(self, val: bool) -> None:
         self.auto_center = val
@@ -1068,6 +1238,36 @@ class PrimaryFlightDisplay:
         if self.dest_path: self.dest_path.delete(); self.dest_path = None
         self.update_navigation_path()
 
+    def _nearest_dist_on_path(self, path_coords: list, lat: float, lon: float) -> float:
+        """Return minimum distance (meters) from a point to a polyline."""
+        if not path_coords:
+            return float('inf')
+        min_dist = float('inf')
+        for i in range(len(path_coords)):
+            py, px = path_coords[i]
+            d_lat = py - lat
+            d_lon = (px - lon) * math.cos(math.radians(lat))
+            d = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+            if d < min_dist:
+                min_dist = d
+            if i < len(path_coords) - 1:
+                ny, nx = path_coords[i + 1]
+                seg_dy = ny - py
+                seg_dx = (nx - px) * math.cos(math.radians(py))
+                to_dy = lat - py
+                to_dx = (lon - px) * math.cos(math.radians(py))
+                seg_len2 = seg_dx**2 + seg_dy**2
+                if seg_len2 > 0:
+                    t = max(0.0, min(1.0, (to_dx * seg_dx + to_dy * seg_dy) / seg_len2))
+                    proj_x = px + t * (nx - px)
+                    proj_y = py + t * (ny - py)
+                    d_lat2 = proj_y - lat
+                    d_lon2 = (proj_x - lon) * math.cos(math.radians(lat))
+                    d2 = math.sqrt(d_lat2**2 + d_lon2**2) * 111320.0
+                    if d2 < min_dist:
+                        min_dist = d2
+        return min_dist
+
     def update_navigation_path(self) -> None:
         if not self.map_widget: return
 
@@ -1077,26 +1277,26 @@ class PrimaryFlightDisplay:
         else:
             # Check for deviation if path exists
             deviated = False
-            if self.road_path_coords:
-                # Check distance to the first few coordinates of the current road path
-                # to see if we've moved significantly away from the start/planned line
-                start_lat, start_lon = self.road_path_coords[0]
-                d_lat = start_lat - self.lat
-                d_lon = (start_lon - self.lon) * math.cos(math.radians(self.lat))
-                dist_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
-                if dist_m > 50.0: # 50m deviation threshold
+            with self._road_lock:
+                path_snapshot = list(self.road_path_coords) if self.road_path_coords else []
+            if path_snapshot:
+                # Find nearest point on the road path (not just the first point)
+                dist_m = self._nearest_dist_on_path(path_snapshot, self.lat, self.lon)
+                if dist_m > 50.0:
                     deviated = True
 
             # For ROAD/HIGHWAY, try to use road-adhered coordinates
             # Update if: throttled (5s), path missing, or deviated
             now = time.time()
-            if not self.is_fetching_road and (now - self.last_road_update > 5.0 or not self.road_path_coords or deviated):
+            if not self.is_fetching_road and (now - self.last_road_update > 5.0 or not path_snapshot or deviated):
                 threading.Thread(target=self.fetch_road_routing, daemon=True).start()
 
-            if self.road_path_coords:
+            with self._road_lock:
+                current_path = list(self.road_path_coords) if self.road_path_coords else []
+            if current_path:
                 if self.dest_path: self.dest_path.delete(); self.dest_path = None
                 path_color = "magenta" if self.env_mode != "AIRWAY" else "#00ff00"
-                self.dest_path = self.map_widget.set_path(self.road_path_coords, color=path_color, width=3)
+                self.dest_path = self.map_widget.set_path(current_path, color=path_color, width=3)
             else:
                 self.draw_straight_path()
 
@@ -1132,10 +1332,18 @@ class PrimaryFlightDisplay:
                 data = json.loads(response.read().decode())
                 if data and 'routes' in data and data['routes']:
                     geom = data['routes'][0]['geometry']['coordinates']
-                    self.road_path_coords = [(float(c[1]), float(c[0])) for c in geom]
-                    self.last_road_update = time.time()
+                    new_coords = [(float(c[1]), float(c[0])) for c in geom]
+                    with self._road_lock:
+                        self.road_path_coords = new_coords
+                        self.last_road_update = time.time()
+                else:
+                    with self._road_lock:
+                        self.road_path_coords = []
+                    self.road_error_msg = "No route found"
+                    self.road_error_time = time.time()
         except Exception as e:
-            print(f"Road routing failed: {e}")
+            self.road_error_msg = str(e)[:60]
+            self.road_error_time = time.time()
         finally:
             self.is_fetching_road = False
 
@@ -1323,8 +1531,8 @@ class PrimaryFlightDisplay:
                         self.warn_acknowledged = False
                         self.prev_warning = True
 
-                    # Repeating Warning Chime (Every 1.5s) if not acknowledged
-                    if not self.warn_acknowledged and time.time() - self.last_warning_chime > 1.5:
+                    # Repeating Warning Chime (Every 1.5s) if not acknowledged and not muted
+                    if not self.warn_acknowledged and not self.warning_muted and time.time() - self.last_warning_chime > 1.5:
                         play_chime("warning")
                         self.last_warning_chime = time.time()
                 else:
@@ -1337,8 +1545,8 @@ class PrimaryFlightDisplay:
                         self.caution_acknowledged = False
                         self.prev_caution = True
 
-                    # Repeating Caution Chime (Every 4.0s) if not acknowledged
-                    if not self.caution_acknowledged and time.time() - self.last_caution_chime > 4.0:
+                    # Repeating Caution Chime (Every 4.0s) if not acknowledged and not muted
+                    if not self.caution_acknowledged and not self.caution_muted and time.time() - self.last_caution_chime > 4.0:
                         play_chime("caution")
                         self.last_caution_chime = time.time()
                 else:
@@ -1536,6 +1744,7 @@ class PrimaryFlightDisplay:
         elif self.page == 9: self.draw_energy_page(w, h)
         self.draw_nav_keys()
         self.draw_warning_caution_buttons(w, h)
+        self.draw_mute_overlay(w, h)
 
         # Draw dynamic significant location recording message if active
         if hasattr(self, 'sig_loc_message') and self.sig_loc_message and time.time() - self.sig_loc_message_time < 10.0:
@@ -1720,6 +1929,76 @@ class PrimaryFlightDisplay:
                                           font=("Monaco", 8), tags=target_tags)
                 ty += LINE_H
 
+    def draw_mute_overlay(self, w: float, h: float) -> None:
+        """Draw canvas-based mute confirmation overlay with checkerboard background."""
+        if not self._mute_overlay_active:
+            return
+        tag = "mute_overlay"
+        # Semi-transparent dark backdrop over entire canvas
+        self.canvas.create_rectangle(0, 0, w, h, fill="black", stipple="gray50",
+                                     outline="", tags=tag)
+        # Panel dimensions
+        pw, ph = 420, 200
+        px1, py1 = (w - pw) / 2, (h - ph) / 2
+        px2, py2 = px1 + pw, py1 + ph
+        # Checkerboard background (12x12 tile grid)
+        tile = 12
+        cx, cy = int(px1), int(py1)
+        row = 0
+        while cy < py2:
+            col = 0
+            ccx = cx
+            while ccx < px2:
+                fill_c = "#111111" if (row + col) % 2 == 0 else "#222222"
+                rx1 = max(ccx, px1)
+                ry1 = max(cy, py1)
+                rx2 = min(ccx + tile, px2)
+                ry2 = min(cy + tile, py2)
+                if rx2 > rx1 and ry2 > ry1:
+                    self.canvas.create_rectangle(rx1, ry1, rx2, ry2,
+                                                 fill=fill_c, outline="", tags=tag)
+                ccx += tile
+                col += 1
+            cy += tile
+            row += 1
+        # Panel border
+        self.canvas.create_rectangle(px1, py1, px2, py2,
+                                     outline="#ffffff", width=3, tags=tag)
+        # Header color based on type
+        hdr_fill = "#cc0000" if self._mute_overlay_type == 'warning' else "#996600"
+        hdr_text = "MASTER WARNING" if self._mute_overlay_type == 'warning' else "MASTER CAUTION"
+        hdr_outline = "#ff3333" if self._mute_overlay_type == 'warning' else "#ffaa00"
+        self.canvas.create_rectangle(px1, py1, px2, py1 + 36,
+                                     fill=hdr_fill, outline=hdr_outline, width=1, tags=tag)
+        self.canvas.create_text(px1 + pw / 2, py1 + 18, text=hdr_text,
+                                fill="white", font=("Monaco", 12, "bold"), tags=tag)
+        # Question text
+        self.canvas.create_text(px1 + pw / 2, py1 + 72,
+                                text="DO YOU WANT TO MUTE THIS?",
+                                fill="#ffffff", font=("Monaco", 11, "bold"), tags=tag)
+        self.canvas.create_text(px1 + pw / 2, py1 + 96,
+                                text="This will silence all alerts until the GUI is restarted.",
+                                fill="#aaaaaa", font=("Monaco", 9), tags=tag)
+        # YES button
+        bx1, by1 = px1 + 40, py1 + 130
+        bx2, by2 = px1 + 190, py1 + 170
+        self.canvas.create_rectangle(bx1, by1, bx2, by2,
+                                     fill="#006600", outline="#00cc00", width=2, tags=tag)
+        self.canvas.create_text((bx1 + bx2) / 2, (by1 + by2) / 2,
+                                text="YES", fill="white", font=("Monaco", 11, "bold"), tags=tag)
+        # NO button
+        nx1, ny1 = px1 + 230, py1 + 130
+        nx2, ny2 = px1 + 380, py1 + 170
+        self.canvas.create_rectangle(nx1, ny1, nx2, ny2,
+                                     fill="#660000", outline="#cc0000", width=2, tags=tag)
+        self.canvas.create_text((nx1 + nx2) / 2, (ny1 + ny2) / 2,
+                                text="NO", fill="white", font=("Monaco", 11, "bold"), tags=tag)
+        # Store button regions for click detection (absolute canvas coords)
+        self._mute_overlay_buttons = [
+            (bx1, by1, bx2, by2, 'yes'),
+            (nx1, ny1, nx2, ny2, 'no'),
+        ]
+
     def draw_search_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="DESTINATION SEARCH & SELECTION", fill="#0077be", font=("Monaco", 20, "bold"))
         self.canvas.create_text(50, 100, anchor="nw", text=f"STATUS: {self.search_status}", fill="white", font=("Monaco", 10))
@@ -1734,6 +2013,30 @@ class PrimaryFlightDisplay:
     def on_canvas_click(self, event: tk.Event) -> None:
         import time
         self._on_interaction()
+        x, y = event.x, event.y
+
+        # Handle mute overlay YES/NO clicks (highest priority)
+        if self._mute_overlay_active and hasattr(self, '_mute_overlay_buttons'):
+            for bx1, by1, bx2, by2, choice in self._mute_overlay_buttons:
+                if bx1 <= x <= bx2 and by1 <= y <= by2:
+                    if choice == 'yes':
+                        if self._mute_overlay_type == 'warning':
+                            self.warning_muted = True
+                            print("[MUTE] Master Warning muted (5x rapid click) — until GUI restart")
+                        else:
+                            self.caution_muted = True
+                            print("[MUTE] Master Caution muted (5x rapid click) — until GUI restart")
+                    self._mute_overlay_active = False
+                    self._mute_overlay_type = ''
+                    self._mute_overlay_buttons = []
+                    self.canvas.delete("mute_overlay")
+                    return
+            # Click outside buttons dismisses overlay without muting
+            self._mute_overlay_active = False
+            self._mute_overlay_type = ''
+            self._mute_overlay_buttons = []
+            self.canvas.delete("mute_overlay")
+            return
         w = self.canvas.winfo_width()
         now = time.time()
         CLICK_WINDOW = 2.0  # seconds
@@ -1746,9 +2049,9 @@ class PrimaryFlightDisplay:
             # Purge clicks older than CLICK_WINDOW
             self.warn_click_times = [t for t in self.warn_click_times if now - t < CLICK_WINDOW]
             if len(self.warn_click_times) >= CLICK_THRESHOLD:
-                self.warning_muted = True
                 self.warn_click_times = []
-                print("[MUTE] Master Warning muted (5x rapid click) — until GUI restart")
+                self._mute_overlay_active = True
+                self._mute_overlay_type = 'warning'
                 return
             # Normal single-click acknowledge
             self.warn_acknowledged = True
@@ -1759,9 +2062,9 @@ class PrimaryFlightDisplay:
             self.caut_click_times.append(now)
             self.caut_click_times = [t for t in self.caut_click_times if now - t < CLICK_WINDOW]
             if len(self.caut_click_times) >= CLICK_THRESHOLD:
-                self.caution_muted = True
                 self.caut_click_times = []
-                print("[MUTE] Master Caution muted (5x rapid click) — until GUI restart")
+                self._mute_overlay_active = True
+                self._mute_overlay_type = 'caution'
                 return
             # Normal single-click acknowledge
             self.caution_acknowledged = True
@@ -2363,7 +2666,7 @@ class PrimaryFlightDisplay:
                         speed_limit = "110 KPH"
 
                 brg = math.degrees(math.atan2(d_lon, d_lat)) % 360
-                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0 | {self.env_mode} ({self.transportation_category.upper()}) | LMT: {speed_limit}"
+                dest_info = f"DEST: {dist_lbl} @ {brg:03.0f}\u00b0T | {self.env_mode} ({self.transportation_category.upper()}) | LMT: {speed_limit}"
                 self.draw_text_with_halo(self.map_widget.canvas, w/2, 60, dest_info, "magenta", ("Monaco", 12, "bold"), "center", "overlay_info")
 
             # Status and Controls
@@ -2372,16 +2675,63 @@ class PrimaryFlightDisplay:
             status_text = f"MODE: {'AUTO-CENTER' if self.auto_center else 'MANUAL PAN'} | {orient_text}"
 
             # Deviation / Off Course Warning
-            if self.road_path_coords:
-                start_lat, start_lon = self.road_path_coords[0]
-                d_lat = start_lat - self.lat
-                d_lon = (start_lon - self.lon) * math.cos(math.radians(self.lat))
-                xtk_m = math.sqrt(d_lat**2 + d_lon**2) * 111320.0
+            with self._road_lock:
+                path_snap = list(self.road_path_coords) if self.road_path_coords else []
+            if path_snap:
+                xtk_m = self._nearest_dist_on_path(path_snap, self.lat, self.lon)
                 if xtk_m > 50.0:
                     status_text += f" | OFF COURSE: {int(xtk_m)}m"
                     status_col = "red"
 
             self.draw_text_with_halo(self.map_widget.canvas, 20, 20, status_text, status_col, ("Monaco", 10, "bold"), "nw", "overlay_info")
+
+            # OSRM error feedback
+            if self.road_error_msg and self.road_error_time:
+                age = time.time() - self.road_error_time
+                if age < 8.0:
+                    err_col = "red" if age < 4.0 else "#ff6600"
+                    self.draw_text_with_halo(self.map_widget.canvas, w/2, h - 40, f"ROUTE ERR: {self.road_error_msg}", err_col, ("Monaco", 9, "bold"), "center", "overlay_info")
+
+            # Prefetch status box (top-right, below north arrow)
+            ps = self._prefetch_stats
+            bx, by, bw, bh = w - 210, 130, 195, 95
+            self.map_widget.canvas.create_rectangle(bx, by, bx + bw, by + bh,
+                                                    fill="#050505", outline="#444", width=1,
+                                                    tags="overlay_info")
+            self.map_widget.canvas.create_text(bx + 5, by + 5, anchor="nw",
+                                               text="TILE PREFETCH", fill="#00ccff",
+                                               font=("Monaco", 8, "bold"), tags="overlay_info")
+            pz = ps.get('current_zoom', self.map_zoom)
+            cl = ps.get('cache_loaded', 0)
+            cm = ps.get('cache_max', 10_000)
+            pct = cl / cm * 100 if cm else 0
+            bar_w = bw - 10
+            bar_fill = max(0, min(bar_w, int(bar_w * pct / 100)))
+            self.map_widget.canvas.create_rectangle(bx + 5, by + 22, bx + 5 + bar_w, by + 30,
+                                                    fill="#111", outline="#333", tags="overlay_info")
+            if bar_fill > 0:
+                bar_col = "#00ff00" if pct < 60 else ("#ffcc00" if pct < 85 else "red")
+                self.map_widget.canvas.create_rectangle(bx + 5, by + 22, bx + 5 + bar_fill, by + 30,
+                                                        fill=bar_col, outline="", tags="overlay_info")
+            self.map_widget.canvas.create_text(bx + 5, by + 34, anchor="nw",
+                                               text=f"Z{pz}  {cl}/{cm} ({pct:.0f}%)",
+                                               fill="white", font=("Monaco", 8), tags="overlay_info")
+            bias = ps.get('motion_bias', 'IDLE')
+            self.map_widget.canvas.create_text(bx + 5, by + 48, anchor="nw",
+                                               text=f"BIAS: {bias}",
+                                               fill="#ffcc00" if bias != 'IDLE' else "#555",
+                                               font=("Monaco", 8), tags="overlay_info")
+            adj = ps.get('adj_zoom_pending', '')
+            rq = ps.get('queued_total', 0)
+            aq = ps.get('adj_queued', 0)
+            self.map_widget.canvas.create_text(bx + 5, by + 62, anchor="nw",
+                                               text=f"RING Q:{rq}  ADJ Q:{aq}",
+                                               fill="white", font=("Monaco", 8), tags="overlay_info")
+            adj_txt = f"ADJ Z: [{adj}]" if adj else "ADJ Z: --"
+            self.map_widget.canvas.create_text(bx + 5, by + 76, anchor="nw",
+                                               text=adj_txt,
+                                               fill="#00ccff" if adj else "#555",
+                                               font=("Monaco", 8), tags="overlay_info")
 
             # Draw Avionics Icons
             arrow_hdg = self.heading if self.map_heading_up else 0.0
@@ -2471,9 +2821,7 @@ class PrimaryFlightDisplay:
             wd_lat = self.dest_lat - w_lat
             wd_lon = (self.dest_lon - w_lon) * math.cos(math.radians(w_lat))
             w_dist = math.sqrt(wd_lat**2 + wd_lon**2) * 60.0
-            # Assume waypoints are at some "step" altitude or just linear
-            # For now, let's assume they are on the GS for visualization if they are closer
-            w_alt = w_dist * 318.0
+            w_alt = wp.get('alt', w_dist * 318.0)  # Use actual altitude if available, else glideslope fallback
             w_pt = to_canvas(w_dist, w_alt)
             canvas.create_line(prev_pt[0], prev_pt[1], w_pt[0], w_pt[1], fill="#00ff00", width=2, tags=tags)
             canvas.create_oval(w_pt[0]-3, w_pt[1]-3, w_pt[0]+3, w_pt[1]+3, fill="#00ff00", tags=tags)
