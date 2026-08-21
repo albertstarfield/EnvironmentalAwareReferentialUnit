@@ -512,6 +512,7 @@ package body Earu.IO is
       AP ("v_mag",          F (State.Location.V_Mag));
       AP ("calibrated_g",   F (State.Location.Calibrated_G));
       AP ("pressure_hpa",   F (State.Location.Pressure_HPa));
+      AP ("terrain_altitude_m", F (State.Location.Terrain_Alt));
       AP ("compass_dir",    S (Ada.Strings.Fixed.Trim (State.Location.Compass_Dir, Ada.Strings.Both)));
       Append (Buf, """pos"": [" &
          F (State.Location.Pos.X) & ", " &

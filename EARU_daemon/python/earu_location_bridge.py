@@ -19,7 +19,18 @@ import requests  # pyrefly: ignore
 
 
 class LocationState:
-    """Mutable container for the current geographic position."""
+    """Mutable container for the current geographic position.
+
+    Derivation of terrain_alt:
+        terrain_alt is the ground elevation above sea level at the current
+        lat/lon, fetched from OpenTopoData (ASTER 30m DEM).  It represents
+        the *true* terrain height independent of the GPS altitude, which
+        may drift or be unreliable indoors.
+
+        Updated by get_terrain_anchor() at most once per 60 s and written
+        to the RAM-disk file ``sensor_terrain_alt.dat`` so the Ada daemon
+        can read it without touching the SHM layout.
+    """
 
     def __init__(self) -> None:
         self.lat: float = -6.2
@@ -28,6 +39,7 @@ class LocationState:
         self.pressure_hpa: float = 1013.25
         self.cl_running: bool = False
         self.v_mag: float = 0.0
+        self.terrain_alt: float = 0.0  # OpenTopoData ground elevation (m)
 
 
 global_location = LocationState()
@@ -158,6 +170,15 @@ def check_core_location_bg() -> None:
                                 global_location.pressure_hpa = (
                                     1013.25 * math.pow(1.0 - 0.0000225577 * new_alt, 5.25588)
                                 )
+
+                                # -- Terrain elevation (OpenTopoData ASTER 30m) --
+                                # get_terrain_anchor() caches the DEM lookup for 60 s
+                                # and returns 0.0 on first call / API failure.
+                                global_location.terrain_alt = get_terrain_anchor(
+                                    global_location.lat, global_location.lon
+                                )
+                                _write_terrain_alt(global_location.terrain_alt)
+
                                 break
                     elif res.stderr and "The operation couldn't be completed" in res.stderr:
                         time.sleep(1.0)
@@ -189,6 +210,25 @@ def get_terrain_anchor(lat: float, lon: float) -> float:
         if el is not None:
             _cached_terrain_elevation = el
     return _cached_terrain_elevation
+
+
+def _write_terrain_alt(terrain_alt: float) -> None:
+    """Write terrain altitude to RAM-disk file for the Ada daemon.
+
+    Follows the same ``Read_Sensor_Real`` contract used by all other
+    sensor files: a single float written to
+    ``/Volumes/EARU_dataIO/sensor_terrain_alt.dat``.  Falls back to the
+    local project root if the RAM-disk is not mounted.
+    """
+    payload = f"{terrain_alt:.4f}\n"
+    for base in ("/Volumes/EARU_dataIO", "/usr/local/EnvironmentalAwareReferentialUnit"):
+        try:
+            path = os.path.join(base, "sensor_terrain_alt.dat")
+            with open(path, "w") as fh:
+                fh.write(payload)
+            return  # success
+        except OSError:
+            continue
 
 
 def geodetic_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

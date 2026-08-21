@@ -22,6 +22,9 @@ with Earu.System_Bridge;
 with Earu.CoreWLAN;
 with Earu.Bluetooth;
 with Earu.Sig_Loc_Store;
+with Earu.BCG_Shared;
+with Earu.BCG_Detection;
+with Earu.Mood_Inference;
 with Interfaces;
 pragma Unreferenced (Earu.System_Bridge);
 
@@ -349,6 +352,9 @@ procedure Earu_Daemon is
                      begin
                         Local_Accel := (X => Real(E_A.X)/65536.0, Y => Real(E_A.Y)/65536.0, Z => Real(E_A.Z)/65536.0);
                         Local_Gyro := (X => Real(E_G.X)/65536.0, Y => Real(E_G.Y)/65536.0, Z => Real(E_G.Z)/65536.0);
+
+                        -- Feed 800Hz accel samples into BCG heartbeat detector
+                        Earu.BCG_Shared.BCG_Buffer.Push (Float(Local_Accel.X), Float(Local_Accel.Y), Float(Local_Accel.Z));
                         if Last_T > 0.0 then
                            DT := Real(E_A.Timestamp) - Last_T;
                            if DT <= 0.0 or DT > 0.1 then DT := 0.00125; end if;
@@ -735,9 +741,16 @@ procedure Earu_Daemon is
                     L.Start_Alt := Real (Weather_SHM.Alt);
                     L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
                  end if;
-                 -- Pressure mirrors the fan-RPM calibrated estimation (Category 3).
-                 -- See comment above at W.Pressure_MSL for derivation details.
-                 L.Pressure_HPa := W.Pressure_MSL;
+                  -- Pressure mirrors the fan-RPM calibrated estimation (Category 3).
+                  -- See comment above at W.Pressure_MSL for derivation details.
+                  L.Pressure_HPa := W.Pressure_MSL;
+
+                  -- Terrain elevation from OpenTopoData ASTER 30m DEM, written
+                  -- by the Python sidecar (earu_location_bridge.py) via
+                  -- get_terrain_anchor() → sensor_terrain_alt.dat.
+                  -- Used downstream for altitude-delta checks and
+                  -- BlueSolTerrainAltitude in EARU_data.dat.
+                  L.Terrain_Alt := Earu.IO.Read_Sensor_Real ("sensor_terrain_alt.dat");
 
                   --  CATEGORY 4: Wind grid from SMC pressure gradient.
                   --  Instead of copying the Python sidecar's (always-zero) SHM
@@ -953,22 +966,62 @@ procedure Earu_Daemon is
             Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
             U : User_Detection_Type;
          begin
-            if ML_Results /= null then
-               -- Consume real-time mood from Python ML Bridge
-               U.Mood.Anxious := Real (ML_Results.Mood_Anxious);
-               U.Mood.Calm    := Real (ML_Results.Mood_Calm);
-               U.Mood.Excited := Real (ML_Results.Mood_Excited);
-               U.Mood.Tired   := Real (ML_Results.Mood_Tired);
+            -- ── Ada-native BCG heartbeat detection ──────────────────────────
+            --  The 800Hz IMU task feeds accel samples into BCG_Buffer.Push.
+            --  Here we run autocorrelation to extract BPM and confidence.
+            declare
+               BCG_Entities  : Earu.BCG_Detection.Entity_Result_Array;
+               BCG_Count     : Natural;
+               BCG_Dominant  : Earu.BCG_Detection.Entity_Result;
+               BCG_Ready     : constant Boolean := Earu.BCG_Shared.BCG_Buffer.Is_Ready;
+            begin
+               if BCG_Ready then
+                  Earu.BCG_Shared.BCG_Buffer.Compute_Results (BCG_Entities, BCG_Count, BCG_Dominant);
+               else
+                  BCG_Count    := 0;
+                  BCG_Dominant := (BPM => 0.0, Confidence => 0.0);
+                  BCG_Entities := (others => (others => 0.0));
+               end if;
 
-               U.Count := Integer (ML_Results.Detection_Count);
-
-               -- Sync detected entities (BPM/Confidence)
+               -- Populate User_Detection_Type from BCG results
+               U.Count := BCG_Count;
                U.Detected := (others => (BPM => 0.0, Confidence => 0.0));
-               for I in 1 .. Integer'Min (3, U.Count) loop
-                  U.Detected(I).BPM        := Real (ML_Results.Detected(I).BPM);
-                  U.Detected(I).Confidence := Real (ML_Results.Detected(I).Confidence);
+               for I in 1 .. Integer'Min (3, BCG_Count) loop
+                  U.Detected(I).BPM        := Real (BCG_Entities(I).BPM);
+                  U.Detected(I).Confidence := Real (BCG_Entities(I).Confidence);
                end loop;
 
+               -- ── Ada-native mood inference (Russell's Circumplex) ──────────
+               declare
+                  STA1    : constant Real := Full.Vib_State.STA(1);
+                  RMS     : constant Real := (if STA1 > 1.0 then Sqrt (STA1 - 1.0) else 0.0);
+                  Mood_P  : Earu.Mood_Inference.Mood_Probs;
+                  Arousal : Float;
+                  Valence : Float;
+                  Stress  : Earu.Mood_Inference.Stress_Flags;
+               begin
+                  --  Build stress flags from available daemon state
+                  Stress.High_Fatigue  := Full.Seismic_Activity.Damage_Fatigue.Cumulative_Fatigue > 0.3;
+                  Stress.Low_Periodicity := RMS > 0.05;  -- high vibration = low periodicity signal
+                  Stress.Steps_No_Stress := Full.Pedometer.Steps > 0 and RMS < 0.02;
+
+                  Earu.Mood_Inference.Infer_Mood
+                    (BPM_Avg  => (if BCG_Dominant.Confidence > 0.3 then Float (BCG_Dominant.BPM) else 0.0),
+                     RMS      => Float (RMS),
+                     Stress   => Stress,
+                     Probs    => Mood_P,
+                     Arousal  => Arousal,
+                     Valence  => Valence);
+
+                  U.Mood.Anxious := Real (Mood_P.Anxious);
+                  U.Mood.Calm    := Real (Mood_P.Calm);
+                  U.Mood.Excited := Real (Mood_P.Excited);
+                  U.Mood.Tired   := Real (Mood_P.Tired);
+               end;
+            end;
+
+            -- Battery stats from Python ML Bridge (if available)
+            if ML_Results /= null then
                declare
                   S_ML : System_Stats_Type := Full.System;
                begin
@@ -978,26 +1031,6 @@ procedure Earu_Daemon is
                   S_ML.Drain_Time_Hib     := Real (ML_Results.Drain_Time_Hib);
                   S_ML.Drain_Time_DeepHib := Real (ML_Results.Drain_Time_DHib);
                   Earu.State_Store.State_Buffer.Update_System (S_ML, Full.Interaction_Responsiveness);
-               end;
-            else
-               -- Fallback to basic vibration-based heuristic if ML sidecar is unavailable
-               declare
-                  STA1 : constant Real := Full.Vib_State.STA(1);
-                  RMS : constant Real := (if STA1 > 1.0 
-                                          then Sqrt (STA1 - 1.0) 
-                                          else Real (0.0));
-                  Est_BPM : constant Real := Real'Max (55.0, Real'Min (165.0, 72.0 + (RMS * 120.0)));
-                  Est_Conf : constant Real := Real'Max (0.15, Real'Min (0.95, 0.92 - (RMS * 1.5)));
-               begin
-                  U.Count := 1;
-                  U.Mood.Anxious := Real'Max (0.0, Real'Min (1.0, 0.1 + RMS * 0.8));
-                  U.Mood.Calm := Real'Max (0.0, Real'Min (1.0, 0.8 - RMS * 0.8));
-                  U.Mood.Excited := Real'Max (0.0, Real'Min (1.0, 0.05 + RMS * 0.5));
-                  U.Mood.Tired := Real'Max (0.0, Real'Min (1.0, 0.05 + (1.0 - RMS) * 0.2));
-                  
-                  U.Detected := (others => (BPM => 0.0, Confidence => 0.0));
-                  U.Detected(1).BPM := Est_BPM;
-                  U.Detected(1).Confidence := Est_Conf;
                end;
             end if;
             

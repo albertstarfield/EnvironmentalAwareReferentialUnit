@@ -83,6 +83,7 @@ package Earu.Types is
       Heading       : aliased Real := 0.0;
       Compass_Dir   : aliased String (1 .. 2) := (others => ' ');
       Pressure_HPa  : aliased Real := 1013.25;
+      Terrain_Alt   : aliased Real := 0.0;  -- OpenTopoData ground elevation (m ASL)
       Calibrated_G  : aliased Real := 1.0;
       Pos           : aliased Vector3 := (others => <>);
       Total_Dist    : aliased Real := 0.0;
