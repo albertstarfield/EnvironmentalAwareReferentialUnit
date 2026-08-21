@@ -594,6 +594,11 @@ class PrimaryFlightDisplay:
         self.prev_caution: bool = False
         self.warn_acknowledged: bool = False
         self.caution_acknowledged: bool = False
+        # 5x rapid click mute system (indefinite until GUI restart)
+        self.warn_click_times: list[float] = []
+        self.caut_click_times: list[float] = []
+        self.warning_muted: bool = False
+        self.caution_muted: bool = False
 
         self.simulated: bool = False
         self.raw_pitch: float = 0.0
@@ -1560,10 +1565,18 @@ class PrimaryFlightDisplay:
 
         warn_ack = getattr(self, 'warn_acknowledged', False)
         caut_ack = getattr(self, 'caution_acknowledged', False)
+        warn_muted = getattr(self, 'warning_muted', False)
+        caut_muted = getattr(self, 'caution_muted', False)
 
         # 1. Master Warning button (x: w - 240 to w - 130, y: 10 to 40)
         wx1, wy1, wx2, wy2 = w - 240, 10, w - 130, 40
-        if raw_warning:
+        if warn_muted:
+            # MUTED: dark dithered overlay, suppressed
+            w_fill = "#1a0000"
+            w_outline = "#330000"
+            w_text = "WARNING\n(MUTED)"
+            w_text_color = "#660000"
+        elif raw_warning:
             if warn_ack:
                 # Solid dimmed red if acknowledged
                 w_fill = "#7a0000"
@@ -1588,7 +1601,13 @@ class PrimaryFlightDisplay:
 
         # 2. Master Caution button (x: w - 120 to w - 10, y: 10 to 40)
         cx1, cy1, cx2, cy2 = w - 120, 10, w - 10, 40
-        if raw_caution:
+        if caut_muted:
+            # MUTED: dark dithered overlay, suppressed
+            c_fill = "#1a1000"
+            c_outline = "#332000"
+            c_text = "CAUTION\n(MUTED)"
+            c_text_color = "#664400"
+        elif raw_caution:
             if caut_ack:
                 # Solid dimmed amber
                 c_fill = "#7a4a00"
@@ -1611,15 +1630,15 @@ class PrimaryFlightDisplay:
         target_canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=c_fill, outline=c_outline, width=2, tags=target_tags)
         target_canvas.create_text((cx1+cx2)/2, (cy1+cy2)/2, text=c_text, fill=c_text_color, font=("Monaco", 8, "bold"), justify="center", tags=target_tags)
 
-        # 3. Draw Reasoning Text with Shadow (Shadow first for depth)
-        if raw_warning and self.warning_reason:
+        # 3. Draw Reasoning Text with Shadow (suppressed when muted)
+        if raw_warning and self.warning_reason and not warn_muted:
             reason = self.warning_reason.replace("\\n", "\n")
             # Shadow
             target_canvas.create_text((wx1+wx2)/2 + 1, wy2 + 12 + 1, text=reason, fill="#4a0000", font=("Monaco", 8, "bold"), justify="center", tags=target_tags)
             # Foreground
             target_canvas.create_text((wx1+wx2)/2, wy2 + 12, text=reason, fill="white", font=("Monaco", 8, "bold"), justify="center", tags=target_tags)
 
-        if raw_caution and self.caution_reason:
+        if raw_caution and self.caution_reason and not caut_muted:
             reason = self.caution_reason.replace("\\n", "\n")
             # Shadow
             target_canvas.create_text((cx1+cx2)/2 + 1, cy2 + 12 + 1, text=reason, fill="#4a2a00", font=("Monaco", 8, "bold"), justify="center", tags=target_tags)
@@ -1653,7 +1672,7 @@ class PrimaryFlightDisplay:
         overlay_y_start = max(warn_text_bottom, caut_text_bottom) + 16
 
         # --- Warning overlay panel ---
-        warn_triggers = _parse_triggers(self.warning_reason) if raw_warning else []
+        warn_triggers = _parse_triggers(self.warning_reason) if raw_warning and not warn_muted else []
         if warn_triggers:
             n = len(warn_triggers)
             panel_h = HEADER_H + PAD + n * LINE_H + PAD
@@ -1678,7 +1697,7 @@ class PrimaryFlightDisplay:
             overlay_y_start = py2 + 8
 
         # --- Caution overlay panel ---
-        caut_triggers = _parse_triggers(self.caution_reason) if raw_caution else []
+        caut_triggers = _parse_triggers(self.caution_reason) if raw_caution and not caut_muted else []
         if caut_triggers:
             n = len(caut_triggers)
             panel_h = HEADER_H + PAD + n * LINE_H + PAD
@@ -1713,14 +1732,38 @@ class PrimaryFlightDisplay:
             if y > h - 100: break
 
     def on_canvas_click(self, event: tk.Event) -> None:
+        import time
         self._on_interaction()
         w = self.canvas.winfo_width()
+        now = time.time()
+        CLICK_WINDOW = 2.0  # seconds
+        CLICK_THRESHOLD = 5  # rapid clicks to trigger mute
+
         # Master Warning click acknowledgement (w-240 to w-130, y: 10 to 40)
         if w - 240 <= event.x <= w - 130 and 10 <= event.y <= 40:
+            # Track rapid clicks for mute
+            self.warn_click_times.append(now)
+            # Purge clicks older than CLICK_WINDOW
+            self.warn_click_times = [t for t in self.warn_click_times if now - t < CLICK_WINDOW]
+            if len(self.warn_click_times) >= CLICK_THRESHOLD:
+                self.warning_muted = True
+                self.warn_click_times = []
+                print("[MUTE] Master Warning muted (5x rapid click) — until GUI restart")
+                return
+            # Normal single-click acknowledge
             self.warn_acknowledged = True
             return
         # Master Caution click acknowledgement (w-120 to w-10, y: 10 to 40)
         if w - 120 <= event.x <= w - 10 and 10 <= event.y <= 40:
+            # Track rapid clicks for mute
+            self.caut_click_times.append(now)
+            self.caut_click_times = [t for t in self.caut_click_times if now - t < CLICK_WINDOW]
+            if len(self.caut_click_times) >= CLICK_THRESHOLD:
+                self.caution_muted = True
+                self.caut_click_times = []
+                print("[MUTE] Master Caution muted (5x rapid click) — until GUI restart")
+                return
+            # Normal single-click acknowledge
             self.caution_acknowledged = True
             return
 
