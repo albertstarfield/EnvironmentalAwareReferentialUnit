@@ -19,6 +19,10 @@ with Ada.Strings.Fixed;
 with Earu.Weather_Fetcher;
 with Earu.Stale_Detector;
 with Earu.System_Bridge;
+with Earu.CoreWLAN;
+with Earu.Bluetooth;
+with Earu.Sig_Loc_Store;
+with Interfaces;
 pragma Unreferenced (Earu.System_Bridge);
 
 -- Main entry point for the EARU daemon.
@@ -542,6 +546,14 @@ procedure Earu_Daemon is
     Weather_Fetcher_Task : Earu.Weather_Fetcher.Fetcher;
     Stale_Watchdog_Task  : Earu.Stale_Detector.Watchdog;
 
+    -- WiFi scan task: periodically scans for WiFi networks via native CoreWLAN
+    -- (.mm compiled by start.sh). Results stored in state → EARU_data.dat.
+    task WiFi_Scan_Task;
+
+    -- BLE scan task: periodically scans for Bluetooth LE devices via native CoreBluetooth
+    -- (.mm compiled by start.sh). Results stored in state → EARU_data.dat.
+    task BLE_Scan_Task;
+
     -- System log watcher task. Polls macOS system log every 60s for errors.
    -- Sets the Log_Error flag in state if errors are detected. Used to trigger
    -- INTERFERENCE warnings in the master caution/warning system.
@@ -1009,7 +1021,32 @@ procedure Earu_Daemon is
                      end if;
                   end loop;
                end if;
+
+               --  When Python sends 0 sig locs, preserve existing Ada-loaded state
+               --  so the JSON data survives across restarts (Ada owns persistence).
+               if Sig_Count = 0 then
+                  declare
+                     Ex_Count : Natural;
+                     Ex_Loc   : Significant_Location;
+                  begin
+                     Earu.State_Store.State_Buffer.Get_Sig_Loc_Count (Ex_Count);
+                     if Ex_Count > 0 then
+                        Sig_Count := Ex_Count;
+                        for I in 1 .. Ex_Count loop
+                           Earu.State_Store.State_Buffer.Get_Sig_Loc (I, Ex_Loc);
+                           Sig_Locs(I) := Ex_Loc;
+                           if Earu.Math.Haversine (Full.Location.Lat, Full.Location.Lon, Ex_Loc.Lat, Ex_Loc.Lon) <= 100.0 then
+                              Inside := True;
+                           end if;
+                        end loop;
+                     end if;
+                  end;
+               end if;
+
                Earu.State_Store.State_Buffer.Update_ML (U, Sig_Count, Sig_Locs, Inside);
+
+               -- Persist significant locations to save_state/ (Ada-owned I/O)
+               Earu.Sig_Loc_Store.Save_Sig_Locs;
             end;
 
          end;
@@ -1132,6 +1169,196 @@ procedure Earu_Daemon is
          null;
    end Network_Probe_Task;
 
+    --  ── WiFi_Scan_Task ─────────────────────────────────────────────────────
+    --  Periodically scans for WiFi networks using native CoreWLAN (.mm).
+    --  The .mm scanner runs on its own pthread with an active NSRunLoop.
+    --  This task calls CoreWLAN_Scan_WiFi every 30s, copies results into
+    --  the daemon state, which gets serialized to EARU_data.dat.
+    task body WiFi_Scan_Task is
+       use type Earu.Types.Integer_32;
+       C_Result : aliased Earu.CoreWLAN.WiFi_Scan_Result;
+
+       --  Wait for state store to be initialized
+    begin
+       delay 5.0;
+
+       --  Initialize CoreWLAN scanner (starts the dedicated pthread)
+       declare
+          Ret : Earu.Types.Integer_32;
+       begin
+          Ret := Earu.CoreWLAN.CoreWLAN_Scan_Init;
+          if Ret = 0 then
+             Ada.Text_IO.Put_Line ("[ok] CoreWLAN WiFi scanner initialized successfully!");
+          else
+              Ada.Text_IO.Put_Line ("[!] CoreWLAN scan init returned error:" &
+                                    Earu.Types.Integer_32'Image (Ret) &
+                                    " -- WiFi scanning unavailable.");
+          end if;
+       end;
+
+       --  Periodic scan loop
+       loop
+          begin
+             --  Perform WiFi scan (blocks up to ~5s on scanner thread)
+             Earu.CoreWLAN.CoreWLAN_Scan_WiFi (C_Result'Access);
+
+             --  Copy results into daemon state
+             declare
+                 Networks : Earu.Types.WiFi_Network_Array :=
+                   (others => (others => <>));
+             begin
+                for I in 1 .. Integer'Min (
+                  Integer (C_Result.Count),
+                  Earu.Types.WIFI_SCAN_MAX)
+                loop
+                   declare
+                      C_Net : constant Earu.CoreWLAN.WiFi_Network_Entry :=
+                        C_Result.Networks (I);
+                      A_Net : Earu.Types.WiFi_Network_Entry;
+                   begin
+                      --  Copy SSID (up to 64 bytes, both sides are Unsigned_8 arrays)
+                      for J in 1 .. Earu.Types.WIFI_SSID_MAX loop
+                         A_Net.SSID (J) := C_Net.SSID (J);
+                      end loop;
+                      --  Copy BSSID (up to 24 bytes, both sides are Unsigned_8 arrays)
+                      for J in 1 .. Earu.Types.WIFI_BSSID_MAX loop
+                         A_Net.BSSID (J) := C_Net.BSSID (J);
+                      end loop;
+                      A_Net.RSSI      := C_Net.RSSI;
+                      A_Net.Channel   := C_Net.Channel;
+                      A_Net.Is_Secure := C_Net.Is_Secure;
+                      Networks (I)    := A_Net;
+                   end;
+                end loop;
+
+                Earu.State_Store.State_Buffer.Update_WiFi_Scan (
+                  Count           => C_Result.Count,
+                  Error_Code      => C_Result.Error_Code,
+                  Timestamp       => Earu.Types.Real (C_Result.Timestamp),
+                  Duration_Ms     => Earu.Types.Real (C_Result.Scan_Duration_Ms),
+                  Networks        => Networks
+                );
+
+                 --  Log scan summary with signal strength
+                 Ada.Text_IO.Put_Line ("[wifi] Scan complete: " &
+                   Interfaces.Integer_32'Image (C_Result.Count) &
+                   " networks found, " &
+                   Earu.Types.Real'Image (Earu.Types.Real (C_Result.Scan_Duration_Ms)) &
+                   " ms");
+                 for I in 1 .. Integer'Min (
+                   Integer (C_Result.Count),
+                   Earu.Types.WIFI_SCAN_MAX)
+                 loop
+                        declare
+                           C_Net : constant Earu.CoreWLAN.WiFi_Network_Entry :=
+                             C_Result.Networks (I);
+                           --  Extract SSID as a String for logging
+                           SSID_Str : String (1 .. Earu.Types.WIFI_SSID_MAX);
+                           SSID_Len : Natural := 0;
+                        begin
+                           for K in 1 .. Earu.Types.WIFI_SSID_MAX loop
+                              if C_Net.SSID (K) /= 0 then
+                                 SSID_Len := SSID_Len + 1;
+                                 SSID_Str (SSID_Len) :=
+                                   Character'Val (Interfaces.Unsigned_8'Pos (C_Net.SSID (K)));
+                              end if;
+                           end loop;
+                           Ada.Text_IO.Put_Line (
+                             "  [" & Interfaces.Integer_32'Image (Interfaces.Integer_32 (I)) &
+                             "] RSSI=" & Interfaces.Integer_32'Image (C_Net.RSSI) & " dBm" &
+                             "  ch=" & Interfaces.Integer_32'Image (C_Net.Channel) &
+                             "  secure=" & Interfaces.Integer_32'Image (C_Net.Is_Secure) &
+                             "  ssid=""" & SSID_Str (1 .. SSID_Len) & """");
+                        end;
+                 end loop;
+             end;
+          exception
+             when others =>
+                null;  --  Don't crash the daemon if scan fails
+          end;
+
+          delay 30.0;  --  Scan every 30 seconds
+       end loop;
+     end WiFi_Scan_Task;
+
+     --  ── BLE_Scan_Task ────────────────────────────────────────────────────
+     --  Periodically scans for Bluetooth LE devices using native CoreBluetooth (.mm).
+     --  The .mm scanner runs on its own pthread with an active NSRunLoop.
+     --  This task calls Bluetooth_Scan_Perform every 30s, copies results into
+     --  the daemon state, which gets serialized to EARU_data.dat.
+     task body BLE_Scan_Task is
+        use type Earu.Types.Integer_32;
+        C_Result : aliased Earu.Bluetooth.BLE_Scan_Result;
+
+     begin
+        delay 7.0;  --  Wait a bit longer than WiFi task to avoid startup contention
+
+        --  Initialize CoreBluetooth scanner (starts the dedicated pthread)
+        declare
+           Ret : Earu.Types.Integer_32;
+        begin
+           Ret := Earu.Bluetooth.Bluetooth_Scan_Init;
+           if Ret = 0 then
+              Ada.Text_IO.Put_Line ("[ok] CoreBluetooth BLE scanner initialized successfully!");
+           else
+              Ada.Text_IO.Put_Line ("[!] CoreBluetooth scan init returned error:" &
+                                    Earu.Types.Integer_32'Image (Ret) &
+                                    " -- BLE scanning unavailable.");
+           end if;
+        end;
+
+        --  Periodic scan loop
+        loop
+           begin
+              --  Perform BLE scan (blocks up to ~15s on scanner thread)
+              Earu.Bluetooth.Bluetooth_Scan_Perform (C_Result'Access);
+
+              --  Copy results into daemon state
+              declare
+                 Devices : Earu.Types.BLE_Device_Array :=
+                   (others => (others => <>));
+              begin
+                 for I in 1 .. Integer'Min (
+                   Integer (C_Result.Count),
+                   Earu.Types.BLE_SCAN_MAX)
+                 loop
+                    declare
+                       C_Dev : constant Earu.Bluetooth.BLE_Device_Entry :=
+                         C_Result.Devices (I);
+                       A_Dev : Earu.Types.BLE_Device_Entry;
+                    begin
+                       --  Copy name (up to 64 bytes, both sides are Unsigned_8 arrays)
+                       for J in 1 .. Earu.Types.BLE_DEVICE_NAME_MAX loop
+                          A_Dev.Name (J) := C_Dev.Name (J);
+                       end loop;
+                       --  Copy device_id (up to 48 bytes, both sides are Unsigned_8 arrays)
+                       for J in 1 .. Earu.Types.BLE_DEVICE_ID_MAX loop
+                          A_Dev.Device_Id (J) := C_Dev.Device_Id (J);
+                       end loop;
+                        A_Dev.RSSI           := C_Dev.RSSI;
+                        A_Dev.TX_Power_Level := Earu.Types.Integer_32 (C_Dev.TX_Power_Level);
+                        A_Dev.Is_Connectable := Earu.Types.Integer_32 (C_Dev.Is_Connectable);
+                       Devices (I)          := A_Dev;
+                    end;
+                 end loop;
+
+                 Earu.State_Store.State_Buffer.Update_BLE_Scan (
+                   Count           => C_Result.Count,
+                   Error_Code      => C_Result.Error_Code,
+                   Timestamp       => Earu.Types.Real (C_Result.Timestamp),
+                   Duration_Ms     => Earu.Types.Real (C_Result.Scan_Duration_Ms),
+                   Devices         => Devices
+                 );
+              end;
+           exception
+              when others =>
+                 null;  --  Don't crash the daemon if scan fails
+           end;
+
+           delay 30.0;  --  Scan every 30 seconds
+        end loop;
+     end BLE_Scan_Task;
+
 begin
    Earu.IO.Configure_Realtime (2, 1, 2);
    Setup_Ramdisk;
@@ -1179,9 +1406,12 @@ begin
          Earu.State_Store.State_Buffer.Update_Location (State.Location);
          Earu.State_Store.State_Buffer.Update_Damage_Fatigue (State.Seismic_Activity.Damage_Fatigue);
          Earu.State_Store.State_Buffer.Update_System (State.System, State.Interaction_Responsiveness);
-         Earu.State_Store.State_Buffer.Update_Sensors (State.Accel, State.Gyro, State.Orientation.Q);
-      end;
-   end;
+          Earu.State_Store.State_Buffer.Update_Sensors (State.Accel, State.Gyro, State.Orientation.Q);
+       end;
+    end;
+
+    -- Load persistent significant locations from JSON (Ada-owned persistence)
+    Earu.Sig_Loc_Store.Load_Sig_Locs;
 
       Start_ML_Bridge;
       Start_ADB_Mock;

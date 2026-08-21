@@ -3,6 +3,7 @@ with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Exceptions;
+with Interfaces;
 with Interfaces.C.Strings;
 with GNAT.SHA256;
 
@@ -21,6 +22,7 @@ with System;
 package body Earu.IO is
    use Earu.Types;
    use type System.Address;
+   use type Interfaces.Unsigned_8;
    use Ada.Strings.Unbounded;
 
    package Real_IO is new Ada.Text_IO.Float_IO (Real);
@@ -218,6 +220,70 @@ package body Earu.IO is
             return Default;
       end;
    end Execute_And_Read_Real;
+
+   --  Convert a Byte_Array_64 (Unsigned_8 array) to a trimmed String.
+   --  Stops at the first null byte (0).
+   function Byte64_To_String (Arr : Earu.Types.Byte_Array_64) return String is
+      Last : Natural := 0;
+   begin
+      for I in Arr'Range loop
+         if Interfaces.Unsigned_8'(Arr (I)) = 0 then
+            exit;
+         end if;
+         Last := I;
+      end loop;
+      if Last = 0 then return ""; end if;
+      declare
+         Result : String (1 .. Last);
+      begin
+         for I in 1 .. Last loop
+            Result (I) := Character'Val (Interfaces.Unsigned_8'(Arr (I)));
+         end loop;
+         return Result;
+      end;
+   end Byte64_To_String;
+
+   --  Convert a Byte_Array_24 (Unsigned_8 array) to a trimmed String.
+   --  Stops at the first null byte (0).
+   function Byte24_To_String (Arr : Earu.Types.Byte_Array_24) return String is
+      Last : Natural := 0;
+   begin
+      for I in Arr'Range loop
+         if Interfaces.Unsigned_8'(Arr (I)) = 0 then
+            exit;
+         end if;
+         Last := I;
+      end loop;
+      if Last = 0 then return ""; end if;
+      declare
+         Result : String (1 .. Last);
+      begin
+         for I in 1 .. Last loop
+            Result (I) := Character'Val (Interfaces.Unsigned_8'(Arr (I)));
+         end loop;
+         return Result;
+      end;
+   end Byte24_To_String;
+
+   function Byte48_To_String (Arr : Earu.Types.Byte_Array_48) return String is
+      Last : Natural := 0;
+   begin
+      for I in Arr'Range loop
+         if Interfaces.Unsigned_8'(Arr (I)) = 0 then
+            exit;
+         end if;
+         Last := I;
+      end loop;
+      if Last = 0 then return ""; end if;
+      declare
+         Result : String (1 .. Last);
+      begin
+         for I in 1 .. Last loop
+            Result (I) := Character'Val (Interfaces.Unsigned_8'(Arr (I)));
+         end loop;
+         return Result;
+      end;
+   end Byte48_To_String;
 
    function S (Str : String) return String is
       Result : Unbounded_String;
@@ -710,6 +776,75 @@ package body Earu.IO is
          Append (Buf, "}");
       end if;
       --  Close the ecosystem_weather dict.
+      Append (Buf, "}, ");
+
+      --  ── wifi_scan ────────────────────────────────────────────────────────
+      Append (Buf, """wifi_scan"": {");
+      AI ("count", Integer (State.WiFi_Scan.Count));
+      AI ("error_code", Integer (State.WiFi_Scan.Error_Code));
+      AP ("timestamp", F (State.WiFi_Scan.Timestamp));
+      AP ("scan_duration_ms", F (State.WiFi_Scan.Scan_Duration_Ms));
+      Append (Buf, """networks"": [");
+      for I in 1 .. Integer'Min (
+        Integer (State.WiFi_Scan.Count),
+        Earu.Types.WIFI_SCAN_MAX)
+      loop
+         declare
+            N : constant Earu.Types.WiFi_Network_Entry :=
+              State.WiFi_Scan.Networks (I);
+            SSID_Str  : constant String := Trim_Null (Byte64_To_String (N.SSID));
+            BSSID_Str : constant String := Trim_Null (Byte24_To_String (N.BSSID));
+         begin
+            Append (Buf, "{");
+            AP ("ssid", S (SSID_Str));
+            AP ("bssid", S (BSSID_Str));
+            AP ("rssi", Ada.Strings.Fixed.Trim (
+                  Interfaces.Integer_32'Image (N.RSSI), Ada.Strings.Both));
+            AP ("channel", Ada.Strings.Fixed.Trim (
+                  Interfaces.Integer_32'Image (N.Channel), Ada.Strings.Both));
+            AI ("is_secure", Integer (N.Is_Secure), False);
+            Append (Buf, "}");
+         end;
+         if I < Integer'Min (Integer (State.WiFi_Scan.Count),
+                             Earu.Types.WIFI_SCAN_MAX)
+         then
+            Append (Buf, ", ");
+         end if;
+      end loop;
+      Append (Buf, "], ");
+      AI ("network_count", Integer (State.WiFi_Scan.Count), False);
+      Append (Buf, "}, ");
+
+      --  ── bluetooth_scan ───────────────────────────────────────────────────
+      Append (Buf, """bluetooth_scan"": {");
+      AI ("count", Integer (State.BLE_Scan.Count));
+      AI ("error_code", Integer (State.BLE_Scan.Error_Code));
+      AP ("timestamp", F (State.BLE_Scan.Timestamp));
+      AP ("scan_duration_ms", F (State.BLE_Scan.Scan_Duration_Ms), False);
+      Append (Buf, ", ""devices"": [");
+      for I in 1 .. Integer'Min (Integer (State.BLE_Scan.Count),
+                                  Earu.Types.BLE_SCAN_MAX)
+      loop
+         declare
+            D : constant Earu.Types.BLE_Device_Entry :=
+              State.BLE_Scan.Devices (I);
+         begin
+            Append (Buf, "{");
+            AP ("name", S (Byte64_To_String (D.Name)));
+            AP ("device_id", S (Byte48_To_String (D.Device_Id)));
+            AP ("rssi", Integer_32'Image (D.RSSI));
+            AP ("tx_power_level", Integer_32'Image (D.TX_Power_Level));
+            AP ("is_connectable", Integer'Image (Integer (D.Is_Connectable)), False);
+            Append (Buf, "}");
+            if I < Integer'Min (Integer (State.BLE_Scan.Count),
+                                Earu.Types.BLE_SCAN_MAX)
+            then
+               Append (Buf, ", ");
+            end if;
+         end;
+      end loop;
+      Append (Buf, "], ");
+      AI ("device_count", Integer (State.BLE_Scan.Count), False);
       Append (Buf, "}, ");
 
       --  ── Sol_BlueMarble_TimeAnchor ─────────────────────────────────────────

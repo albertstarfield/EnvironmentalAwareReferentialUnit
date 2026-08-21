@@ -55,7 +55,7 @@ cd "$DAEMON_DIR" || { echo "[!] Failed to enter daemon directory"; exit 1; }
 HASH_FILE=".source_hash"
 calculate_hash() {
     # Hash all relevant source files to detect changes, excluding build artifacts
-    find . \( -name "*.adb" -o -name "*.ads" -o -name "*.gpr" -o -name "*.toml" -o -name "*.c" -o -name "*.h" -o -name "*.py" \) \
+    find . \( -name "*.adb" -o -name "*.ads" -o -name "*.gpr" -o -name "*.toml" -o -name "*.c" -o -name "*.h" -o -name "*.mm" -o -name "*.py" \) \
          -not -path "./obj/*" -not -path "./bin/*" -not -path "./.git/*" -not -path "*/__pycache__/*" \
          -not -path "./alire/*" -not -path "./config/*" \
          -not -name "b~*" -not -name "b__*" \
@@ -74,6 +74,50 @@ echo "[*] Cleaning up existing EARU processes..."
 pkill -f "earu_ml_bridge.py" 2>/dev/null
 pkill -f "earu_adb_mock.py" 2>/dev/null
 pkill -f "earu_daemon" 2>/dev/null
+
+# 4b. Compile CoreWLAN Objective-C++ scanner (not handled by Alire/GNAT)
+# AXIOM: Alire only compiles Ada and C sources. .mm files need clang++ -ObjC++.
+MM_SRC="$DAEMON_DIR/src/corewlan_scanner.mm"
+MM_HDR="$DAEMON_DIR/src/corewlan_scanner.h"
+MM_OBJ="$DAEMON_DIR/obj/release/corewlan_scanner.o"
+MM_HASH_FILE="$DAEMON_DIR/.mm_hash"
+
+# Ensure obj/release/ directory exists
+mkdir -p "$DAEMON_DIR/obj/release" 2>/dev/null
+
+# Calculate hash of .mm + .h files for incremental compilation
+MM_CURRENT_HASH=""
+if [ -f "$MM_SRC" ]; then
+    MM_CURRENT_HASH=$(shasum -a 256 "$MM_SRC" "$MM_HDR" 2>/dev/null | shasum -a 256 | awk '{print $1}')
+fi
+MM_OLD_HASH=""
+if [ -f "$MM_HASH_FILE" ]; then
+    MM_OLD_HASH=$(cat "$MM_HASH_FILE")
+fi
+
+if [ -f "$MM_SRC" ] && ([ "$MM_CURRENT_HASH" != "$MM_OLD_HASH" ] || [ ! -f "$MM_OBJ" ] || [ "$FORCE_CLEAN" = true ]); then
+    echo "[*] Compiling CoreWLAN scanner (.mm → .o)..."
+    SDK_PATH=$(xcrun --show-sdk-path)
+    run_as_user clang++ -ObjC++ -c "$MM_SRC" \
+        -o "$MM_OBJ" \
+        -isysroot "$SDK_PATH" \
+        -framework CoreWLAN \
+        -framework Foundation \
+        -std=c++17 -O2 -g \
+        -I "$DAEMON_DIR/src"
+    if [ $? -eq 0 ]; then
+        echo "$MM_CURRENT_HASH" > "$MM_HASH_FILE"
+        echo "[*] CoreWLAN scanner compiled successfully."
+    else
+        echo "[!] WARNING: CoreWLAN scanner compilation failed. WiFi scan will be unavailable."
+    fi
+else
+    if [ -f "$MM_OBJ" ]; then
+        echo "[*] CoreWLAN scanner unchanged, skipping .mm compilation."
+    else
+        echo "[!] corewlan_scanner.mm not found, skipping."
+    fi
+fi
 
 # 5. Build or Skip
 FAIL_COUNT_FILE="$DAEMON_DIR/.build_fail_count"
@@ -138,6 +182,21 @@ fi
 if [ -f "./bin/earu_daemon" ]; then
     echo "[*] Cleaning duplicate LC_RPATH from compiled binary..."
     install_name_tool -delete_rpath /Users/albertstarfield/.local/share/alire/toolchains/gnat_native_15.1.2_60748c54/lib ./bin/earu_daemon 2>/dev/null
+fi
+
+# 5b. Ad-hoc code sign the binary (required for macOS Location Services)
+# CoreWLAN SSID data is gated behind Location Services permission.
+# The binary must be signed (even ad-hoc) before macOS will allow the user
+# to grant Location Services in System Settings → Privacy & Security.
+if [ -f "./bin/earu_daemon" ]; then
+    echo "[*] Ad-hoc code signing binary for Location Services eligibility..."
+    codesign --force --sign - ./bin/earu_daemon 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "[*] Binary signed successfully. To enable WiFi SSID names:"
+        echo "    System Settings → Privacy & Security → Location Services → Enable"
+    else
+        echo "[!] WARNING: codesign failed. WiFi SSIDs may show as <Hidden SSID>."
+    fi
 fi
 
 # 6. Run the daemon natively as root from project root (direct binary invocation for max speed)

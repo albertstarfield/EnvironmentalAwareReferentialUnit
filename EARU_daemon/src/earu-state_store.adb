@@ -195,10 +195,64 @@ package body Earu.State_Store is
          end if;
       end Update_Loop_Consistency;
 
+      procedure Update_WiFi_Scan (
+         Count      : Integer_32;
+         Error_Code : Integer_32;
+         Timestamp  : Real;
+         Duration_Ms : Real;
+         Networks   : WiFi_Network_Array
+      ) is
+      begin
+         State.WiFi_Scan.Count := Count;
+         State.WiFi_Scan.Error_Code := Error_Code;
+         State.WiFi_Scan.Timestamp := Timestamp;
+         State.WiFi_Scan.Scan_Duration_Ms := Duration_Ms;
+         State.WiFi_Scan.Networks := Networks;
+      end Update_WiFi_Scan;
+
+      procedure Update_BLE_Scan (
+         Count       : Integer_32;
+         Error_Code  : Integer_32;
+         Timestamp   : Real;
+         Duration_Ms : Real;
+         Devices     : BLE_Device_Array
+      ) is
+      begin
+         State.BLE_Scan.Count := Count;
+         State.BLE_Scan.Error_Code := Error_Code;
+         State.BLE_Scan.Timestamp := Timestamp;
+         State.BLE_Scan.Scan_Duration_Ms := Duration_Ms;
+         State.BLE_Scan.Devices := Devices;
+      end Update_BLE_Scan;
+
       function Get_Full_State return Earu_State is
       begin
          return State;
       end Get_Full_State;
+
+      --  Sig loc persistence helpers (used by Earu.Sig_Loc_Store)
+
+      procedure Load_Sig_Loc (Index : Natural; Loc : Significant_Location) is
+      begin
+         if Index >= 1 and Index <= 10 then
+            State.Sig_Locations (Significant_Location_Array'First + Index - 1) := Loc;
+            State.Sig_Loc_Count := Index;
+         end if;
+      end Load_Sig_Loc;
+
+      procedure Get_Sig_Loc_Count (Count : out Natural) is
+      begin
+         Count := Natural (State.Sig_Loc_Count);
+      end Get_Sig_Loc_Count;
+
+      procedure Get_Sig_Loc (Index : Positive; Loc : out Significant_Location) is
+      begin
+         if Index >= 1 and Index <= 10 then
+            Loc := State.Sig_Locations (Significant_Location_Array'First + Index - 1);
+         else
+            Loc := (others => 0.0);
+         end if;
+      end Get_Sig_Loc;
 
       procedure Initialize_State is
       begin

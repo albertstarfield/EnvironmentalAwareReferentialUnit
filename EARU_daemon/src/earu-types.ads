@@ -1,7 +1,16 @@
+with Interfaces;
+
 package Earu.Types is
    --  pragma SPARK_Mode (On); -- Temporarily off for String/Array flexibility in events if needed, but I'll try to keep it on.
 
    type Real is new Long_Float;
+
+   --  Fixed-width integer type matching C int32_t (for CoreWLAN C interop)
+   subtype Integer_32 is Interfaces.Integer_32;
+
+   --  Fixed-size byte arrays for CoreWLAN scan results (match C char[64]/char[24])
+   type Byte_Array_64 is array (1 .. 64) of Interfaces.Unsigned_8;
+   type Byte_Array_24 is array (1 .. 24) of Interfaces.Unsigned_8;
 
    type Vector3 is record
       X : aliased Real := 0.0;
@@ -423,6 +432,55 @@ package Earu.Types is
    end record;
    type Significant_Location_Array is array (1 .. 10) of aliased Significant_Location;
 
+   --  WiFi scan result types (mirrors corewlan_scanner.h)
+   WIFI_SCAN_MAX : constant := 64;
+   WIFI_SSID_MAX : constant := 64;
+   WIFI_BSSID_MAX : constant := 24;
+
+   type WiFi_Network_Entry is record
+      SSID      : Byte_Array_64 := (others => 0);
+      BSSID     : Byte_Array_24 := (others => 0);
+      RSSI      : aliased Integer_32 := 0;
+      Channel   : aliased Integer_32 := 0;
+      Is_Secure : aliased Integer_32 := 0;
+   end record;
+
+   type WiFi_Network_Array is array (1 .. WIFI_SCAN_MAX) of aliased WiFi_Network_Entry;
+
+   type WiFi_Scan_State_Type is record
+      Count           : aliased Integer_32 := 0;
+      Error_Code      : aliased Integer_32 := 0;
+      Timestamp       : aliased Real := 0.0;
+      Scan_Duration_Ms : aliased Real := 0.0;
+      Networks        : WiFi_Network_Array;
+   end record;
+
+   --  BLE scan result types (mirrors bluetooth_scanner.h)
+   BLE_SCAN_MAX        : constant := 64;
+   BLE_DEVICE_NAME_MAX : constant := 64;
+   BLE_DEVICE_ID_MAX   : constant := 48;
+
+   type Byte_Array_48 is array (1 .. BLE_DEVICE_ID_MAX)
+      of Interfaces.Unsigned_8;
+
+   type BLE_Device_Entry is record
+      Name           : Byte_Array_64 := (others => 0);
+      Device_Id      : Byte_Array_48 := (others => 0);
+      RSSI           : aliased Integer_32 := 0;
+      TX_Power_Level : aliased Integer_32 := 0;
+      Is_Connectable : aliased Integer_32 := 0;
+   end record;
+
+   type BLE_Device_Array is array (1 .. BLE_SCAN_MAX) of aliased BLE_Device_Entry;
+
+   type BLE_Scan_State_Type is record
+      Count            : aliased Integer_32 := 0;
+      Error_Code       : aliased Integer_32 := 0;
+      Timestamp        : aliased Real := 0.0;
+      Scan_Duration_Ms : aliased Real := 0.0;
+      Devices          : BLE_Device_Array;
+   end record;
+
    type Earu_State is record
       Time                : aliased Real := 0.0;
       Loop_Consistency    : aliased Loop_Consistency_Type := (others => <>);
@@ -448,6 +506,8 @@ package Earu.Types is
       Sol_BlueMarble      : aliased Sol_BlueMarble_Type := (others => <>);
       Sig_Loc_Count       : aliased Integer := 0;
       Sig_Locations       : aliased Significant_Location_Array := (others => (others => <>));
+      WiFi_Scan           : aliased WiFi_Scan_State_Type := (others => <>);
+      BLE_Scan            : aliased BLE_Scan_State_Type := (others => <>);
    end record;
 
 end Earu.Types;

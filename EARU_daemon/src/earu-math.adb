@@ -3,12 +3,17 @@ with Ada.Calendar;
 with Interfaces.C;
 with Interfaces; use Interfaces;
 with System;
+with Ada.Text_IO; use Ada.Text_IO;
 with Earu.IO;
 
 package body Earu.Math is
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
    use Real_Funcs;
+
+   --  Rate-limit counter for Dead_Reckon_Update logging (800 Hz procedure).
+   --  Logs every 1600th call = 0.5 Hz output rate (every 2 seconds).
+   DR_Log_Counter : Natural := 0;
 
    package C renames Interfaces.C;
    function C_Time (T : System.Address) return C.long;
@@ -1368,18 +1373,39 @@ package body Earu.Math is
          -- D. Update magnitude to be consistent with the vector
          Loc.V_Mag := Sqrt (Loc.Vel.X**2 + Loc.Vel.Y**2 + Loc.Vel.Z**2);
 
-         -- E. Integrate position using the fully corrected velocity
-         Dx := Loc.Vel.X * DT;
-         Dy := Loc.Vel.Y * DT;
-         Dz := Loc.Vel.Z * DT;
-         
-         Loc.Pos.X := Loc.Pos.X + Dx;
-         Loc.Pos.Y := Loc.Pos.Y + Dy;
-         Loc.Pos.Z := Loc.Pos.Z + Dz;
+          -- E. Integrate position using the fully corrected velocity
+          Dx := Loc.Vel.X * DT;
+          Dy := Loc.Vel.Y * DT;
+          Dz := Loc.Vel.Z * DT;
+
+          --  E2. Direct displacement gain from Corr_Velocity.
+          --  Without this, the DR position gets stuck / stops accumulating
+          --  even though velocity already carries the correction factor.
+          --  The velocity-level gain alone is insufficient to overcome
+          --  integration drift at low V_Mag; the extra displacement-level
+          --  pull ensures GPS-calibrated correction actually moves the
+          --  lat/lon position when the device is in motion.
+          Dx := Dx * Loc.Corr_Velocity;
+          Dy := Dy * Loc.Corr_Velocity;
+
+          Loc.Pos.X := Loc.Pos.X + Dx;
+          Loc.Pos.Y := Loc.Pos.Y + Dy;
+          Loc.Pos.Z := Loc.Pos.Z + Dz;
          
          -- Odometer update
          Dist_Inc := Sqrt (Dx**2 + Dy**2 + Dz**2);
          Loc.Total_Dist := Loc.Total_Dist + Dist_Inc;
+
+         -- Rate-limited DR logging (every 1600 calls = 2s at 800Hz)
+         DR_Log_Counter := DR_Log_Counter + 1;
+         if DR_Log_Counter rem 1600 = 0 then
+            Put_Line ("[DR-CORR] Scale=" & Real'Image (Scale) &
+                      " Resp=" & Real'Image (Responsiveness) &
+                      " CV=" & Real'Image (Loc.Corr_Velocity) &
+                      " CVr=" & Real'Image (Loc.Corr_VRate) &
+                      " Dx=" & Real'Image (Dx) &
+                      " Dy=" & Real'Image (Dy));
+         end if;
       end;
       
       -- 7. Update lat/lon/alt
@@ -1427,6 +1453,10 @@ package body Earu.Math is
                   Loc.Alt_Inop_Until := Now_T + 3600.0;
                   Loc.Pos.Z := 0.0;
                   Loc.Alt_Rate := 0.0;
+
+                  Put_Line ("[DR-INOP] TRIGGERED! Alt=" & Real'Image (Loc.Alt) &
+                            " Rate=" & Real'Image (Alt_Rate_Fpm) &
+                            " fpm -- Altitude INOP for 3600s");
                end if;
             end;
          else
@@ -1441,7 +1471,10 @@ package body Earu.Math is
       end;
 
       Loc.Alt := Loc.Start_Alt + Loc.Pos.Z + Loc.Corr_Alt;
-      Loc.Alt_Rate := Loc.Vel.Z * Loc.Corr_VRate;
+      --  BUG FIX: Vel.Z already carries Corr_VRate from step 5C (line 1366).
+      --  Multiplying again here squared the correction factor, causing VSI
+      --  to display Corr_VRate^2 instead of Corr_VRate.
+      Loc.Alt_Rate := Loc.Vel.Z;
       
       -- 8. Mach calculation
       Sound_Product := Gas_Gamma * Gas_R * Ambient_Temp_K;
@@ -1550,21 +1583,28 @@ package body Earu.Math is
             Max_Alpha := (if Loc.CL_Count = 3 then 0.3 else 0.15);
             Adj_Alpha := Max_Alpha * Dist_Confidence;
 
-            -- Velocity Gain Anchor
-            if Loc.V_Mag > 1.0E-16 and CL_V_Mag > 1.0E-16 and Adj_Alpha > 0.0 then
-               Error_Ratio := CL_V_Mag / Loc.V_Mag;
+             -- Velocity Gain Anchor
+             if Loc.V_Mag > 1.0E-16 and CL_V_Mag > 1.0E-16 and Adj_Alpha > 0.0 then
+                Error_Ratio := CL_V_Mag / Loc.V_Mag;
 
-               -- User request: Hard Pull if Ratio > 0.4 or < 0.1
-               -- This prioritizes GPS truth and forces frequent absolute syncs
-               if Error_Ratio > 0.4 or Error_Ratio < 0.1 then
-                  Loc.Raw_Vel.X := Loc.Raw_Vel.X * Error_Ratio;
-                  Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Error_Ratio;
-                  Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Error_Ratio;
-               end if;
+                -- User request: Hard Pull if Ratio > 0.4 or < 0.1
+                -- This prioritizes GPS truth and forces frequent absolute syncs
+                if Error_Ratio > 0.4 or Error_Ratio < 0.1 then
+                   Loc.Raw_Vel.X := Loc.Raw_Vel.X * Error_Ratio;
+                   Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Error_Ratio;
+                   Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Error_Ratio;
+                end if;
 
-               Loc.Corr_Velocity := Loc.Corr_Velocity * (1.0 - Adj_Alpha) + (Loc.Corr_Velocity * Error_Ratio) * Adj_Alpha;
-               Loc.Corr_Velocity := Real'Max (0.1, Real'Min (10.0, Loc.Corr_Velocity));
-            end if;
+                Loc.Corr_Velocity := Loc.Corr_Velocity * (1.0 - Adj_Alpha) + (Loc.Corr_Velocity * Error_Ratio) * Adj_Alpha;
+                Loc.Corr_Velocity := Real'Max (0.1, Real'Min (10.0, Loc.Corr_Velocity));
+
+                Put_Line ("[DR-GAIN] Velocity: CorrV=" & Real'Image (Loc.Corr_Velocity) &
+                          " ErrRatio=" & Real'Image (Error_Ratio) &
+                          " CL_V=" & Real'Image (CL_V_Mag) &
+                          " DR_V=" & Real'Image (Loc.V_Mag) &
+                          " Alpha=" & Real'Image (Adj_Alpha) &
+                          " HardPull=" & Boolean'Image (Error_Ratio > 0.4 or Error_Ratio < 0.1));
+             end if;
 
             -- Vertical Rate Gain Anchor
             if Abs (Loc.Alt_Rate) > 1.0E-16 and Abs (CL_V_Vert) > 1.0E-16 and Adj_Alpha > 0.0 then
@@ -1573,6 +1613,12 @@ package body Earu.Math is
                begin
                   Loc.Corr_VRate := Loc.Corr_VRate * (1.0 - Adj_Alpha) + (Loc.Corr_VRate * Error_Ratio_V) * Adj_Alpha;
                   Loc.Corr_VRate := Real'Max (0.1, Real'Min (10.0, Loc.Corr_VRate));
+
+                  Put_Line ("[DR-GAIN] VertRate: CorrVR=" & Real'Image (Loc.Corr_VRate) &
+                            " ErrRatio=" & Real'Image (Error_Ratio_V) &
+                            " CL_Vv=" & Real'Image (CL_V_Vert) &
+                            " DR_Vr=" & Real'Image (Loc.Alt_Rate) &
+                            " Alpha=" & Real'Image (Adj_Alpha));
                end;
             end if;
 
@@ -1581,6 +1627,12 @@ package body Earu.Math is
                Alt_Error : constant Real := New_Alt - Loc.Alt;
             begin
                Loc.Corr_Alt := Loc.Corr_Alt + Alt_Error * (Adj_Alpha * 0.5);
+
+               Put_Line ("[DR-GAIN] AltOffset: Err=" & Real'Image (Alt_Error) &
+                         " CorrAlt=" & Real'Image (Loc.Corr_Alt) &
+                         " GPS_Alt=" & Real'Image (New_Alt) &
+                         " DR_Alt=" & Real'Image (Loc.Alt) &
+                         " Alpha=" & Real'Image (Adj_Alpha * 0.5));
             end;
 
             -- Heading fix from CL gradient
@@ -1659,28 +1711,39 @@ package body Earu.Math is
                               end;
                            end;
                         end loop;
-                        Loc.Mapping_Mode := Best_Mode;
-                     end;
-                  end if;
+                         Loc.Mapping_Mode := Best_Mode;
 
-                  Bearing_Diff := CL_Bearing - DR_Bearing;
-                  if Bearing_Diff > 180.0 then
-                     Bearing_Diff := Bearing_Diff - 360.0;
-                  elsif Bearing_Diff < -180.0 then
-                     Bearing_Diff := Bearing_Diff + 360.0;
-                  end if;
+                         Put_Line ("[DR-PARITY] Mode -> " & Integer'Image (Best_Mode) &
+                                   " Dot=" & Real'Image (Best_Dot) &
+                                   " GPSDist=" & Real'Image (CL_Dist));
+                      end;
+                   end if;
 
-                  Max_Nudge := (if Loc.CL_Count = 3 then 0.2 else 0.1);
-                  Nudge_Alpha := Max_Nudge * Dist_Confidence;
+                   Bearing_Diff := CL_Bearing - DR_Bearing;
+                   if Bearing_Diff > 180.0 then
+                      Bearing_Diff := Bearing_Diff - 360.0;
+                   elsif Bearing_Diff < -180.0 then
+                      Bearing_Diff := Bearing_Diff + 360.0;
+                   end if;
 
-                  if Nudge_Alpha > 0.0 then
-                     Loc.Corr_Heading := Loc.Corr_Heading + Bearing_Diff * Nudge_Alpha;
-                     if Loc.Corr_Heading < 0.0 then
-                        Loc.Corr_Heading := Loc.Corr_Heading + 360.0;
-                     elsif Loc.Corr_Heading >= 360.0 then
-                        Loc.Corr_Heading := Loc.Corr_Heading - 360.0;
-                     end if;
-                  end if;
+                   Max_Nudge := (if Loc.CL_Count = 3 then 0.2 else 0.1);
+                   Nudge_Alpha := Max_Nudge * Dist_Confidence;
+
+                   if Nudge_Alpha > 0.0 then
+                      Loc.Corr_Heading := Loc.Corr_Heading + Bearing_Diff * Nudge_Alpha;
+                      if Loc.Corr_Heading < 0.0 then
+                         Loc.Corr_Heading := Loc.Corr_Heading + 360.0;
+                      elsif Loc.Corr_Heading >= 360.0 then
+                         Loc.Corr_Heading := Loc.Corr_Heading - 360.0;
+                      end if;
+
+                      Put_Line ("[DR-HEAD] CL=" & Real'Image (CL_Bearing) &
+                                " DR=" & Real'Image (DR_Bearing) &
+                                " Diff=" & Real'Image (Bearing_Diff) &
+                                " Nudge=" & Real'Image (Bearing_Diff * Nudge_Alpha) &
+                                " CorrH=" & Real'Image (Loc.Corr_Heading) &
+                                " Alpha=" & Real'Image (Nudge_Alpha));
+                   end if;
                end;
             end if;
          end if;

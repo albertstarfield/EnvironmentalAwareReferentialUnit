@@ -26,8 +26,27 @@ package Earu.State_Store is
       procedure Add_Event (E : Event_Type);
       procedure Update_Misc (Lid_Angle, Lid_Speed : Real; ALS : ALS_Type);
       procedure Update_Loop_Consistency (Duration_Ms : Real);
+      procedure Update_WiFi_Scan (
+         Count      : Integer_32;
+         Error_Code : Integer_32;
+         Timestamp  : Real;
+         Duration_Ms : Real;
+         Networks   : WiFi_Network_Array
+      );
+      procedure Update_BLE_Scan (
+         Count       : Integer_32;
+         Error_Code  : Integer_32;
+         Timestamp   : Real;
+         Duration_Ms : Real;
+         Devices     : BLE_Device_Array
+      );
       procedure Set_Log_Error (Detected : Boolean);
       function Get_Full_State return Earu_State;
+
+      --  Sig loc persistence helpers (used by Earu.Sig_Loc_Store)
+      procedure Load_Sig_Loc (Index : Natural; Loc : Significant_Location);
+      procedure Get_Sig_Loc_Count (Count : out Natural);
+      procedure Get_Sig_Loc (Index : Positive; Loc : out Significant_Location);
    private
       State          : Earu_State;
       Log_Error_Detected : Boolean := False;

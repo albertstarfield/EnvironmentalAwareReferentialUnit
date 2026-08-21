@@ -74,94 +74,93 @@ if __name__ == "__main__":
         sys.stderr.write("Error: ruff dependency not found in environment.\n")
         sys.exit(1)
 
-    # === E-Core Scheduling Restriction ===
+    # === macOS QoS Scheduling (Dynamic Background ↔ Interactive) ===
     # This viewer is a passive data display (~15Hz render, file I/O only).
-    # Pin it to efficiency (E) cores via QOS_CLASS_BACKGROUND so it does not
-    # compete with the 800Hz EARU daemon or user foreground apps for P-core
-    # time. Equivalent to launching with `taskpolicy -b`, but self-contained.
-    # QOS_CLASS_BACKGROUND (0x09) = kernel schedules only on E-cores on Apple
-    # Silicon. Falls through silently on non-macOS or unsupported platforms.
+    # Start pinned to efficiency (E) cores via QOS_CLASS_BACKGROUND so it does
+    # not compete with the 800Hz EARU daemon or user foreground apps for P-core
+    # time.  On user interaction (key press, mouse click, hover) promote to
+    # QOS_CLASS_USER_INTERACTIVE for minimum input latency, then automatically
+    # demote back to BACKGROUND after 2 seconds of idle.
+    # Equivalent to launching with `taskpolicy -b`, but self-contained.
+    # QOS_CLASS_USER_INTERACTIVE (0x21) = P-cores, full responsiveness
+    # QOS_CLASS_BACKGROUND      (0x09) = E-cores, lowest priority
+    # Falls through silently on non-macOS or unsupported platforms.
     if sys.platform == "darwin":
         try:
             _libc = ctypes.CDLL(None)  # libSystem.B.dylib
             _QOS_CLASS_BACKGROUND = 0x09
+            _QOS_CLASS_USER_INTERACTIVE = 0x21
             _libc.pthread_set_qos_class_self_np(_QOS_CLASS_BACKGROUND, 0)
         except Exception:
             pass
 
-    # === macOS Wake Lock (IOKit Power Assertions) ===
-    # Hold two IOKit assertions to prevent system sleep while the viewer is active:
-    #   1. PreventUserIdleSystemSleep — prevents idle sleep (same as QuickTime/AVFoundation)
-    #   2. AudioPlayback — tells macOS audio is active, prevents sleep during playback
-    # Both are released at interpreter exit via atexit.
-    _WAKELOCK_ID = ctypes.c_uint32(0)
-    _AUDIOLOCK_ID = ctypes.c_uint32(0)
+    # === macOS Wake Lock (NSProcessInfo.beginActivity — same API as IINA) ===
+    # Uses Foundation's ProcessInfo.beginActivity instead of raw IOKit
+    # IOPMAssertionCreateWithName.  IINA found IOKit assertions unreliable
+    # (issues #3842, #3478); Foundation activities are properly recognized
+    # by 247AlwaysOnlineServe daemon's audio/video detection.
+    # Shows as PreventUserIdleSystemSleep in `pmset -g assertions`.
+    # 0x100000 = NSActivityIdleSystemSleepDisabled (prevents system sleep).
+    # NOTE: 0x200000 (idleDisplaySleepDisabled) silently fails via ctypes —
+    # returns a tagged pointer token that creates no pmset assertion.
+    # 0x100000 (idleSystemSleepDisabled) creates a real pmset assertion that
+    # 247AlwaysOnlineServe detects via `pmset -g assertions` parsing.
+    #
+    # ARM64 NOTE: objc_msgSend is a variadic trampoline. ctypes MUST have
+    # argtypes set to the EXACT method signature before each call, otherwise
+    # default argument promotion causes segfaults on ARM64.  Each Objective-C
+    # method has a different signature, so argtypes is reset per call.
+    _activity_token = None
     if sys.platform == "darwin":
         try:
-            _IOKit = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/IOKit.framework/IOKit")
-            _CF = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+            _objc = ctypes.cdll.LoadLibrary('/usr/lib/libobjc.A.dylib')
+            _objc.objc_getClass.restype = ctypes.c_void_p
+            _objc.objc_getClass.argtypes = [ctypes.c_char_p]
+            _objc.sel_registerName.restype = ctypes.c_void_p
+            _objc.sel_registerName.argtypes = [ctypes.c_char_p]
+            _objc.objc_msgSend.restype = ctypes.c_void_p
 
-            # --- CFStringCreateWithCString: (alloc, chars, encoding) -> CFStringRef ---
-            _CF.CFStringCreateWithCString.restype = ctypes.c_void_p
-            _CF.CFStringCreateWithCString.argtypes = [
-                ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32
-            ]
-            # --- IOPMAssertionCreateWithName: (type, level, name, id*) -> IOReturn ---
-            _IOKit.IOPMAssertionCreateWithName.restype = ctypes.c_int32
-            _IOKit.IOPMAssertionCreateWithName.argtypes = [
-                ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
-                ctypes.POINTER(ctypes.c_uint32)
-            ]
-            # --- CFRelease: (cf) -> void ---
-            _CF.CFRelease.restype = None
-            _CF.CFRelease.argtypes = [ctypes.c_void_p]
-            # --- IOPMAssertionRelease: (id) -> IOReturn ---
-            _IOKit.IOPMAssertionRelease.restype = ctypes.c_int32
-            _IOKit.IOPMAssertionRelease.argtypes = [ctypes.c_uint32]
+            _NSProcessInfo = _objc.objc_getClass(b'NSProcessInfo')
+            _NSString     = _objc.objc_getClass(b'NSString')
+            _sel_procInfo = _objc.sel_registerName(b'processInfo')
+            _sel_beginAct = _objc.sel_registerName(b'beginActivityWithOptions:reason:')
+            _sel_endAct   = _objc.sel_registerName(b'endActivity:')
+            _sel_utf8     = _objc.sel_registerName(b'stringWithUTF8String:')
 
-            _kCFStringEncodingUTF8 = 0x08000100
+            # [NSProcessInfo processInfo] — (self, _cmd)
+            _objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            _pi = _objc.objc_msgSend(_NSProcessInfo, _sel_procInfo)
 
-            # Assertion 1: PreventUserIdleSystemSleep (video/display wakelock)
-            _cfstr_idle_type = _CF.CFStringCreateWithCString(
-                None, b"PreventUserIdleSystemSleep", _kCFStringEncodingUTF8
-            )
-            _cfstr_idle_name = _CF.CFStringCreateWithCString(
-                None, b"EARU SensorTerminalMonitor", _kCFStringEncodingUTF8
-            )
-            _IOKit.IOPMAssertionCreateWithName(
-                _cfstr_idle_type, ctypes.c_uint32(255), _cfstr_idle_name,
-                ctypes.byref(_WAKELOCK_ID)
-            )
-            _CF.CFRelease(_cfstr_idle_type)
-            _CF.CFRelease(_cfstr_idle_name)
+            # [NSString stringWithUTF8String:] — (self, _cmd, c_char_p)
+            _objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                            ctypes.c_char_p]
+            _reason = _objc.objc_msgSend(_NSString, _sel_utf8,
+                                          b'SensorTerminalMonitor is active')
 
-            # Assertion 2: AudioPlayback (audio wakelock)
-            _cfstr_audio_type = _CF.CFStringCreateWithCString(
-                None, b"AudioPlayback", _kCFStringEncodingUTF8
-            )
-            _cfstr_audio_name = _CF.CFStringCreateWithCString(
-                None, b"EARU SensorTerminalMonitor Audio", _kCFStringEncodingUTF8
-            )
-            _IOKit.IOPMAssertionCreateWithName(
-                _cfstr_audio_type, ctypes.c_uint32(255), _cfstr_audio_name,
-                ctypes.byref(_AUDIOLOCK_ID)
-            )
-            _CF.CFRelease(_cfstr_audio_type)
-            _CF.CFRelease(_cfstr_audio_name)
+            # [pi beginActivityWithOptions:reason:] — (self, _cmd, c_ulong, id)
+            _objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                            ctypes.c_ulong, ctypes.c_void_p]
+            _activity_token = _objc.objc_msgSend(
+                _pi, _sel_beginAct, ctypes.c_ulong(0x100000), _reason)
         except Exception:
             pass
 
     import atexit as _atexit
-    def _release_wakelocks():
-        if sys.platform == "darwin":
+    def _release_activity():
+        if _activity_token is not None and sys.platform == "darwin":
             try:
-                if _WAKELOCK_ID.value != 0:
-                    _IOKit.IOPMAssertionRelease(_WAKELOCK_ID)
-                if _AUDIOLOCK_ID.value != 0:
-                    _IOKit.IOPMAssertionRelease(_AUDIOLOCK_ID)
+                # [NSProcessInfo processInfo] — (self, _cmd)
+                _objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+                _pi = _objc.objc_msgSend(
+                    _objc.objc_getClass(b'NSProcessInfo'),
+                    _objc.sel_registerName(b'processInfo'))
+                # [pi endActivity:] — (self, _cmd, id)
+                _objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                                ctypes.c_void_p]
+                _objc.objc_msgSend(_pi, _sel_endAct, _activity_token)
             except Exception:
                 pass
-    _atexit.register(_release_wakelocks)
+    _atexit.register(_release_activity)
 
 def generate_avionics_chimes() -> None:
     """Generates professional avionics-style chimes with linear fade release."""
@@ -473,6 +472,13 @@ class PrimaryFlightDisplay:
         self.create_gradient_auras()
         self.hovered_anchor: Optional[int] = None
 
+        # QoS State: Dynamic Background ↔ Interactive scheduling
+        self._last_interaction_time: float = time.monotonic()
+        self._qos_is_interactive: bool = False
+
+        # Start QoS idle-check timer (promotes on interaction, demotes after 2s)
+        self.root.after(500, self._check_qos_idle)
+
         # Layout: Content Frame (Top) + Nav Canvas (Bottom)
         self.content_frame = tk.Frame(self.root, bg='black')
         self.content_frame.pack(fill=tk.BOTH, expand=True)
@@ -709,6 +715,7 @@ class PrimaryFlightDisplay:
         self.animate()
 
     def on_key_press(self, event: tk.Event) -> None:
+        self._on_interaction()
         key = event.keysym
         lower_key = key.lower()
         if self.page == 3:
@@ -743,6 +750,32 @@ class PrimaryFlightDisplay:
         lower_key = key.lower()
         if lower_key in self.panning_keys: self.panning_keys.remove(lower_key)
         if key in self.panning_keys: self.panning_keys.remove(key)
+
+    # --- QoS Dynamic Scheduling ---
+    def _on_interaction(self) -> None:
+        """Promote from E-core Background to P-core Interactive on user input."""
+        self._last_interaction_time = time.monotonic()
+        if not self._qos_is_interactive and sys.platform == "darwin":
+            try:
+                _libc.pthread_set_qos_class_self_np(_QOS_CLASS_USER_INTERACTIVE, 0)
+                self._qos_is_interactive = True
+                print("[QoS] Background -> Interactive (user input)", flush=True)
+            except Exception:
+                pass
+
+    def _check_qos_idle(self) -> None:
+        """Demote back to E-core Background after 2 seconds of no interaction."""
+        if self._qos_is_interactive:
+            idle = time.monotonic() - self._last_interaction_time
+            if idle >= 2.0:
+                if sys.platform == "darwin":
+                    try:
+                        _libc.pthread_set_qos_class_self_np(_QOS_CLASS_BACKGROUND, 0)
+                        self._qos_is_interactive = False
+                        print("[QoS] Interactive -> Background (idle 2s)", flush=True)
+                    except Exception:
+                        pass
+        self.root.after(500, self._check_qos_idle)
 
     def _scan_wifi_corewlan(self) -> list[dict[str, Any]]:
         """Scan WiFi via CoreWLAN (requires Location Services for SSID/BSSID)."""
@@ -832,32 +865,49 @@ class PrimaryFlightDisplay:
             return []
 
     def _wireless_scan_loop(self) -> None:
-        import random
         while not self.stop_wireless_scan.is_set():
-            # WiFi: try CoreWLAN first, then airport fallback
-            wifi_list = self._scan_wifi_corewlan()
+            # WiFi: Tier 1 = daemon CoreWLAN JSON (real RSSI/channel from .mm bridge)
+            wifi_list = []
+            try:
+                ws = self.full_data.get('wifi_scan', {})
+                networks = ws.get('networks', [])
+                for nw in networks:
+                    ssid = nw.get('ssid', '')
+                    if not ssid:
+                        continue  # skip truly empty entries
+                    # Show hidden SSIDs with RSSI/channel (real data from daemon)
+                    wifi_list.append({
+                        'ssid': ssid,
+                        'bssid': nw.get('bssid', 'unknown'),
+                        'rssi': int(nw.get('rssi', -90)),
+                        'channel': str(nw.get('channel', '?'))
+                    })
+            except Exception:
+                pass
+
+            # WiFi: Tier 2 = local CoreWLAN via PyObjC (same permission applies)
+            if not wifi_list:
+                wifi_list = self._scan_wifi_corewlan()
+
+            # WiFi: Tier 3 = airport CLI fallback (deprecated in macOS 26+)
             if not wifi_list:
                 wifi_list = self._scan_wifi_airport()
+
+            # WiFi: Tier 4 = show INOP instead of fake data
             if not wifi_list:
                 wifi_list = [
-                    {"ssid": "EARU-Tactical-Mesh-01", "bssid": "ac:86:74:28:aa:11", "rssi": -40 - random.randint(0, 5), "channel": "36 (5 GHz)"},
-                    {"ssid": "EARU-AccessPoint-Secure", "bssid": "34:fc:b9:99:bb:ef", "rssi": -52 - random.randint(0, 6), "channel": "11 (2.4 GHz)"},
-                    {"ssid": "Home-Network-5G", "bssid": "de:ad:be:ef:12:34", "rssi": -65 - random.randint(0, 7), "channel": "149 (5 GHz)"},
-                    {"ssid": "Transit-Public-WiFi", "bssid": "00:11:22:33:44:55", "rssi": -76 - random.randint(0, 8), "channel": "6 (2.4 GHz)"},
-                    {"ssid": "Linksys-Calib-AP", "bssid": "f0:99:bf:28:cc:88", "rssi": -82 - random.randint(0, 10), "channel": "44 (5 GHz)"}
+                    {"ssid": "INOP — No WiFi data", "bssid": "--:--:--:--:--:--", "rssi": -99, "channel": "N/A"}
                 ]
-            self.wifi_devices = sorted(wifi_list, key=lambda x: x["rssi"], reverse=True)
+            self.wifi_devices = sorted(wifi_list, key=lambda x: x.get("rssi", -99), reverse=True)
 
             # Bluetooth: real system_profiler parse
             bt_list = self._scan_bluetooth()
+            # Bluetooth: show INOP instead of fake data if system_profiler fails
             if not bt_list:
                 bt_list = [
-                    {"name": "EARU-IMU-Beacon-A", "address": "aa-bb-cc-dd-ee-11", "type": "Seismic Sensor / BLE", "rssi": -45 - random.randint(0, 5)},
-                    {"name": "Albert's Smart Tracker", "address": "12-34-56-78-9a-bc", "type": "Location beacon / BLE", "rssi": -58 - random.randint(0, 8)},
-                    {"name": "Transit-Sensors-Hub", "address": "ff-ee-dd-cc-bb-aa", "type": "Telemetry Node", "rssi": -68 - random.randint(0, 10)},
-                    {"name": "BLE-Temperature-04", "address": "00-11-22-33-44-55", "type": "Environmental Sensor", "rssi": -80 - random.randint(0, 12)}
+                    {"name": "INOP — No BT data", "address": "--:--:--:--:--:--", "type": "BLE", "rssi": -99}
                 ]
-            self.bt_devices = sorted(bt_list, key=lambda x: x["rssi"], reverse=True)
+            self.bt_devices = sorted(bt_list, key=lambda x: x.get("rssi", -99), reverse=True)
 
             for _ in range(150):
                 if self.stop_wireless_scan.is_set():
@@ -926,6 +976,7 @@ class PrimaryFlightDisplay:
         ]
 
     def on_nav_click(self, event: tk.Event) -> None:
+        self._on_interaction()
         w = self.nav_canvas.winfo_width()
         for key in self.get_soft_keys(w):
             rect = key.get("rect")
@@ -1323,8 +1374,8 @@ class PrimaryFlightDisplay:
                 self.targets['anchor_refresh_speed'] = float(loc.get('locationd_anchor_refresh_speed', 0.0))
                 self.loc_time = float(loc.get('time', 0.0))
                 self.lockin_miss = float(loc.get('lockin_miss', 0.0))
-                self.warning_reason = str(loc.get('warning_reason', "")).strip()
-                self.caution_reason = str(loc.get('caution_reason', "")).strip()
+                self.warning_reason = str(loc.get('master_warning', "")).strip()
+                self.caution_reason = str(loc.get('master_caution', "")).strip()
                 self.sig_locs = loc.get('significant_locations', [])
                 self.inside_sig_loc = bool(loc.get('inside_significant_location', False))
 
@@ -1575,6 +1626,81 @@ class PrimaryFlightDisplay:
             # Foreground
             target_canvas.create_text((cx1+cx2)/2, cy2 + 12, text=reason, fill="white", font=("Monaco", 8, "bold"), justify="center", tags=target_tags)
 
+        # 4. Draw structured alarm trigger overlay panels (beneath the reason text)
+        #    These are the prominent avionics-style panels showing each active trigger.
+        import re as _re
+        PANEL_W = 234
+        PANEL_X1 = w - 244
+        LINE_H = 18
+        HEADER_H = 20
+        PAD = 5
+
+        def _parse_triggers(reason_str: str) -> list[str]:
+            """Parse reason string into individual trigger entries.
+            Format: 'TRIGGER_CODE [HINT TEXT] TRIGGER_CODE [HINT TEXT] ...'"""
+            if not reason_str or not reason_str.strip():
+                return []
+            # Try to parse structured format first
+            triggers = _re.findall(r'[A-Z_]+(?:\s*\[[^\]]*\])?', reason_str.strip())
+            if triggers:
+                return triggers
+            # Fallback: if no structured parse, show the raw text as one entry
+            return [reason_str.strip()]
+
+        # Compute Y position: overlay starts below the buttons + reason text
+        warn_text_bottom = wy2 + 12 + 12 if raw_warning and self.warning_reason else wy2
+        caut_text_bottom = cy2 + 12 + 12 if raw_caution and self.caution_reason else cy2
+        overlay_y_start = max(warn_text_bottom, caut_text_bottom) + 16
+
+        # --- Warning overlay panel ---
+        warn_triggers = _parse_triggers(self.warning_reason) if raw_warning else []
+        if warn_triggers:
+            n = len(warn_triggers)
+            panel_h = HEADER_H + PAD + n * LINE_H + PAD
+            py1 = overlay_y_start
+            py2 = py1 + panel_h
+            # Dark red background with bright red border
+            target_canvas.create_rectangle(PANEL_X1, py1, PANEL_X1 + PANEL_W, py2,
+                                           fill="#1a0000", outline="#ff3333", width=2, tags=target_tags)
+            # Header bar
+            target_canvas.create_rectangle(PANEL_X1, py1, PANEL_X1 + PANEL_W, py1 + HEADER_H,
+                                           fill="#cc0000", outline="#ff3333", width=1, tags=target_tags)
+            target_canvas.create_text(PANEL_X1 + PANEL_W / 2, py1 + HEADER_H / 2,
+                                      text="[!] ACTIVE WARNINGS", fill="white",
+                                      font=("Monaco", 9, "bold"), tags=target_tags)
+            # Each trigger entry
+            ty = py1 + HEADER_H + PAD + 3
+            for trig in warn_triggers:
+                target_canvas.create_text(PANEL_X1 + 10, ty, anchor="nw",
+                                          text="\u25b8 " + trig, fill="#ff6666",
+                                          font=("Monaco", 8), tags=target_tags)
+                ty += LINE_H
+            overlay_y_start = py2 + 8
+
+        # --- Caution overlay panel ---
+        caut_triggers = _parse_triggers(self.caution_reason) if raw_caution else []
+        if caut_triggers:
+            n = len(caut_triggers)
+            panel_h = HEADER_H + PAD + n * LINE_H + PAD
+            py1 = overlay_y_start
+            py2 = py1 + panel_h
+            # Dark amber background with bright amber border
+            target_canvas.create_rectangle(PANEL_X1, py1, PANEL_X1 + PANEL_W, py2,
+                                           fill="#1a1000", outline="#ffaa00", width=2, tags=target_tags)
+            # Header bar
+            target_canvas.create_rectangle(PANEL_X1, py1, PANEL_X1 + PANEL_W, py1 + HEADER_H,
+                                           fill="#996600", outline="#ffaa00", width=1, tags=target_tags)
+            target_canvas.create_text(PANEL_X1 + PANEL_W / 2, py1 + HEADER_H / 2,
+                                      text="[!] ACTIVE CAUTIONS", fill="white",
+                                      font=("Monaco", 9, "bold"), tags=target_tags)
+            # Each trigger entry
+            ty = py1 + HEADER_H + PAD + 3
+            for trig in caut_triggers:
+                target_canvas.create_text(PANEL_X1 + 10, ty, anchor="nw",
+                                          text="\u25b8 " + trig, fill="#ffcc66",
+                                          font=("Monaco", 8), tags=target_tags)
+                ty += LINE_H
+
     def draw_search_page(self, w: float, h: float) -> None:
         self.canvas.create_text(w/2, 40, text="DESTINATION SEARCH & SELECTION", fill="#0077be", font=("Monaco", 20, "bold"))
         self.canvas.create_text(50, 100, anchor="nw", text=f"STATUS: {self.search_status}", fill="white", font=("Monaco", 10))
@@ -1587,6 +1713,7 @@ class PrimaryFlightDisplay:
             if y > h - 100: break
 
     def on_canvas_click(self, event: tk.Event) -> None:
+        self._on_interaction()
         w = self.canvas.winfo_width()
         # Master Warning click acknowledgement (w-240 to w-130, y: 10 to 40)
         if w - 240 <= event.x <= w - 130 and 10 <= event.y <= 40:
@@ -1635,6 +1762,7 @@ class PrimaryFlightDisplay:
 
     def on_canvas_hover(self, event: tk.Event) -> None:
         """Show tooltip overlay when hovering over weather graphs or wind grid cells."""
+        self._on_interaction()
         self._hover_pos = (float(event.x), float(event.y))
         self._draw_hover_at(event.x, event.y)
 
@@ -1977,6 +2105,7 @@ class PrimaryFlightDisplay:
         canvas.create_text(x, y+2, text="PROF", fill="white", font=("Monaco", 7, "bold"), tags=tags)
 
     def on_map_mouse_motion(self, event: tk.Event) -> None:
+        self._on_interaction()
         if not self.map_widget: return
 
         # Check if mouse is over an anchor marker
@@ -1998,6 +2127,7 @@ class PrimaryFlightDisplay:
             self.hovered_anchor = new_hover
 
     def on_map_click(self, event: tk.Event) -> None:
+        self._on_interaction()
         if not self.map_widget: return
         w, h = self.map_widget.width, self.map_widget.height
 

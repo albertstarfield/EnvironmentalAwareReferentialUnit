@@ -18,7 +18,21 @@ project Earu_Daemon is
    end Compiler;
 
    package Linker is
-      for Switches ("Ada") use ("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib", "-F/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks", "-framework", "IOKit", "-framework", "CoreFoundation");
+      --  AXIOM: corewlan_scanner.o is compiled separately by start.sh
+      --  (clang++ -ObjC++ — Alire cannot compile .mm files).
+      --  We link it here along with CoreWLAN and Foundation frameworks.
+       for Switches ("Ada") use (
+          "-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib",
+          "-F/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks",
+          "-framework", "IOKit",
+          "-framework", "CoreFoundation",
+          "-framework", "CoreWLAN",
+          "-framework", "CoreBluetooth",
+          "-framework", "Foundation",
+          "-lstdc++",
+          "obj/release/corewlan_scanner.o",
+          "obj/release/bluetooth_scanner.o"
+       );
    end Linker;
 
    package Install is

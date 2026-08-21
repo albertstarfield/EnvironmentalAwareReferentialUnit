@@ -52,6 +52,10 @@ sys.path.append(root_dir)
 global_scenario_history: deque[tuple[float, float, float, int, int, float, float]] = deque(maxlen=300)
 global_last_confirmed_ground: bool = False
 
+# In-memory significant location cache — no more JSON file I/O on Python side.
+# Ada daemon owns persistence to save_state/significant_locations.json.
+_sig_loc_cache: list[dict[str, Any]] = []
+
 
 # ---------------------------------------------------------------------------
 # Self-Bootstrapping Block
@@ -459,34 +463,15 @@ def weather_worker() -> None:
                             if has_le and dense_wifi and low_speed and stationary_100m:
                                 weather_code = 7
                                 try:
-                                    sig_loc_dir = os.path.join(BASE_PATH, "EARU_daemon", "run")
-                                    try:
-                                        os.makedirs(sig_loc_dir, exist_ok=True)
-                                    except PermissionError:
-                                        for fd in ["/Volumes/EARU_dataIO/save_state", os.path.join(BASE_PATH, "EARU_daemon", "run")]:
-                                            try:
-                                                os.makedirs(fd, exist_ok=True)
-                                                sig_loc_dir = fd
-                                                break
-                                            except Exception:
-                                                pass
-                                    sig_loc_file = os.path.join(sig_loc_dir, "significant_locations.json")
-
-                                    sig_data: list[dict[str, Any]] = []
-                                    if os.path.exists(sig_loc_file):
-                                        try:
-                                            with open(sig_loc_file, "r") as sf:
-                                                sig_data = json.load(sf)
-                                        except Exception:
-                                            pass
-
+                                    # --- Sig Loc Detection: in-memory cache only ---
+                                    # File I/O (persistence) is handled by Ada daemon.
                                     is_duplicate = any(
                                         geodetic_distance(start_lat, start_lon, item.get("lat", 0.0), item.get("lon", 0.0)) <= 100.0
-                                        for item in sig_data
+                                        for item in _sig_loc_cache
                                     )
 
                                     if not is_duplicate:
-                                        sig_data.append({
+                                        _sig_loc_cache.append({
                                             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                                             "lat": start_lat,
                                             "lon": start_lon,
@@ -496,18 +481,9 @@ def weather_worker() -> None:
                                             "type": "User Anchor Base / Home Hub",
                                             "description": "Dwell time > 5 min, low velocity (< 30 kts), strong local WiFi and BLE beacon anchors.",
                                         })
-                                        try:
-                                            with open(sig_loc_file, "w") as sf:
-                                                json.dump(sig_data, sf, indent=4)
-                                        except PermissionError:
-                                            sig_loc_dir = os.path.join(BASE_PATH, "EARU_daemon", "run")
-                                            os.makedirs(sig_loc_dir, exist_ok=True)
-                                            sig_loc_file = os.path.join(sig_loc_dir, "significant_locations.json")
-                                            with open(sig_loc_file, "w") as sf:
-                                                json.dump(sig_data, sf, indent=4)
-                                            print(f"[!] Primary significant location file permission denied. Fell back to {sig_loc_file}")
+                                        print(f"[SigLoc] Detected #{len(_sig_loc_cache)}: {start_lat:.6f}, {start_lon:.6f}")
                                 except Exception as e:
-                                    print(f"[!] Error saving significant location: {e}")
+                                    print(f"[!] Error detecting significant location: {e}")
 
             if weather_code == 0:
                 v_mag_val2 = getattr(global_location, "v_mag", 0.0)
@@ -708,21 +684,17 @@ def ml_worker() -> None:
 
             battery_data = struct.pack("<5f", batt_life_y, drain_act, drain_slp, drain_hib, drain_dhib)
 
-            # Significant Locations (Latest 10)
+            # Significant Locations (Latest 10) — pack from in-memory cache
+            # Persistence (read/write JSON) is handled by Ada daemon.
             sig_loc_data = bytearray()
             sig_count = 0
             try:
-                sig_loc_file = os.path.join(BASE_PATH, "EARU_daemon", "run", "significant_locations.json")
-
-                if os.path.exists(sig_loc_file):
-                    with open(sig_loc_file, "r") as sf:
-                        all_sig = json.load(sf)
-                    # Sort by timestamp descending
-                    all_sig.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-                    latest_10 = all_sig[:10]
+                if _sig_loc_cache:
+                    # Sort by timestamp descending, take latest 10
+                    sorted_locs = sorted(_sig_loc_cache, key=lambda x: x.get("timestamp", ""), reverse=True)
+                    latest_10 = sorted_locs[:10]
                     sig_count = len(latest_10)
                     for loc in latest_10:
-                        # Convert ISO timestamp to epoch
                         ts_str = loc.get("timestamp", "")
                         try:
                             ts_epoch = time.mktime(time.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ"))
