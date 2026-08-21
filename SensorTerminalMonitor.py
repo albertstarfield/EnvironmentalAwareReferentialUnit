@@ -4181,9 +4181,26 @@ class PrimaryFlightDisplay:
         t_c = float(smc.get('ambient_temp_k', 293.15)) - 273.15
         dp_c = float(weather.get('dew_point_k', 283.15)) - 273.15
         press = float(loc.get('pressure_hpa', 1013.25))
-        altim = press / 33.8639
+        terrain_alt = float(loc.get('terrain_altitude_m', 0.0))
+        alt_delta = float(loc.get('alt_delta_m', 0.0))
+        baro_corr = float(loc.get('baro_corrected_pressure_hpa', 0.0))
+        # Use baro-corrected pressure for METAR if available (more accurate),
+        # otherwise fall back to the raw fan-RPM estimate.
+        metar_press = baro_corr if baro_corr > 0 else press
+        altim = metar_press / 33.8639
         tendency = float(weather.get('pressure_tendency_hpa', 0.0))
         hum = float(smc.get('humidity_pct', 0.0))
+
+        # Read Open-Meteo API pressure from the meteo file (same as WEATHER page)
+        api_press = 0.0
+        meteo_path = "/Volumes/EARU_dataIO/EARU_meteo.dat"
+        try:
+            if os.path.exists(meteo_path) and (time.time() - os.path.getmtime(meteo_path)) < 7200:
+                with open(meteo_path, 'r') as mf:
+                    _meteo = json.loads(mf.read())
+                    api_press = float(_meteo.get('current', {}).get('pressure_msl', 0.0))
+        except (OSError, json.JSONDecodeError, ValueError, AttributeError):
+            pass
 
         # Read condition_icon from the Ada daemon instead of duplicating
         # the classification logic here.  The daemon uses WMO CIMO Guide
@@ -4240,13 +4257,22 @@ class PrimaryFlightDisplay:
         wind_speed_kts = metar_taf.get('wind_speed_kts', 0.0)
         wind_dir_deg = metar_taf.get('wind_dir_deg', 0.0)
         basis = [
-            f"STATION PRESSURE: {press:.2f} hPa",
+            f"FAN-RPM PRESSURE: {press:.2f} hPa",
+        ]
+        if api_press > 0:
+            p_diff = press - api_press
+            basis.append(f"WEATHER API:      {api_press:.2f} hPa  (delta: {p_diff:+.2f})")
+        if baro_corr > 0:
+            basis.append(f"BARO-CORRECTED:   {baro_corr:.2f} hPa  (ISA adjusted)")
+        basis.extend([
+            f"TERRAIN ELEV:     {terrain_alt:.1f} m  (OpenTopoData)",
+            f"ALT DELTA:        {alt_delta:+.1f} m  (GPS vs terrain)",
             f"DEWPOINT SPREAD:  {spread:.2f} K",
             f"AIR DENSITY:      {float(weather.get('air_fluid_density',0.0)):.4f} kg/m3",
             f"BARO TENDENCY:    {tendency:+.4f} hPa/hr",
             f"REL. HUMIDITY:    {hum:.1f} %",
-            f"DERIVED WIND:     {wind_speed_kts:.1f} kts @ {wind_dir_deg:.0f}°"
-        ]
+            f"DERIVED WIND:     {wind_speed_kts:.1f} kts @ {wind_dir_deg:.0f} deg"
+        ])
 
         anchors = self.full_data.get("Sol_BlueMarble_TimeAnchor", {})
         if anchors:
