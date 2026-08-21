@@ -513,6 +513,12 @@ package body Earu.IO is
       AP ("calibrated_g",   F (State.Location.Calibrated_G));
       AP ("pressure_hpa",   F (State.Location.Pressure_HPa));
       AP ("terrain_altitude_m", F (State.Location.Terrain_Alt));
+      --  Altitude delta: positive means laptop is above ground level (e.g.
+      --  on a higher floor).  When |alt_delta_m| > 30 m, baro_corrected_pressure
+      --  applies the ISA formula to adjust the fan-RPM estimate for the
+      --  altitude difference.
+      AP ("alt_delta_m",                F (State.Location.Alt_Delta_M));
+      AP ("baro_corrected_pressure_hpa", F (State.Location.Baro_Corrected_Pressure));
       AP ("compass_dir",    S (Ada.Strings.Fixed.Trim (State.Location.Compass_Dir, Ada.Strings.Both)));
       Append (Buf, """pos"": [" &
          F (State.Location.Pos.X) & ", " &

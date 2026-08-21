@@ -752,6 +752,46 @@ procedure Earu_Daemon is
                   -- BlueSolTerrainAltitude in EARU_data.dat.
                   L.Terrain_Alt := Earu.IO.Read_Sensor_Real ("sensor_terrain_alt.dat");
 
+                  --  ── CATEGORY 3b: ALTITUDE DELTA CHECK ─────────────────────────
+                  --  Compare GPS altitude (CoreLocationCLI) against terrain
+                  --  altitude (OpenTopoData ASTER 30m).  When the laptop sits on
+                  --  a different floor/level than ground, |Alt_Delta_M| > 30 m
+                  --  (≈100 ft).  The fan-RPM pressure estimate was calibrated at
+                  --  ground level, so we apply the ISA barometric formula to
+                  --  correct for the altitude difference:
+                  --
+                  --    P_corrected = P_fan × (1 − 2.25577e-5 × Δh)^5.25588
+                  --
+                  --  where Δh = GPS_alt − terrain_alt (positive = above ground).
+                  --  The correction factor is close to 1.0 for small deltas and
+                  --  becomes significant above ~30 m (≈3 hPa per 300 m).
+                  declare
+                     Alt_Delta : constant Real := L.Alt - L.Terrain_Alt;
+                     Abs_Delta : constant Real := Abs (Alt_Delta);
+                     --  ISA lapse rate constant: 6.5 K/km → 2.25577e-5 Pa/m
+                     --  at sea-level standard conditions (T0 = 288.15 K).
+                     Lapse_Const : constant Real := 2.25577e-5;
+                     --  ISA exponent: g / (Lapse_Rate × R_dry) = 5.25588
+                     ISA_Exponent : constant Real := 5.25588;
+                  begin
+                     L.Alt_Delta_M := Alt_Delta;
+                     if Abs_Delta > 30.0 then
+                        --  Apply ISA barometric correction:
+                        --  Base = (1 − Lapse_Const × Δh)
+                        --  Factor = Base ^ ISA_Exponent  (use Exp/Ln for real exponent)
+                        declare
+                           Base : constant Real := 1.0 - Lapse_Const * Alt_Delta;
+                           Factor : constant Real :=
+                              Real_Funcs.Exp (ISA_Exponent * Real_Funcs.Log (Base));
+                        begin
+                           L.Baro_Corrected_Pressure := L.Pressure_HPa * Factor;
+                        end;
+                     else
+                        --  Delta ≤ 30 m: no correction needed, pass through
+                        L.Baro_Corrected_Pressure := L.Pressure_HPa;
+                     end if;
+                  end;
+
                   --  CATEGORY 4: Wind grid from SMC pressure gradient.
                   --  Instead of copying the Python sidecar's (always-zero) SHM
                   --  grid, compute wind vectors directly from SMC pressure keys.

@@ -84,6 +84,13 @@ package Earu.Types is
       Compass_Dir   : aliased String (1 .. 2) := (others => ' ');
       Pressure_HPa  : aliased Real := 1013.25;
       Terrain_Alt   : aliased Real := 0.0;  -- OpenTopoData ground elevation (m ASL)
+      -- Altitude delta check (Step 1e): difference between GPS altitude and
+      -- terrain altitude.  When |Alt_Delta_M| > 30.0 m (≈100 ft), the laptop
+      -- is on a different floor/level than ground, and the fan-RPM pressure
+      -- estimate (calibrated at ground level) needs barometric correction.
+      -- ISA barometric formula: P = P0 × (1 − 2.25577e-5 × h)^5.25588
+      Alt_Delta_M          : aliased Real := 0.0;  -- GPS alt minus terrain alt (m)
+      Baro_Corrected_Pressure : aliased Real := 0.0;  -- ISA-corrected pressure (hPa)
       Calibrated_G  : aliased Real := 1.0;
       Pos           : aliased Vector3 := (others => <>);
       Total_Dist    : aliased Real := 0.0;
