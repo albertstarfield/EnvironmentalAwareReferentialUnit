@@ -2194,8 +2194,8 @@ class PrimaryFlightDisplay:
             dir_str = dirs[int((dir_deg + 11.25) / 22.5) % 16]
         else:
             dir_deg = 0.0; dir_str = "CALM"
-        # Temperature K→C
-        tc = wz["temperature"] - 273.15
+        # Temperature (source is already Celsius from Ada daemon thermal sensors)
+        tc = wz["temperature"]
         dp = wz["pressure"] - 1013.25
         # Tooltip box
         tip_w, tip_h = 200, 110
@@ -2222,7 +2222,7 @@ class PrimaryFlightDisplay:
                                 text=f"PRESSURE: {wz['pressure']:.2f} hPa ({dp:+.2f})",
                                 fill=p_color, font=("Monaco", 7), tags=tag)
         self.canvas.create_text(tip_x + 8, tip_y + 64, anchor="nw",
-                                text=f"TEMP: {tc:.1f} C ({wz['temperature']:.1f} K)",
+                                text=f"TEMP: {tc:.1f} C",
                                 fill="#ff8844", font=("Monaco", 7), tags=tag)
         self.canvas.create_text(tip_x + 8, tip_y + 78, anchor="nw",
                                 text=f"POS: X={wz['pos_x']:.3f}  Y={wz['pos_y']:.3f}",
@@ -4332,9 +4332,8 @@ class PrimaryFlightDisplay:
                         dp_color = "#ff4444" if dp > 0 else "#4488ff"
                         self.canvas.create_text(x, y - 6, text=f"{dp:+.1f}",
                                                  fill=dp_color, font=("Monaco", 6))
-                    # Temperature in Kelvin → Celsius
-                    tc = temp - 273.15
-                    self.canvas.create_text(x, y + 6, text=f"{tc:.0f}C",
+                    # Temperature (source is already Celsius from Ada daemon thermal sensors)
+                    self.canvas.create_text(x, y + 6, text=f"{temp:.0f}C",
                                              fill="#ccc", font=("Monaco", 6))
                     # Velocity arrow
                     if abs(vx) > 0.1 or abs(vy) > 0.1:

@@ -783,7 +783,7 @@ package body Earu.Math is
       --  1 unit SMC pressure delta across the chip ~ SCALE knots.
       SCALE : constant Real := 2.0;
 
-      --  Chassis thermal anchors (Kelvin).
+      --  Chassis thermal anchors (Celsius from sensor_temp_*.dat files).
       --  6 sensors mapped to 3 row pairs for bilinear blend:
       --    Row 1 (top):   TaLP (left) / TaRF (right)
       --    Row 4 (mid):   TaLT (left) / TaRT (right)
