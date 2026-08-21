@@ -280,6 +280,126 @@ package body Earu.Weather_Fetcher is
    --  the 10,000 req/day free-tier limit (~48 req/day).
    Fetch_Interval : constant Duration := 1800.0;
 
+   --  ── Standalone pressure file for smcSystemDemandNow ────────────────
+   --  smcSystemDemandNow needs the TRUE weather API pressure (pressure_msl)
+   --  as the reference for its fan-RPM pressure estimation formula.
+   --  Previously, it read pressure_hpa from EARU_data.dat which IS the
+   --  fan-RPM estimate itself — circular reasoning that produced ~3278 hPa.
+   --
+   --  This file contains a single float: the Open-Meteo pressure_msl value
+   --  in hPa (sea-level reduced pressure per WMO-No. 8 CIMO Guide Ch.9).
+   --  Written here after each successful fetch; read by smc_daemon via
+   --  Ada.Text_IO.Get_Line.
+   --
+   --  Axiom: RAM disk path matches smcSystemDemandNow's EARU_dataIO mount.
+   Weather_Pressure_File : constant String :=
+      "/Volumes/EARU_dataIO/sensor_weather_pressure.dat";
+
+   --  ── Extract pressure_msl from JSON ──────────────────────────────────
+   --  Minimal JSON extraction: searches for the key "pressure_msl": and
+   --  parses the floating-point number that follows.  No full JSON parser
+   --  needed — Open-Meteo always returns this key in the current section.
+   --
+   --  Derivation:
+   --    1. Find substring "\"pressure_msl\":" in JSON
+   --    2. Skip past the colon
+   --    3. Skip whitespace
+   --    4. Collect digits, decimal point, and optional sign
+   --    5. Convert to Float via Float'Value
+   --
+   --  Trace for typical JSON: ...,"pressure_msl":1008.2,...
+   --    Key found at position K
+   --    After colon: "1008.2,..."
+   --    Number = "1008.2" → 1008.2
+   --
+   --  Fallback: if key not found or parse fails, returns Default.
+   function Extract_Pressure_MSL (JSON : String; Default : Float := 0.0)
+      return Float
+   is
+      use Ada.Strings.Fixed;
+      Key  : constant String := """pressure_msl"":";
+      K_Idx : Natural;
+   begin
+      --  Search for the key in the JSON string
+      K_Idx := Index (JSON, Key);
+      if K_Idx = 0 then
+         return Default;
+      end if;
+
+      declare
+         Start : constant Natural := K_Idx + Key'Length;
+         End_I : Natural := Start;
+      begin
+         --  Skip whitespace after colon
+         while End_I <= JSON'Last and then JSON (End_I) = ' ' loop
+            End_I := End_I + 1;
+         end loop;
+
+         if End_I > JSON'Last then
+            return Default;
+         end if;
+
+         --  Collect number characters (digits, '.', '+', '-')
+         while End_I <= JSON'Last and then
+               (JSON (End_I) in '0' .. '9' | '.' | '+' | '-') loop
+            End_I := End_I + 1;
+         end loop;
+
+         if End_I > Start then
+            return Float'Value (JSON (Start .. End_I - 1));
+         else
+            return Default;
+         end if;
+      exception
+         when others =>
+            return Default;
+      end;
+   end Extract_Pressure_MSL;
+
+   --  ── Write pressure_msl to standalone file ──────────────────────────
+   --  Writes a single-line float file readable by smcSystemDemandNow.
+   --  Falls back to project-local path if RAM disk is unavailable.
+   --
+   --  Derivation:
+   --    1. Convert Float to String via Float'Image
+   --    2. Trim leading/trailing whitespace
+   --    3. Write to Weather_Pressure_File (RAM disk)
+   --    4. On failure, try /usr/local/EnvironmentalAwareReferentialUnit/
+   --
+   --  Axiom: smcSystemDemandNow reads this file every 10 seconds via
+   --  Ada.Text_IO.Open/Get_Line/Close pattern (smc_files.adb).
+   procedure Write_Weather_Pressure (Pressure_HPa : Float) is
+      use Ada.Text_IO;
+      use Ada.Strings.Fixed;
+      File : File_Type;
+      Val_Str : constant String :=
+         Trim (Float'Image (Pressure_HPa), Ada.Strings.Both);
+   begin
+      begin
+         Create (File, Out_File, Weather_Pressure_File);
+         Put_Line (File, Val_Str);
+         Close (File);
+      exception
+         when others =>
+            if Is_Open (File) then
+               Close (File);
+            end if;
+            --  Fallback to project-local path
+            begin
+               Create (File, Out_File,
+                  "/usr/local/EnvironmentalAwareReferentialUnit/" &
+                  "sensor_weather_pressure.dat");
+               Put_Line (File, Val_Str);
+               Close (File);
+            exception
+               when others =>
+                  if Is_Open (File) then
+                     Close (File);
+                  end if;
+            end;
+      end;
+   end Write_Weather_Pressure;
+
    --  ── Fetcher task body ───────────────────────────────────────────────
 
    task body Fetcher is
@@ -339,11 +459,33 @@ package body Earu.Weather_Fetcher is
             begin
                Ada.Text_IO.Put_Line ("[WeatherFetcher] Read " &
                   Natural'Image (Body_Str'Length) & " bytes from " & Temp_File);
-               if Body_Str'Length > 2 then
-                  Shared.Store (Body_Str);
-                  Ada.Text_IO.Put_Line ("[WeatherFetcher] Stored " &
-                     Natural'Image (Body_Str'Length) & " bytes");
-               end if;
+                if Body_Str'Length > 2 then
+                   Shared.Store (Body_Str);
+                   Ada.Text_IO.Put_Line ("[WeatherFetcher] Stored " &
+                      Natural'Image (Body_Str'Length) & " bytes");
+
+                   --  ── Extract pressure_msl for smcSystemDemandNow ────
+                   --  Breaks the circular reasoning in the calibration formula.
+                   --  Previously: smcSystemDemandNow read pressure_hpa from
+                   --  EARU_data.dat which IS the fan-RPM estimate (circular).
+                   --  Now: reads the TRUE Open-Meteo sea-level pressure
+                   --  (pressure_msl) extracted from this JSON response.
+                   declare
+                      P_MSL : constant Float :=
+                         Extract_Pressure_MSL (Body_Str);
+                   begin
+                      if P_MSL > 0.0 then
+                         Write_Weather_Pressure (P_MSL);
+                         Ada.Text_IO.Put_Line
+                            ("[WeatherFetcher] Wrote pressure_msl=" &
+                             Float'Image (P_MSL) & " hPa to " &
+                             Weather_Pressure_File);
+                      else
+                         Ada.Text_IO.Put_Line
+                            ("[WeatherFetcher] WARNING: pressure_msl not found in JSON");
+                      end if;
+                   end;
+                end if;
             end;
 
          exception
