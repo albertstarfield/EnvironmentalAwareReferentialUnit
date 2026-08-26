@@ -508,10 +508,7 @@ class PrimaryFlightDisplay:
             self.root.bind("<KeyRelease>", self.on_key_release)
             self.map_widget.canvas.bind("<Button-1>", self.on_map_click, add="+")
             self.map_widget.canvas.bind("<Motion>", self.on_map_mouse_motion, add="+")
-            # Monkey-patch pre_cache for multi-zoom + motion-biased prefetch
-            self._patch_map_prefetch()
-
-        # State Variables
+            # State Variables
         self.pitch: float = 0.0
         self.roll: float = 0.0
         self.yaw: float = 0.0
@@ -638,12 +635,36 @@ class PrimaryFlightDisplay:
         self._prefetch_dir: tuple[float, float] = (0.0, 0.0)   # (d_lat, d_lon) from panning
         self._prefetch_time: float = 0.0
         self._prefetch_zoom_cache: int = -1                     # last zoom we triggered multi-zoom prefetch at
+        # GPS velocity vector for circle-cone prefetch (30-min rolling window)
+        #   Derivation: Collect (lat, lon, timestamp) samples.  Every tick,
+        #   compute instantaneous dlat/dt, dlon/dt from successive GPS fixes.
+        #   Store in a deque capped at 30 minutes of samples (~1 sample/tick at
+        #   15 Hz = ~27000 max, but we decimate to 1 sample/2s = 900 samples).
+        #   The 30-min window mean gives a stable heading + speed for prefetch.
+        #   |mean_vel| > velocity_threshold → cone mode; ≤ → circle mode.
+        from collections import deque as _dq
+        self._gps_samples: _dq[tuple[float, float, float]] = _dq()
+        # (dlat_dt, dlon_dt, timestamp) — instantaneous velocity samples
+        self._gps_window_sec: float = 1800.0                   # 30 minutes
+        self._gps_decimate_sec: float = 2.0                    # sample every 2s
+        self._gps_last_sample_time: float = 0.0
+        self._prev_gps_lat: Optional[float] = None
+        self._prev_gps_lon: Optional[float] = None
+        self._prev_gps_time: float = 0.0
+        self._velocity_threshold: float = 0.00005              # ~5.5 m/s ≈ 10 kts in lat deg/s
         # Shared stats dict (read by GUI, written by pre_cache thread)
         self._prefetch_stats: dict[str, Any] = {
             'current_zoom': 15, 'cache_loaded': 0, 'cache_max': 10_000,
             'adj_zoom_pending': '', 'motion_bias': 'IDLE', 'last_msg': '',
             'queued_total': 0, 'adj_queued': 0,
+            'gps_speed_kts': 0.0, 'gps_heading': 0.0, 'prefetch_mode': 'CIRCLE',
+            'gps_samples_n': 0,
         }
+
+        # Ape-patch: replace pre_cache for multi-zoom + circle-cone prefetch
+        # Must be called AFTER _gps_samples, _gps_window_sec, _velocity_threshold,
+        # _prefetch_stats are initialized (above), since the thread reads them immediately.
+        self._ape_patch_prefetch()
 
         # Search UI
         self.search_frame = tk.Frame(self.content_frame, bg='#111')
@@ -982,15 +1003,18 @@ class PrimaryFlightDisplay:
         # Trigger multi-zoom prefetch for the new zoom level
         self._prefetch_zoom_cache = -1
 
-    def _patch_map_prefetch(self) -> None:
-        """Monkey-patch tkintermapview's pre_cache thread to add multi-zoom
-        layer prefetching (zoom-1, zoom+1) and motion-direction bias.
+    def _ape_patch_prefetch(self) -> None:
+        """Ape-patch: replace tkintermapview's pre_cache thread with circle-cone version.
 
-        The original pre_cache only loads tiles at the current zoom in
-        expanding rings (radius 1..8). This patch extends it to also
-        prefetch adjacent zoom levels at a smaller radius (2 tiles around
-        viewport center) and stretch the current-zoom ring ahead in the
-        direction of WASD panning.
+        CRITICAL: The original thread is created in TkinterMapView.__init__
+        with `target=self.pre_cache`, which captures a reference to the original
+        bound method.  Reassigning `self.map_widget.pre_cache` has NO effect on
+        the running thread — it still calls the original function.  We must:
+
+          1. Set `running = False` to signal all background threads to stop.
+          2. Join the original pre_cache thread (it exits its while-loop).
+          3. Set `running = True` to resume image-load threads.
+          4. Start a NEW thread with our enhanced function.
         """
         if not self.map_widget:
             return
@@ -998,6 +1022,7 @@ class PrimaryFlightDisplay:
         _orig_pre_cache = self.map_widget.pre_cache.__func__
 
         def _enhanced_pre_cache(wself: Any) -> None:  # type: ignore[no-untyped-def]
+            import math as _m
             import sqlite3 as _sql
             import time as _t
 
@@ -1006,6 +1031,12 @@ class PrimaryFlightDisplay:
             zoom = round(wself.zoom)
             last_log = 0.0          # throttle stdio to every 2 s
             cycle_count = 0
+            # 100 km offline prefetch state: when the device is stationary
+            # (no position change) for >10 s, we prefetch tiles at zoomed-out
+            # levels covering a 100 km radius so road/place data is cached
+            # for offline use (search, browse without network).
+            stationary_since: float = _t.time()   # timestamp of last position change
+            offline_100km_done: bool = False       # True once we've completed the pass
 
             if wself.database_path is not None:
                 db_conn = _sql.connect(wself.database_path)
@@ -1013,7 +1044,7 @@ class PrimaryFlightDisplay:
             else:
                 db_cur = None
 
-            print("[PREFETCH] Enhanced pre-cache thread started", flush=True)
+            print("[APE-PATCH] Circle-cone pre-cache thread started", flush=True)
 
             while wself.running:
                 cur_pos = wself.pre_cache_position
@@ -1023,53 +1054,111 @@ class PrimaryFlightDisplay:
                     radius = 1
                     cycle_count += 1
                     earu._prefetch_zoom_cache = -1  # force re-prefetch on move
-                    print(f"[PREFETCH] Position changed → cycle #{cycle_count}  "
+                    stationary_since = _t.time()    # reset 100 km timer on move
+                    offline_100km_done = False       # re-arm for new position
+                    print(f"[APE-PATCH] Position changed → cycle #{cycle_count}  "
                           f"center=({cur_pos[0]},{cur_pos[1]}) zoom={zoom}", flush=True)
 
-                # --- current zoom (original logic with motion-bias) ---
+                # --- Determine CIRCLE vs CONE mode from 30-min window mean ---
+                import time as _t2
+                now_w = _t2.time()
+                cutoff_w = now_w - earu._gps_window_sec
+                # Expire old samples in the pre_cache thread too (it reads concurrently)
+                while earu._gps_samples and earu._gps_samples[0][2] < cutoff_w:
+                    earu._gps_samples.popleft()
+                n_samples = len(earu._gps_samples)
+                gv_lat, gv_lon = 0.0, 0.0
+                if n_samples >= 2:
+                    s_n, s_e = 0.0, 0.0
+                    for (sd, se, _) in earu._gps_samples:
+                        s_n += sd
+                        s_e += se
+                    gv_lat = s_n / n_samples
+                    gv_lon = s_e / n_samples
+                # Correct dlon for latitude compression at current center lat
+                # (tiles are roughly square only at equator; correct for lat)
+                lat_rad = _m.radians(earu.pan_lat if last_pos is None else
+                                     earu.lat)  # fallback to GPS lat
+                cos_lat = max(_m.cos(lat_rad), 0.01)  # clamp to avoid div-by-zero
+                # Convert GPS velocity to approximate tile-space direction
+                # dlat is already in lat-deg; dlon needs cos(lat) correction
+                vel_n = gv_lat              # north component (dlat/s)
+                vel_e = gv_lon * cos_lat    # east component (corrected dlon/s)
+                speed = _m.sqrt(vel_n ** 2 + vel_e ** 2)
+
+                # Threshold: ~0.00005 deg/s ≈ 5.5 m/s ≈ 10 kts
+                # Below this → CIRCLE mode (uniform); above → CONE mode
+                cone_mode = speed > earu._velocity_threshold
+
+                # Compute heading from velocity vector (0°=N, 90°=E)
+                if cone_mode and (abs(vel_n) > 1e-10 or abs(vel_e) > 1e-10):
+                    gps_heading_rad = _m.atan2(vel_e, vel_n)  # atan2(E, N)
+                    # Half-aperture angle: faster → narrower cone
+                    # speed_factor: 0 at threshold, 1 at 0.001 deg/s (~111 m/s)
+                    speed_factor = min(1.0, (speed - earu._velocity_threshold) / 0.001)
+                    half_ap = _m.radians(max(15.0, 60.0 - speed_factor * 45.0))
+                else:
+                    gps_heading_rad = 0.0
+                    half_ap = _m.pi  # full circle (fallback)
+
+                prefetch_mode = "CONE" if cone_mode else "CIRCLE"
+
+                # --- Current-zoom ring fetch (circle-cone aware) ---
                 queued_current = 0
+                bias_label = 'IDLE'
                 if last_pos is not None and radius <= 8:
-                    # Motion-bias: stretch radius ahead in panning direction
-                    pd_lat, pd_lon = earu._prefetch_dir
-                    stretch_n = max(0, min(4, int(pd_lat * 8000)))
-                    stretch_s = max(0, min(4, int(-pd_lat * 8000)))
-                    stretch_e = max(0, min(4, int(pd_lon * 8000)))
-                    stretch_w = max(0, min(4, int(-pd_lon * 8000)))
-
-                    bias_label = 'IDLE'
-                    if stretch_n + stretch_s + stretch_e + stretch_w > 0:
-                        dirs = []
-                        if stretch_n: dirs.append(f'N+{stretch_n}')
-                        if stretch_s: dirs.append(f'S+{stretch_s}')
-                        if stretch_e: dirs.append(f'E+{stretch_e}')
-                        if stretch_w: dirs.append(f'W+{stretch_w}')
-                        bias_label = ' '.join(dirs)
-
-                    for x in range(wself.pre_cache_position[0] - radius - stretch_w,
-                                    wself.pre_cache_position[0] + radius + stretch_e + 1):
-                        ky_p = f"{zoom}{x}{wself.pre_cache_position[1] + radius + stretch_n}"
-                        ky_m = f"{zoom}{x}{wself.pre_cache_position[1] - radius - stretch_s}"
-                        if ky_p not in wself.tile_image_cache:
-                            wself.request_image(zoom, x, wself.pre_cache_position[1] + radius + stretch_n, db_cursor=db_cur)
-                            queued_current += 1
-                        if ky_m not in wself.tile_image_cache:
-                            wself.request_image(zoom, x, wself.pre_cache_position[1] - radius - stretch_s, db_cursor=db_cur)
-                            queued_current += 1
-
-                    for y in range(wself.pre_cache_position[1] - radius - stretch_s,
-                                    wself.pre_cache_position[1] + radius + stretch_n + 1):
-                        ky_p = f"{zoom}{wself.pre_cache_position[0] + radius + stretch_e}{y}"
-                        ky_m = f"{zoom}{wself.pre_cache_position[0] - radius - stretch_w}{y}"
-                        if ky_p not in wself.tile_image_cache:
-                            wself.request_image(zoom, wself.pre_cache_position[0] + radius + stretch_e, y, db_cursor=db_cur)
-                            queued_current += 1
-                        if ky_m not in wself.tile_image_cache:
-                            wself.request_image(zoom, wself.pre_cache_position[0] - radius - stretch_w, y, db_cursor=db_cur)
-                            queued_current += 1
+                    if cone_mode:
+                        # CONE: fetch tiles within the heading cone at each ring
+                        for dx in range(-radius, radius + 1):
+                            for dy in range(-radius, radius + 1):
+                                # Only border tiles (ring perimeter)
+                                if abs(dx) != radius and abs(dy) != radius:
+                                    continue
+                                # Angle from center to this tile
+                                tile_angle = _m.atan2(float(dx), float(dy))
+                                # Angular difference from heading (handle wraparound)
+                                diff = _m.fabs(tile_angle - gps_heading_rad)
+                                if diff > _m.pi:
+                                    diff = 2.0 * _m.pi - diff
+                                # Fetch if within half-aperture
+                                if diff <= half_ap:
+                                    tx = wself.pre_cache_position[0] + dx
+                                    ty = wself.pre_cache_position[1] + dy
+                                    ky = f"{zoom}{tx}{ty}"
+                                    if ky not in wself.tile_image_cache:
+                                        wself.request_image(zoom, tx, ty, db_cursor=db_cur)
+                                        queued_current += 1
+                        # Compute cone stats for display
+                        deg_ap = _m.degrees(half_ap) * 2
+                        deg_hdg = _m.degrees(gps_heading_rad) % 360
+                        bias_label = f'CONE {deg_hdg:03.0f}deg/{deg_ap:.0f}deg'
+                    else:
+                        # CIRCLE: uniform ring (all border tiles)
+                        for x in range(wself.pre_cache_position[0] - radius,
+                                        wself.pre_cache_position[0] + radius + 1):
+                            ky_p = f"{zoom}{x}{wself.pre_cache_position[1] + radius}"
+                            ky_m = f"{zoom}{x}{wself.pre_cache_position[1] - radius}"
+                            if ky_p not in wself.tile_image_cache:
+                                wself.request_image(zoom, x, wself.pre_cache_position[1] + radius, db_cursor=db_cur)
+                                queued_current += 1
+                            if ky_m not in wself.tile_image_cache:
+                                wself.request_image(zoom, x, wself.pre_cache_position[1] - radius, db_cursor=db_cur)
+                                queued_current += 1
+                        for y in range(wself.pre_cache_position[1] - radius,
+                                        wself.pre_cache_position[1] + radius + 1):
+                            ky_p = f"{zoom}{wself.pre_cache_position[0] + radius}{y}"
+                            ky_m = f"{zoom}{wself.pre_cache_position[0] - radius}{y}"
+                            if ky_p not in wself.tile_image_cache:
+                                wself.request_image(zoom, wself.pre_cache_position[0] + radius, y, db_cursor=db_cur)
+                                queued_current += 1
+                            if ky_m not in wself.tile_image_cache:
+                                wself.request_image(zoom, wself.pre_cache_position[0] - radius, y, db_cursor=db_cur)
+                                queued_current += 1
+                        bias_label = f'CIRCLE r={radius}'
 
                     radius += 1
 
-                # --- adjacent zoom layers (zoom-1, zoom+1, radius 2) ---
+                # --- Adjacent zoom layers (zoom-1, zoom+1, radius 2) ---
                 queued_adj = 0
                 adj_label = ''
                 if last_pos is not None and earu._prefetch_zoom_cache != zoom:
@@ -1078,16 +1167,54 @@ class PrimaryFlightDisplay:
                     adj_z_list = [z for z in (zoom - 1, zoom + 1) if 1 <= z <= 20]
                     adj_label = ','.join(str(z) for z in adj_z_list)
                     for adj_z in adj_z_list:
-                        for dx in range(-adj_radius, adj_radius + 1):
-                            for dy in range(-adj_radius, adj_radius + 1):
-                                tx = wself.pre_cache_position[0] + dx
-                                ty = wself.pre_cache_position[1] + dy
+                        for adx in range(-adj_radius, adj_radius + 1):
+                            for ady in range(-adj_radius, adj_radius + 1):
+                                tx = wself.pre_cache_position[0] + adx
+                                ty = wself.pre_cache_position[1] + ady
                                 if f"{adj_z}{tx}{ty}" not in wself.tile_image_cache:
                                     wself.request_image(adj_z, tx, ty, db_cursor=db_cur)
                                     queued_adj += 1
 
                 else:
                     _t.sleep(0.1)
+
+                # --- 100 km offline-aware disc prefetch ---
+                # When the device has been stationary (no GPS position change) for
+                # >10 s, we do a single pass that prefetches all tiles within a
+                # ~100 km radius at a zoomed-out level.  This caches road and place
+                # data so the user can search/browse offline or when the network is
+                # temporarily unavailable.
+                #
+                # We target zoom level (current_z - 5), clamped to min 8.
+                # At that zoom each tile covers ~40-80 km, so a disc of radius
+                # ceil(100 / tile_km) tiles covers the full 100 km neighbourhood.
+                #
+                # tile_km = (360 / 2^z) * 111.32   (km per tile, latitude axis)
+                # disc_tiles = pi * r^2              (full disc, not just ring)
+                #
+                # The pass runs once per stationary period (offline_100km_done flag).
+                # On position change the flag resets and the timer restarts.
+                if (last_pos is not None
+                        and not offline_100km_done
+                        and (_t.time() - stationary_since) > 10.0):
+                    off_z = max(zoom - 5, 8)  # zoomed-out target level
+                    tile_km = (360.0 / (2 ** off_z)) * 111.32  # km per tile edge
+                    off_r = max(int(_m.ceil(100.0 / tile_km)), 1)  # radius in tiles
+                    queued_off = 0
+                    cx, cy = wself.pre_cache_position
+                    for dx in range(-off_r, off_r + 1):
+                        for dy in range(-off_r, off_r + 1):
+                            if dx * dx + dy * dy > off_r * off_r:
+                                continue  # outside disc
+                            tx = cx + dx
+                            ty = cy + dy
+                            ky = f"{off_z}{tx}{ty}"
+                            if ky not in wself.tile_image_cache:
+                                wself.request_image(off_z, tx, ty, db_cursor=db_cur)
+                                queued_off += 1
+                    offline_100km_done = True
+                    print(f"[APE-PATCH] 100km offline disc: z={off_z} r={off_r} "
+                          f"tile_km={tile_km:.1f} queued={queued_off}", flush=True)
 
                 # Cache cap (matches tkintermapview original: 10k images ~80 MB)
                 cache_len = len(wself.tile_image_cache)
@@ -1104,21 +1231,51 @@ class PrimaryFlightDisplay:
                 earu._prefetch_stats['adj_zoom_pending'] = adj_label
                 earu._prefetch_stats['queued_total'] = queued_current
                 earu._prefetch_stats['adj_queued'] = queued_adj
+                earu._prefetch_stats['prefetch_mode'] = prefetch_mode
+                earu._prefetch_stats['gps_speed_kts'] = speed * 111_320.0 / 1.852  # deg/s → m/s → kts
+                earu._prefetch_stats['gps_heading'] = _m.degrees(gps_heading_rad) % 360 if cone_mode else 0.0
+                earu._prefetch_stats['offline_100km_done'] = offline_100km_done
 
                 # Throttled stdio (every 2 s)
                 now = _t.time()
                 if now - last_log >= 2.0:
                     last_log = now
                     cache_pct = len(wself.tile_image_cache) / 10_000 * 100
-                    msg = (f"[PREFETCH] zoom={zoom} r={radius}  "
+                    msg = (f"[APE-PATCH] zoom={zoom} r={radius} mode={prefetch_mode}  "
                            f"cache={len(wself.tile_image_cache)}/{10_000} ({cache_pct:.0f}%)  "
                            f"ring_q={queued_current}  adj_q={queued_adj} adj_z=[{adj_label}]  "
                            f"bias={bias_label}  cycle=#{cycle_count}")
                     print(msg, flush=True)
                     earu._prefetch_stats['last_msg'] = msg
 
+        import threading as _th
         import types
-        self.map_widget.pre_cache = types.MethodType(_enhanced_pre_cache, self.map_widget)  # type: ignore[assignment]
+
+        # -----------------------------------------------------------------------
+        # Ape-patch — thread replacement
+        #
+        # The original TkinterMapView.__init__ starts:
+        #   self.pre_cache_thread = threading.Thread(target=self.pre_cache)
+        #   self.pre_cache_thread.start()
+        #
+        # The `target=` captures a BOUND METHOD REFERENCE at creation time.
+        # Reassigning `self.map_widget.pre_cache = ...` only replaces the name
+        # on the instance — the thread still holds the OLD function object.
+        #
+        # We DO NOT set running=False here: that flag is shared by ALL 25
+        # image-load worker threads (they loop `while self.running:`).  Toggling
+        # it would permanently kill those workers — setting it back to True
+        # only flips the flag; the dead threads never restart.  Instead, we
+        # leave the original pre_cache thread running (harmless basic ring
+        # prefetch) and start our enhanced thread alongside it.  Both call
+        # request_image() which adds to the same worker queue — thread-safe.
+        # -----------------------------------------------------------------------
+        mw = self.map_widget
+        mw.pre_cache = types.MethodType(_enhanced_pre_cache, mw)  # type: ignore[assignment]
+        new_thread = _th.Thread(daemon=True, target=mw.pre_cache)
+        new_thread.start()
+        mw.pre_cache_thread = new_thread
+        print("[APE-PATCH] Enhanced circle-cone pre_cache thread started", flush=True)
 
     def set_auto_center(self, val: bool) -> None:
         self.auto_center = val
@@ -3553,6 +3710,59 @@ class PrimaryFlightDisplay:
         self.heading = self.lerp_angle(self.heading, self.targets['heading'], self.lerp_factor)
         self.lat += (self.targets['lat'] - self.lat) * self.lerp_factor
         self.lon += (self.targets['lon'] - self.lon) * self.lerp_factor
+
+        # --- GPS velocity: 30-minute rolling window average ---
+        # Derivation: Collect instantaneous velocity samples (dlat/dt, dlon/dt)
+        # every 2 seconds.  Expire samples older than 30 minutes.  The window
+        # mean gives a stable, low-noise average velocity vector for prefetch.
+        #   speed = sqrt(mean_dlat^2 + (mean_dlon * cos(lat))^2)  [deg/s equiv]
+        #   heading = atan2(mean_dlon * cos(lat), mean_dlat)       [0=N, 90=E]
+        #   |speed| > _velocity_threshold → CONE mode
+        #   |speed| ≤ _velocity_threshold → CIRCLE mode
+        import time as _t_mod
+        now_gps = _t_mod.time()
+        if self._prev_gps_lat is not None and self._prev_gps_time > 0:
+            dt = now_gps - self._prev_gps_time
+            if dt > 0.5:  # require at least 500ms between GPS fixes
+                dlat = self.targets['lat'] - self._prev_gps_lat
+                dlon = self.targets['lon'] - self._prev_gps_lon
+                # Only store samples at decimation rate (every 2s)
+                if now_gps - self._gps_last_sample_time >= self._gps_decimate_sec:
+                    self._gps_samples.append((dlat / dt, dlon / dt, now_gps))
+                    self._gps_last_sample_time = now_gps
+                self._prev_gps_lat = self.targets['lat']
+                self._prev_gps_lon = self.targets['lon']
+                self._prev_gps_time = now_gps
+        else:
+            self._prev_gps_lat = self.targets['lat']
+            self._prev_gps_lon = self.targets['lon']
+            self._prev_gps_time = now_gps
+
+        # Expire samples older than 30 minutes
+        cutoff = now_gps - self._gps_window_sec
+        while self._gps_samples and self._gps_samples[0][2] < cutoff:
+            self._gps_samples.popleft()
+
+        # Compute window mean velocity
+        gps_vel_n = 0.0  # mean dlat/dt
+        gps_vel_e = 0.0  # mean dlon/dt
+        n_samples = len(self._gps_samples)
+        if n_samples >= 2:
+            sum_dlat = 0.0
+            sum_dlon = 0.0
+            for (sdlat, sdlon, _) in self._gps_samples:
+                sum_dlat += sdlat
+                sum_dlon += sdlon
+            gps_vel_n = sum_dlat / n_samples
+            gps_vel_e = sum_dlon / n_samples
+
+        # Blend GPS velocity into _prefetch_dir when not actively panning
+        # (panning still wins when WASD keys are held — GPS is background bias)
+        if not self.panning_keys:
+            self._prefetch_dir = (
+                self._prefetch_dir[0] * 0.7 + gps_vel_n * 0.3,
+                self._prefetch_dir[1] * 0.7 + gps_vel_e * 0.3,
+            )
 
         # Correction Factors LERP
         self.cf_velocity += (self.targets['cf_velocity'] - self.cf_velocity) * self.lerp_factor

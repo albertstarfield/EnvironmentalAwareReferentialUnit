@@ -497,9 +497,30 @@ def weather_worker() -> None:
                     weather_code = 8
 
             header = struct.pack("<I192sI", update_count, b"\0" * 192, 0)
+
+            # SHM 'basic' struct layout (little-endian):
+            #   <3f  → temp_K (float), longitude (float), pressure_hpa (float)
+            #   I    → weather_code (uint32)
+            #   d    → timestamp (double)
+            #   4f   → lat, lon, alt_m, pressure_hpa (all float, from GPS)
+            #
+            # NOTE: Fields 1-3 are a legacy weather overlay.  The Ada daemon
+            # (earu-weather_fetcher.adb) already fetches real temperature and
+            # pressure from Open-Meteo using DYNAMIC GPS coords from
+            # Earu.State_Store.State_Buffer, and writes the result to
+            # /Volumes/EARU_dataIO/EARU_meteo.dat (JSON) which SensorTerminal
+            # Monitor reads directly.  So:
+            #   - temp_K here is a 0.0 sentinel ("no local sensor temp");
+            #     the Ada daemon provides the real value via EARU_meteo.dat.
+            #   - longitude and pressure_hpa now use dynamic values from
+            #     global_location (CoreLocation GPS + barometer) instead of
+            #     the old hardcoded Jakarta coordinates (96.9248°E, 1013.25 hPa).
             basic = struct.pack(
                 "<3fId4f",
-                30.81 + 273.15, 96.9248, 1013.25, weather_code,
+                0.0,                                    # temp_K: sentinel (real temp from Ada daemon via EARU_meteo.dat)
+                global_location.lon,                     # longitude: dynamic from CoreLocation GPS
+                global_location.pressure_hpa,            # pressure_hpa: dynamic from CoreLocation barometer
+                weather_code,
                 time.time(), global_location.lat, global_location.lon,
                 global_location.alt, global_location.pressure_hpa,
             )
@@ -652,8 +673,9 @@ def ml_worker() -> None:
                     print(f"[!] Model adaptation failed: {train_err}")
 
             header = struct.pack("<I192sI", update_count, b"\0" * 192, 0)
-            mood = struct.pack("<4fI", 0.625, 0.125, 0.125, 0.125, 3)
-            detected = struct.pack("<6f", 163.636, 0.491, 163.636, 0.466, 163.636, 0.466)
+            # Mood + heartbeat now computed by Ada daemon (BCG detector + mood inference)
+            mood = struct.pack("<4fI", 0.0, 0.0, 0.0, 0.0, 0)
+            detected = struct.pack("<6f", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
             lstm_modifier = 1.0
             if model is not None:
