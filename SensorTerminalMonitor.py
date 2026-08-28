@@ -3241,7 +3241,7 @@ class PrimaryFlightDisplay:
 
         # --- Network Bandwidth (replaced SMC Power Mgmt - now on Energy page) ---
         x_net, y_net = 750, y_pwr + len(pwr_metrics) * 30 + 30
-        net_active_str = str(self.active_network) if isinstance(self.active_network, str) else str(self.active_network)
+        net_active_str = self.active_network
         net_active = net_active_str.upper() == 'TRUE'
         net_col = "green" if net_active else "gray"
         net_metrics = [
