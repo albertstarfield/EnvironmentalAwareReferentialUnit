@@ -238,8 +238,8 @@ except ImportError:
     HAS_PIL = False
 
 try:
-    from OpenGL.GL import *
-    from OpenGL.GLU import *
+    from OpenGL.GL import *  # pyrefly: ignore [missing-import]
+    from OpenGL.GLU import *  # pyrefly: ignore [missing-import]
     import pyopengltk # pyrefly: ignore
     HAS_OPENGL = HAS_PIL # TileManager needs PIL
 except ImportError:
@@ -300,10 +300,15 @@ class TileManager:
         with self.lock:
             while self.pending_uploads:
                 key, data = self.pending_uploads.pop(0)
+                # pyrefly: ignore [unknown-name]
                 tid = glGenTextures(1)
+                # pyrefly: ignore [unknown-name]
                 glBindTexture(GL_TEXTURE_2D, tid)
+                # pyrefly: ignore [unknown-name]
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+                # pyrefly: ignore [unknown-name]
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+                # pyrefly: ignore [unknown-name]
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
                 self.textures[key] = tid
                 if key in self.loading: self.loading.remove(key)
@@ -330,16 +335,22 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
         self.tile_manager = TileManager()
 
     def initgl(self):
+        # pyrefly: ignore [unknown-name]
         glClearColor(0.0, 0.0, 0.0, 1.0)
+        # pyrefly: ignore [unknown-name]
         glEnable(GL_DEPTH_TEST)
+        # pyrefly: ignore [unknown-name]
         glEnable(GL_BLEND)
+        # pyrefly: ignore [unknown-name]
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        # pyrefly: ignore [unknown-name]
         glEnable(GL_TEXTURE_2D)
 
     def redraw(self):
         if not self.visible: return
         self.tile_manager.upload_pending()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) # pyrefly: ignore
+        # pyrefly: ignore [unknown-name]
         glLoadIdentity()
 
         if self.mode == "HORIZON":
@@ -351,21 +362,32 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
         # Set up perspective
         w, h = self.winfo_width(), self.winfo_height()
         if h == 0: h = 1
+        # pyrefly: ignore [unknown-name]
         glViewport(0, 0, w, h)
+        # pyrefly: ignore [unknown-name]
         gluPerspective(45, (w / h), 0.1, 100.0)
+        # pyrefly: ignore [unknown-name]
         gluLookAt(0, 0, 2.5, 0, 0, 0, 0, 1, 0)
+        # pyrefly: ignore [unknown-name]
         glRotatef(self.roll, 0, 0, 1)
+        # pyrefly: ignore [unknown-name]
         glRotatef(self.pitch, 1, 0, 0)
         self.draw_sphere(1.0, 32, 32)
         self.draw_horizon_line()
 
     def render_map(self):
         w, h = self.winfo_width(), self.winfo_height()
+        # pyrefly: ignore [unknown-name]
         glViewport(0, 0, w, h)
+        # pyrefly: ignore [unknown-name]
         glMatrixMode(GL_PROJECTION)
+        # pyrefly: ignore [unknown-name]
         glLoadIdentity()
+        # pyrefly: ignore [unknown-name]
         glOrtho(0, w, h, 0, -1, 1)
+        # pyrefly: ignore [unknown-name]
         glMatrixMode(GL_MODELVIEW)
+        # pyrefly: ignore [unknown-name]
         glLoadIdentity()
 
         # Simple 2D tile grid
@@ -389,25 +411,38 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
             for dy in range(-2, 3):
                 tid = self.tile_manager.get_tile_texture(self.zoom, tx + dx, ty + dy)
                 if tid:
+                    # pyrefly: ignore [unknown-name]
                     glBindTexture(GL_TEXTURE_2D, tid)
+                    # pyrefly: ignore [unknown-name]
                     glColor4f(1, 1, 1, 1)
                 else:
+                    # pyrefly: ignore [unknown-name]
                     glBindTexture(GL_TEXTURE_2D, 0)
+                    # pyrefly: ignore [unknown-name]
                     glColor4f(0.1, 0.1, 0.1, 1)
 
                 x1 = cx + (dx * 256) - off_x
                 y1 = cy + (dy * 256) - off_y
 
+                # pyrefly: ignore [unknown-name]
                 glBegin(GL_QUADS)
+                # pyrefly: ignore [unknown-name]
                 glTexCoord2f(0, 0); glVertex2f(x1, y1)
+                # pyrefly: ignore [unknown-name]
                 glTexCoord2f(1, 0); glVertex2f(x1 + 256, y1)
+                # pyrefly: ignore [unknown-name]
                 glTexCoord2f(1, 1); glVertex2f(x1 + 256, y1 + 256)
+                # pyrefly: ignore [unknown-name]
                 glTexCoord2f(0, 1); glVertex2f(x1, y1 + 256)
+                # pyrefly: ignore [unknown-name]
                 glEnd()
 
         # Restore Matrix Mode for horizon
+        # pyrefly: ignore [unknown-name]
         glMatrixMode(GL_PROJECTION)
+        # pyrefly: ignore [unknown-name]
         glLoadIdentity()
+        # pyrefly: ignore [unknown-name]
         glMatrixMode(GL_MODELVIEW)
 
     def draw_sphere(self, radius, lats, longs):
@@ -420,6 +455,7 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
             z1 = math.sin(lat1)
             zr1 = math.cos(lat1)
 
+            # pyrefly: ignore [unknown-name]
             glBegin(GL_QUAD_STRIP)
             for j in range(longs + 1):
                 lng = 2 * math.pi * float(j - 1) / longs
@@ -428,25 +464,37 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
 
                 # Color based on latitude (Sky/Ground)
                 if lat1 > 0:
+                    # pyrefly: ignore [unknown-name]
                     glColor4f(0.0, 0.2, 0.5, 0.8) # Blue sky
                 else:
+                    # pyrefly: ignore [unknown-name]
                     glColor4f(0.3, 0.15, 0.0, 0.8) # Brown ground
 
+                # pyrefly: ignore [unknown-name]
                 glNormal3f(x * zr0, y * zr0, z0)
+                # pyrefly: ignore [unknown-name]
                 glVertex3f(x * zr0 * radius, y * zr0 * radius, z0 * radius)
+                # pyrefly: ignore [unknown-name]
                 glNormal3f(x * zr1, y * zr1, z1)
+                # pyrefly: ignore [unknown-name]
                 glVertex3f(x * zr1 * radius, y * zr1 * radius, z1 * radius)
+            # pyrefly: ignore [unknown-name]
             glEnd()
 
     def draw_horizon_line(self):
+        # pyrefly: ignore [unknown-name]
         glColor3f(1.0, 1.0, 1.0)
+        # pyrefly: ignore [unknown-name]
         glLineWidth(3)
+        # pyrefly: ignore [unknown-name]
         glBegin(GL_LINE_LOOP)
         for i in range(100):
             theta = 2.0 * math.pi * i / 100.0
             x = math.cos(theta)
             y = math.sin(theta)
+            # pyrefly: ignore [unknown-name]
             glVertex3f(x * 1.01, y * 1.01, 0.0)
+        # pyrefly: ignore [unknown-name]
         glEnd()
 
 class PrimaryFlightDisplay:
@@ -3725,8 +3773,16 @@ class PrimaryFlightDisplay:
         if self._prev_gps_lat is not None and self._prev_gps_time > 0:
             dt = now_gps - self._prev_gps_time
             if dt > 0.5:  # require at least 500ms between GPS fixes
-                dlat = self.targets['lat'] - self._prev_gps_lat
-                dlon = self.targets['lon'] - self._prev_gps_lon
+                cur_lat = self.targets['lat']
+                cur_lon = self.targets['lon']
+                if cur_lat is None or cur_lon is None:
+                    self._prev_gps_lat = self.targets['lat']
+                    self._prev_gps_lon = self.targets['lon']
+                    self._prev_gps_time = now_gps
+                    return
+                dlat = cur_lat - self._prev_gps_lat
+                # pyrefly: ignore [unsupported-operation]
+                dlon = cur_lon - self._prev_gps_lon
                 # Only store samples at decimation rate (every 2s)
                 if now_gps - self._gps_last_sample_time >= self._gps_decimate_sec:
                     self._gps_samples.append((dlat / dt, dlon / dt, now_gps))

@@ -25,7 +25,7 @@ import numpy as np  # pyrefly: ignore
 # ---------------------------------------------------------------------------
 # Bridge imports (non-ML code lives here)
 # ---------------------------------------------------------------------------
-from earu_location_bridge import (  # noqa: E402
+from earu_location_bridge import (  # noqa: E402  # pyrefly: ignore [missing-import]
     LocationState,
     check_core_location_bg,
     geodetic_distance,
@@ -33,7 +33,7 @@ from earu_location_bridge import (  # noqa: E402
     global_location,
 )
 # earu_system_bridge removed — system metrics now collected natively by Ada System_Metrics_Task
-from earu_wireless_bridge import (  # noqa: E402
+from earu_wireless_bridge import (  # noqa: E402  # pyrefly: ignore [missing-import]
     global_bt_devices,
     global_wifi_devices,
     request_wireless_permissions,
@@ -226,7 +226,8 @@ def weather_worker() -> None:
     while True:
         try:
             now = time.time()
-            v_mag_val = getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"])
+            # pyrefly: ignore [bad-argument-type]
+            v_mag_val: float = float(getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"]))
             scan_interval = float(np.interp(v_mag_val, [0.0, 1.0, 2.0], [30.0, 15.0, 4.0]))
             if now - last_cl_check >= scan_interval and not global_location.cl_running:
                 last_cl_check = now
@@ -242,10 +243,14 @@ def weather_worker() -> None:
 
             # Build grid wind map — spatially-varying wind field derived from
             # GPS ground speed, thermal gradients, and turbulence.
-            v_mag_val2 = getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"])
-            lat_val = getattr(global_location, "lat", LocationState.DEFAULTS["lat"])
-            lon_val = getattr(global_location, "lon", LocationState.DEFAULTS["lon"])
-            base_press = getattr(global_location, "pressure_hpa", LocationState.DEFAULTS["pressure_hpa"])
+            # pyrefly: ignore [bad-argument-type]
+            v_mag_val2: float = float(getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"]))
+            # pyrefly: ignore [bad-argument-type]
+            lat_val: float = float(getattr(global_location, "lat", LocationState.DEFAULTS["lat"]))
+            # pyrefly: ignore [bad-argument-type]
+            lon_val: float = float(getattr(global_location, "lon", LocationState.DEFAULTS["lon"]))
+            # pyrefly: ignore [bad-argument-type]
+            base_press: float = float(getattr(global_location, "pressure_hpa", LocationState.DEFAULTS["pressure_hpa"]))
             if base_press <= 0.0:
                 base_press = 1013.25
             t_stamp = now  # seconds since epoch for temporal variation
@@ -487,9 +492,10 @@ def weather_worker() -> None:
                                     print(f"[!] Error detecting significant location: {e}")
 
             if weather_code == 0:
-                v_mag_val2 = getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"])
-                speed_kph = v_mag_val2 * 3.6
-                speed_kts2 = v_mag_val2 * 1.94384
+                # pyrefly: ignore [bad-argument-type]
+                v_mag_val2b: float = float(getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"]))
+                speed_kph = v_mag_val2b * 3.6
+                speed_kts2 = v_mag_val2b * 1.94384
                 if speed_kts2 >= 100.0:
                     weather_code = 10
                 elif speed_kph >= 20.0:
