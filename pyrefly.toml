@@ -1,0 +1,27 @@
+# pyrefly.toml — V8 fix: point at project .venv so coremltools resolves
+# Created: 2026-08-28 | audit V8 env-mismatch resolution
+# The sidecar self-bootstraps its own .venv where coremltools lives;
+# Homebrew Python 3.14 doesn't have it. Using .venv/bin/python3 (3.13).
+
+python-interpreter-path = ".venv/bin/python3"
+
+# Respect .gitignore to skip directories like BatteryPredictor.mlpackage/weights
+# which has root-only permissions that crash pyrefly's filesystem walker
+use-ignore-files = true
+
+project-includes = [
+    "**/*.py",
+]
+
+project-excludes = [
+    ".venv/**",
+    "obj/**",
+    "alire/**",
+    "**/__pycache__/**",
+    "**/*.dat",
+    "EARU_daemon/obj/**",
+    "EARU_daemon/src/**",
+    "EARU_daemon/python/BatteryPredictor.mlpackage/**",
+    "EARU_LegacyPython/**",
+    ".opencode/**",
+]

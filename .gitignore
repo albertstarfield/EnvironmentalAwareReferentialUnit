@@ -40,3 +40,5 @@ agenticInst.txt
 PRD.md
 EARU_Tasks/
 thoughts/
+# pyrefly V8: mlpackage weights dir has root-only perms that crash pyrefly walker
+**/BatteryPredictor.mlpackage/

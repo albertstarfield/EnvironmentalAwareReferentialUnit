@@ -1009,19 +1009,38 @@ procedure Earu_Daemon is
             -- ── Ada-native BCG heartbeat detection ──────────────────────────
             --  The 800Hz IMU task feeds accel samples into BCG_Buffer.Push.
             --  Here we run autocorrelation to extract BPM and confidence.
-            declare
-               BCG_Entities  : Earu.BCG_Detection.Entity_Result_Array;
-               BCG_Count     : Natural;
-               BCG_Dominant  : Earu.BCG_Detection.Entity_Result;
-               BCG_Ready     : constant Boolean := Earu.BCG_Shared.BCG_Buffer.Is_Ready;
+             declare
+               Snap         : Earu.BCG_Detection.BCG_State;
+               Corrupted    : Boolean;
+               BCG_Entities : Earu.BCG_Detection.Entity_Result_Array;
+               BCG_Count    : Natural;
+               BCG_Dominant : Earu.BCG_Detection.Entity_Result;
             begin
-               if BCG_Ready then
-                  Earu.BCG_Shared.BCG_Buffer.Compute_Results (BCG_Entities, BCG_Count, BCG_Dominant);
-               else
-                  BCG_Count    := 0;
-                  BCG_Dominant := (BPM => 0.0, Confidence => 0.0);
-                  BCG_Entities := (others => (others => 0.0));
+               --  Snapshot pattern (audit V1 fix): copy the detector state out
+               --  of the protected object in a microsecond-scale atomic action,
+               --  then run the O(5.9M-MAC) autocorrelation UNLOCKED so the
+               --  ceiling-priority 800 Hz IMU sampler never stalls behind us.
+               Earu.BCG_Shared.BCG_Buffer.Snapshot (Snap, Corrupted);
+
+               --  LOUD FAILURE policy (audit V3/V6): this caller owns all I/O
+               --  reporting; the real-time packages never block on a console.
+               if Corrupted then
+                  Ada.Text_IO.Put_Line
+                    ("[!] [BCG] guard-word mismatch detected - shared state "
+                     & "self-reset to defaults");
                end if;
+               if Earu.BCG_Detection.Saturation_Events (Snap) > 0 then
+                  Ada.Text_IO.Put_Line
+                    ("[!] [BCG] peak-scan saturation: extra heartbeats dropped"
+                     & Natural'Image
+                         (Earu.BCG_Detection.Saturation_Events (Snap))
+                     & " event(s) so far");
+               end if;
+
+               --  Compute early-outs safely when the buffer is not full yet,
+               --  returning zeroed results - same contract as before.
+               Earu.BCG_Detection.Compute
+                 (Snap, BCG_Entities, BCG_Count, BCG_Dominant);
 
                -- Populate User_Detection_Type from BCG results
                U.Count := BCG_Count;
@@ -1046,7 +1065,7 @@ procedure Earu_Daemon is
                   Stress.Steps_No_Stress := Full.Pedometer.Steps > 0 and RMS < 0.02;
 
                   Earu.Mood_Inference.Infer_Mood
-                    (BPM_Avg  => (if BCG_Dominant.Confidence > 0.3 then Float (BCG_Dominant.BPM) else 0.0),
+                    (BPM_Avg  => (if BCG_Dominant.Confidence > 0.3 then BCG_Dominant.BPM else 0.0),
                      RMS      => Float (RMS),
                      Stress   => Stress,
                      Probs    => Mood_P,

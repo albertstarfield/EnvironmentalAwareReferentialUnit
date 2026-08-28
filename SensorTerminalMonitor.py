@@ -1006,20 +1006,21 @@ class PrimaryFlightDisplay:
     def _ape_patch_prefetch(self) -> None:
         """Ape-patch: replace tkintermapview's pre_cache thread with circle-cone version.
 
-        CRITICAL: The original thread is created in TkinterMapView.__init__
-        with `target=self.pre_cache`, which captures a reference to the original
-        bound method.  Reassigning `self.map_widget.pre_cache` has NO effect on
-        the running thread — it still calls the original function.  We must:
+        The original thread is created in TkinterMapView.__init__ with
+        `target=self.pre_cache`, which captures a bound-method reference.
+        Reassigning `self.map_widget.pre_cache` has NO effect on the running
+        thread — it still calls the original function.
 
-          1. Set `running = False` to signal all background threads to stop.
-          2. Join the original pre_cache thread (it exits its while-loop).
-          3. Set `running = True` to resume image-load threads.
-          4. Start a NEW thread with our enhanced function.
+        We DO NOT stop the original thread: the `running` flag is shared by
+        ALL 25 image-load worker threads.  Toggling it to False would
+        permanently kill those workers (they never restart).  Instead, we
+        leave the original pre_cache thread running (harmless basic ring
+        prefetch) and start our enhanced thread alongside it.  Both call
+        request_image() which is thread-safe (adds to the same worker queue).
         """
         if not self.map_widget:
             return
         earu = self  # capture for closure
-        _orig_pre_cache = self.map_widget.pre_cache.__func__
 
         def _enhanced_pre_cache(wself: Any) -> None:  # type: ignore[no-untyped-def]
             import math as _m

@@ -26,6 +26,7 @@ import numpy as np  # pyrefly: ignore
 # Bridge imports (non-ML code lives here)
 # ---------------------------------------------------------------------------
 from earu_location_bridge import (  # noqa: E402
+    LocationState,
     check_core_location_bg,
     geodetic_distance,
     get_terrain_anchor,
@@ -225,7 +226,7 @@ def weather_worker() -> None:
     while True:
         try:
             now = time.time()
-            v_mag_val = getattr(global_location, "v_mag", 0.0)
+            v_mag_val = getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"])
             scan_interval = float(np.interp(v_mag_val, [0.0, 1.0, 2.0], [30.0, 15.0, 4.0]))
             if now - last_cl_check >= scan_interval and not global_location.cl_running:
                 last_cl_check = now
@@ -241,10 +242,10 @@ def weather_worker() -> None:
 
             # Build grid wind map — spatially-varying wind field derived from
             # GPS ground speed, thermal gradients, and turbulence.
-            v_mag_val2 = getattr(global_location, "v_mag", 0.0)
-            lat_val = getattr(global_location, "lat", 0.0)
-            lon_val = getattr(global_location, "lon", 0.0)
-            base_press = getattr(global_location, "pressure_hpa", 1013.25)
+            v_mag_val2 = getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"])
+            lat_val = getattr(global_location, "lat", LocationState.DEFAULTS["lat"])
+            lon_val = getattr(global_location, "lon", LocationState.DEFAULTS["lon"])
+            base_press = getattr(global_location, "pressure_hpa", LocationState.DEFAULTS["pressure_hpa"])
             if base_press <= 0.0:
                 base_press = 1013.25
             t_stamp = now  # seconds since epoch for temporal variation
@@ -486,7 +487,7 @@ def weather_worker() -> None:
                                     print(f"[!] Error detecting significant location: {e}")
 
             if weather_code == 0:
-                v_mag_val2 = getattr(global_location, "v_mag", 0.0)
+                v_mag_val2 = getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"])
                 speed_kph = v_mag_val2 * 3.6
                 speed_kts2 = v_mag_val2 * 1.94384
                 if speed_kts2 >= 100.0:
@@ -517,12 +518,15 @@ def weather_worker() -> None:
             #     the old hardcoded Jakarta coordinates (96.9248°E, 1013.25 hPa).
             basic = struct.pack(
                 "<3fId4f",
-                0.0,                                    # temp_K: sentinel (real temp from Ada daemon via EARU_meteo.dat)
-                global_location.lon,                     # longitude: dynamic from CoreLocation GPS
-                global_location.pressure_hpa,            # pressure_hpa: dynamic from CoreLocation barometer
+                0.0,                                            # temp_K: sentinel (real temp from Ada daemon via EARU_meteo.dat)
+                getattr(global_location, "lon", 106.8),          # longitude: dynamic from CoreLocation GPS
+                getattr(global_location, "pressure_hpa", LocationState.DEFAULTS["pressure_hpa"]),  # pressure_hpa: dynamic from CoreLocation barometer
                 weather_code,
-                time.time(), global_location.lat, global_location.lon,
-                global_location.alt, global_location.pressure_hpa,
+                time.time(),
+                getattr(global_location, "lat", -6.2),
+                getattr(global_location, "lon", 106.8),
+                getattr(global_location, "alt", 20.0),
+                getattr(global_location, "pressure_hpa", LocationState.DEFAULTS["pressure_hpa"]),
             )
 
             grid_data = bytearray()

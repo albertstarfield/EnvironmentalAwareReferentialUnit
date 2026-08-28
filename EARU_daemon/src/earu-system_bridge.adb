@@ -108,7 +108,9 @@ package body Earu.System_Bridge is
       Batt_State : Integer;
       Now_T      : Real)
    is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
       Dt_Min : Real;
    begin
       if S.Battery_Last_Time > 0.0 then
@@ -134,7 +136,9 @@ package body Earu.System_Bridge is
    --  Maps battery percentage to a recommended playback duration in seconds
    --  using a logarithmic decay curve: ~4800s at 100%, ~60s minimum at 15%.
    procedure Compute_Abandoned_Playback (S : in out System_Stats_Type) is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
       Batt_Pct     : constant Real := Real (S.Battery_Percent);
       Batt_Clamped : constant Real := Real'Max (15.0, Real'Min (100.0, Batt_Pct));
       Rec_Seconds  : constant Real := 2498.3 * Log (Batt_Clamped) - 6706.5;
@@ -151,7 +155,9 @@ package body Earu.System_Bridge is
    --  Also derives ambient temperature (Kelvin) from Ts1P and sets
    --  Power/Power_Rate_Usage from PSTR sensor.
    procedure Read_SMC_Temps (SMC : in out SMC_Type) is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
    begin
       SMC.Temps.TCMz := Read_Sensor ("sensor_temp_TCMz.dat");
       SMC.Temps.Tg0X := Read_Sensor ("sensor_temp_Tg0X.dat");
@@ -196,7 +202,9 @@ package body Earu.System_Bridge is
 
    --  Read fan RPMs and targets from disk files.
    procedure Read_SMC_Fans (SMC : in out SMC_Type) is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
    begin
       SMC.Fan_RPMs := (Read_Sensor ("sensor_fan_F0Ac.dat"),
                        Read_Sensor ("sensor_fan_F1Ac.dat"));
@@ -206,7 +214,9 @@ package body Earu.System_Bridge is
 
    --  Read turbo mode from disk.
    procedure Read_SMC_Turbo (SMC : in out SMC_Type) is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
    begin
       SMC.Turbo := Read_Sensor_Int ("sensor_TURBO_MODE.dat");
    end Read_SMC_Turbo;
@@ -215,7 +225,9 @@ package body Earu.System_Bridge is
    --  These are written by smcDemandNow and control power budgeting,
    --  turbo limits, and thermal management.
    procedure Read_SMC_Power_Keys (SMC : in out SMC_Type) is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
    begin
       SMC.Active_Perf_Mode    := Read_SMC_Key ("sensor_smc_aPMX.dat");
       SMC.Max_Turbo_Power_Lim := Read_SMC_Key ("sensor_smc_mTPL.dat");
@@ -278,7 +290,9 @@ package body Earu.System_Bridge is
    --  If smcDemandNow is not running, these files won't exist and
    --  Read_Sensor returns 0.0 -- we fall back to our own accumulation.
    procedure Read_Power_Tracking (SMC : in out SMC_Type) is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
    begin
       --  Power tracking values from smcDemandNow sensor files
       --  These are written by the smcDemandNow daemon in real-time
@@ -344,7 +358,9 @@ package body Earu.System_Bridge is
       Last_Timestamp_S : in out Long_Long_Integer;
       Update_Count  : Natural)
    is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
       Now_S : constant Long_Long_Integer :=
         Long_Long_Integer (C_Time (null));
       Dt_S : Real;
@@ -420,7 +436,10 @@ package body Earu.System_Bridge is
       Wake_S     : out Real;
       Sleep_S    : out Real)
    is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1 fix): the previous "pragma SPARK_Mode (On);"
+      --  here was an illegal Off->On transition inside a nested unit of a
+      --  non-SPARK compilation and aborted gnatprove Phase 2/3. Proof
+      --  scoping is now handled project-wide via config/earu_spark.adc.
       P_Sleep     : constant Real := 0.5;
       Best_Err    : Real := Real'Last;
       Best_T      : Real := 3600.0;
@@ -466,7 +485,8 @@ package body Earu.System_Bridge is
       History_Idx   : Natural;
       Update_Count  : Natural)
    is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1 fix): illegal nested SPARK_Mode pragma removed
+      --  here too (same root cause as Solve_Pulsing_Numerically above).
       Seconds_Until_Midnight : constant Real :=
         86400.0 - Real (Long_Long_Integer (C_Time (null)) mod 86400);
       Hours_Until_Midnight   : constant Real := Seconds_Until_Midnight / 3600.0;
@@ -528,7 +548,9 @@ package body Earu.System_Bridge is
    --  Cooling_Efficiency = (heatflux / power) * 100
    --  Work_Efficiency = 100 - Cooling_Efficiency
    procedure Compute_Cooling_Efficiency (SMC : in out SMC_Type) is
-      pragma SPARK_Mode (On);
+      --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
+      --  - illegal Off -> On transition; proof scoping lives project-wide in
+      --  config/earu_spark.adc.
    begin
       if SMC.Power > 0.0 then
          SMC.Cooling_Efficiency_Pct :=

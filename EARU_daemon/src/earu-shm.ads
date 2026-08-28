@@ -1,7 +1,9 @@
 with Interfaces;
 
 package Earu.Shm is
-   pragma SPARK_Mode (On);
+   --  NOTE (audit W8 fix): inner "pragma SPARK_Mode (On);" removed -
+   --  illegal Off -> On transition against config/earu_spark.adc default.
+   --  This unit is compiled normally, outside formal proof scope.
 
    type String_64 is array (1 .. 64) of Interfaces.Unsigned_8;
 

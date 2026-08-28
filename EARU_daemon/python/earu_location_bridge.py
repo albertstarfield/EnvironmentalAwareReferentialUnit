@@ -32,14 +32,31 @@ class LocationState:
         can read it without touching the SHM layout.
     """
 
+    # Class-level defaults — single source of truth for getattr fallbacks
+    # in earu_ml_bridge.py and earu_location_bridge.py.  If you change
+    # a default here, every getattr(global_location, …) picks it up.
+    DEFAULTS: dict[str, float] = {
+        "lat": -6.2,
+        "lon": 106.8,
+        "alt": 20.0,
+        "pressure_hpa": 1013.25,
+        "v_mag": 0.0,
+        "terrain_alt": 0.0,
+    }
+
+    # Explicit annotations so static analysers (pyrefly/mypy) can see the
+    # attributes that __init__ creates via setattr from DEFAULTS.
+    lat: float
+    lon: float
+    alt: float
+    pressure_hpa: float
+    v_mag: float
+    terrain_alt: float
+
     def __init__(self) -> None:
-        self.lat: float = -6.2
-        self.lon: float = 106.8
-        self.alt: float = 20.0
-        self.pressure_hpa: float = 1013.25
+        for _key, _val in self.DEFAULTS.items():
+            setattr(self, _key, _val)
         self.cl_running: bool = False
-        self.v_mag: float = 0.0
-        self.terrain_alt: float = 0.0  # OpenTopoData ground elevation (m)
 
 
 global_location = LocationState()
@@ -129,7 +146,7 @@ def check_core_location_bg() -> None:
                                 global_location.lon = new_lon
 
                                 is_alt_nonsensical = False
-                                meas_p = getattr(global_location, "pressure_hpa", 1013.25)
+                                meas_p = getattr(global_location, "pressure_hpa", LocationState.DEFAULTS["pressure_hpa"])
                                 if meas_p is None:
                                     meas_p = 1013.25
 

@@ -1,7 +1,9 @@
 with Earu.Types; use Earu.Types;
 
 package Earu.Math is
-   pragma SPARK_Mode (On);
+   --  NOTE (audit W8 fix): inner "pragma SPARK_Mode (On);" removed -
+   --  illegal Off -> On transition against config/earu_spark.adc default.
+   --  This unit is compiled normally, outside formal proof scope.
 
    type Real_Array is array (Positive range <>) of Real;
 
