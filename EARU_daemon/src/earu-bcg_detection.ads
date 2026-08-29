@@ -92,16 +92,17 @@ is
    --  SAFETY FALLBACK: unconditional; restores the documented safe state.
    --  TIMING/WCET: 8000-word clear ≈ 32 KB memset, < 5 µs @ 3 GHz.
 
-   procedure Push_Sample
-     (S    : in out BCG_State;
-      Ax   : Float;
-      Ay   : Float;
-      Az   : Float) with
-     Post => Samples_Buffered (S) = Natural'Min
-               (Samples_Buffered (S)'Old + 1, 8000)
-       and then Samples_Buffered (S) <= 8000
-       and then Integrity_Ok (S)
-       and then Bounded (S);
+    procedure Push_Sample
+      (S    : in out BCG_State;
+       Ax   : Float;
+       Ay   : Float;
+       Az   : Float) with
+      Pre  => Bounded (S),
+      Post => Samples_Buffered (S) = Natural'Min
+                (Samples_Buffered (S)'Old + 1, 8000)
+        and then Samples_Buffered (S) <= 8000
+        and then Integrity_Ok (S)
+        and then Bounded (S);
    --  Push one 800 Hz acceleration sample (m/s^2). Inputs are SANITISED
    --  (NaN → 0.0, each axis clamped to ±Max_Axis) so no Inf/NaN can ever
    --  enter filter state or the ring (audit V2 fix, Murphy boundary rule).
@@ -173,14 +174,19 @@ private
 
    Buffer_Length : constant := 8000;  --  10 s at 800 Hz
 
+   subtype Sample_Count is Natural range 0 .. Buffer_Length;
+   subtype Index is Natural range 0 .. Buffer_Length - 1;
+
    type Sample_Buffer is array (0 .. Buffer_Length - 1) of Float;
 
    --  Biquad bandpass coefficients for 0.8–3.0 Hz at 800 Hz sample rate
    --  Center freq ~1.5 Hz, Q ~0.707 (Butterworth response)
-   type Biquad_Coeffs is record
-      B0, B1, B2 : Float;  -- numerator
-      A1, A2     : Float;  -- denominator (a0 = 1.0 implicit)
-   end record;
+    subtype Coeff is Float range -10.0 .. 10.0;
+
+    type Biquad_Coeffs is record
+       B0, B1, B2 : Coeff;  -- numerator
+       A1, A2     : Coeff;  -- denominator (a0 = 1.0 implicit)
+    end record;
 
    Default_BQ_Coeffs : constant Biquad_Coeffs :=
      (B0 =>  0.008264,
@@ -201,8 +207,8 @@ private
 
       --  Magnitude ring buffer (m/s^2, filtered, |value| <= Ring_Max)
       Ring      : Sample_Buffer := (others => 0.0);
-      Write_Idx : Natural := 0;
-      Total     : Natural := 0;
+      Write_Idx : Index := 0;
+      Total     : Sample_Count := 0;
 
       --  Loud-failure counters (never silently cleared except by Reset)
       Saturation_Count : Natural := 0;

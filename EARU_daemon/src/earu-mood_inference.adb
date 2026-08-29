@@ -11,6 +11,14 @@ pragma SPARK_Mode (On);
 
 package body Earu.Mood_Inference is
 
+   --  Bounded subtype for the Laplace-smoothed normalization total.
+   --  Each S_* score is in [0.0, 1.0] (asserted below) and 4.0 * Epsilon = 0.4,
+   --  so Total = sum(S_*) + 0.4 is in [0.4, 4.4] ⊆ [0.4, 5.0]. The static
+   --  bound lets the prover discharge the float-overflow checks on
+   --  K * Total and (S_* + Epsilon) / Total without runtime assertions.
+     subtype Prob_Total is Float range 0.3 .. 5.0;
+     subtype Score is Float range 0.0 .. 1.0;
+
    function Clamp (V, Lo, Hi : Float) return Float is
      (if V < Lo then Lo
       elsif V > Hi then Hi
@@ -47,11 +55,11 @@ package body Earu.Mood_Inference is
       S_Penalty : Float := 0.0;
 
       --  Quadrant scores
-      S_Calm    : Float;
-      S_Excited : Float;
-      S_Tired   : Float;
-      S_Anxious : Float;
-      Total     : Float;
+      S_Calm    : Score;
+      S_Excited : Score;
+      S_Tired   : Score;
+      S_Anxious : Score;
+      Total     : Prob_Total;
       Epsilon   : constant Float := 0.1;
    begin
       --  === AROUSAL ===
@@ -100,8 +108,10 @@ package body Earu.Mood_Inference is
          S_Bonus := S_Bonus + 0.3;  -- Walking smoothly
       end if;
 
-      Valence := Clamp (S_Bonus + S_Penalty, -1.0, 1.0);
-      pragma Assert (Valence >= -1.0 and then Valence <= 1.0);
+       pragma Assert (S_Bonus >= 0.0 and then S_Bonus <= 1.0);
+       pragma Assert (S_Penalty >= -1.0 and then S_Penalty <= 0.0);
+       Valence := Clamp (S_Bonus + S_Penalty, -1.0, 1.0);
+       pragma Assert (Valence >= -1.0 and then Valence <= 1.0);
 
       --  === QUADRANT MAPPING ===
       --  Calm:    V >= 0, A < 0        Excited: V >= 0, A >= 0
@@ -149,12 +159,17 @@ package body Earu.Mood_Inference is
       --  so all divisions are safe; each probability is in (0, 1) because
       --  numerator <= Total - 3e and denominator >= 4e.
       Total := S_Calm + S_Excited + S_Tired + S_Anxious + 4.0 * Epsilon;
-      pragma Assert (Total >= 0.4);
+      pragma Assert (Total <= 5.0);
 
-      Probs.Calm    := (S_Calm    + Epsilon) / Total;
-      Probs.Excited := (S_Excited + Epsilon) / Total;
-      Probs.Tired   := (S_Tired   + Epsilon) / Total;
-      Probs.Anxious := (S_Anxious + Epsilon) / Total;
+       pragma Assert (S_Calm    <= 1.0);
+       pragma Assert (S_Excited <= 1.0);
+       pragma Assert (S_Tired   <= 1.0);
+       pragma Assert (S_Anxious <= 1.0);
+
+      Probs.Calm    := Clamp ((S_Calm    + Epsilon) / Total, 0.0, 1.0);
+      Probs.Excited := Clamp ((S_Excited + Epsilon) / Total, 0.0, 1.0);
+      Probs.Tired   := Clamp ((S_Tired   + Epsilon) / Total, 0.0, 1.0);
+      Probs.Anxious := Clamp ((S_Anxious + Epsilon) / Total, 0.0, 1.0);
    end Infer_Mood;
 
 end Earu.Mood_Inference;

@@ -6,7 +6,7 @@
 --    external-dependency noise.  The main earu_daemon.gpr remains the
 --    build project; this GPR exists solely for proof.
 --
---  UNIT SCOPE:
+--  UNIT SCOPE (everything EXCEPT these is excluded):
 --    earu.ads             (minimal parent package — no imports)
 --    earu-bcg_detection   (SPARK_Mode On via file-top pragma)
 --    earu-bcg_shared      (SPARK_Mode Off — Ravenscar limitation)
@@ -19,6 +19,10 @@
 --      individual files override via file-top pragma)
 --
 --  CREATED: 2026-08-28 — audit fix for gnatprove Phase 1-3 abort
+--  UPDATED: completed the Excluded_Source_Files list so the AUnit-
+--    dependent test files (test_mood_inference.adb,
+--    test_bcg_detection.adb) are excluded; previously they were
+--    pulled in and broke Global-contract generation.
 
 project Earu_Daemon_Proof is
 
@@ -64,7 +68,9 @@ project Earu_Daemon_Proof is
       "print_offsets.adb",
       "test_aws.adb",
       "test_bluemarble.adb",
+      "test_bcg_detection.adb",
       "test_exec.adb",
+      "test_mood_inference.adb",
       "test_sha.adb"
    );
 
@@ -78,7 +84,7 @@ project Earu_Daemon_Proof is
    end Compiler;
 
    --  Exclude everything EXCEPT our 7 proof targets.
-   --  Source_Dirs("src/") would pull in all 42 files including
+   --  Source_Dirs("src/") would pull in all 45 files including
    --  earu_daemon.adb, earu_system_bridge.adb, earu_data.ads,
    --  test_*.adb — all of which bring in the aunit/aws/strategy
    --  dependency chain that causes stale-ALI fatal errors.
@@ -118,7 +124,9 @@ project Earu_Daemon_Proof is
          "print_offsets.adb",
          "test_aws.adb",
          "test_bluemarble.adb",
+         "test_bcg_detection.adb",
          "test_exec.adb",
+         "test_mood_inference.adb",
          "test_sha.adb"
       );
    end Gnatprove;

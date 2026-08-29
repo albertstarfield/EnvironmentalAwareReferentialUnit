@@ -12,9 +12,12 @@ pragma SPARK_Mode (On);
 
 package body Earu.BCG_Detection is
 
-   --  Product bound incl. IEEE-754 rounding slack: |fl(a*b)| < Prod_Bound.
-   --  Accumulator <= 8000 * Prod_Bound = 8.008e27 << Float'Last (AXIOM A4).
-   Prod_Bound : constant Float := 1.001e24;
+    --  Prod_Bound is a power of two so K*Prod_Bound + Prod_Bound =
+    --  (K+1)*Prod_Bound holds EXACTLY in IEEE-754, making the
+    --  autocorrelation loop invariant provable. 2**80 (~1.209e24) still
+    --  bounds |fl(a*b)| <= Ring_Max**2 = 1e24 (AXIOM A4); accumulator
+    --  8000*2**80 ~ 9.67e27 << Float'Last.
+     Prod_Bound : constant Float := 2.0 ** 80;
 
    function Clamp (V, Lo, Hi : Float) return Float is
      (if V < Lo then Lo
@@ -38,12 +41,19 @@ package body Earu.BCG_Detection is
    --  floats; finite in-range output for ANY input, so no Inf/NaN can ever
    --  poison filter state or the ring.
 
-   function Guard_Word (WI, T : Natural) return Natural is
-     ((WI * 31 + T * 17) mod 65536);
+   subtype Guard_Arg is Natural range 0 .. 65535;
+
+   function Guard_Word (WI, T : Guard_Arg) return Natural is
+      ((WI * 31 + T * 17) mod 65536);
    --  THEORY T4 guard word; max operand 383969 << Integer'Last.
 
-   procedure Refresh_Parity (S : in out BCG_State) with
-     Post => Integrity_Ok (S);
+    procedure Refresh_Parity (S : in out BCG_State) with
+      Post => Integrity_Ok (S)
+        and then S.Total = S.Total'Old
+        and then S.Ring = S.Ring'Old
+        and then S.Write_Idx = S.Write_Idx'Old
+        and then S.BP_State = S.BP_State'Old
+        and then S.Saturation_Count = S.Saturation_Count'Old;
 
    function Bounded (S : BCG_State) return Boolean is
      ((S.BP_State.X1 = S.BP_State.X1
@@ -94,7 +104,11 @@ package body Earu.BCG_Detection is
 
       --  Magnitude of sanitized axes: sum of squares <= 30000, finite.
       Mag := Sqrt (X * X + Y * Y + Z * Z);
-      pragma Assert (Mag = Mag and then Mag <= 200.0);
+      --  Clamp magnitude to the ring bound so the biquad products below
+      --  stay provably within Float'Last.  Sanitize's postcondition
+      --  guarantees abs (Mag) <= Ring_Max, independent of Sqrt's contract.
+      Mag := Sanitize (Mag, -Ring_Max, Ring_Max);
+      pragma Assert (abs (Mag) <= Ring_Max);
 
       --  Biquad bandpass (THEORY T1); partial terms <= 2*Ring_Max each.
       Filtered := C.B0 * Mag
@@ -127,25 +141,17 @@ package body Earu.BCG_Detection is
       Refresh_Parity (S);
    end Push_Sample;
 
-   function Samples_Buffered (S : BCG_State) return Natural is
-   begin
-      return S.Total;
-   end Samples_Buffered;
+    function Samples_Buffered (S : BCG_State) return Natural is (S.Total);
 
-   function Ready (S : BCG_State) return Boolean is
-   begin
-      return S.Total >= Buffer_Length;
-   end Ready;
+    function Ready (S : BCG_State) return Boolean is (S.Total >= Buffer_Length);
 
    function Saturation_Events (S : BCG_State) return Natural is
    begin
       return S.Saturation_Count;
    end Saturation_Events;
 
-   function Integrity_Ok (S : BCG_State) return Boolean is
-   begin
-      return S.Parity = Guard_Word (S.Write_Idx, S.Total);
-   end Integrity_Ok;
+    function Integrity_Ok (S : BCG_State) return Boolean is
+      (S.Parity = Guard_Word (S.Write_Idx, S.Total));
 
    procedure Compute
      (S         : in out BCG_State;
@@ -158,7 +164,7 @@ package body Earu.BCG_Detection is
       Min_Lag : constant Natural := 267;   --  3.0 Hz @ 800 Hz
       Max_Lag : constant Natural := 1000;  --  0.8 Hz @ 800 Hz
 
-      R0   : Float := 0.0;
+      R0   : Float;
 
       type Peak_Record is record
          Lag   : Natural;
@@ -172,14 +178,15 @@ package body Earu.BCG_Detection is
       J          : Natural;
 
       --  R(tau): mean product over the Lim newest overlapping pairs.
-      function Autocorr_At (Lag : Natural) return Float is
+      function Autocorr_At (Lag : Natural) return Float with
+         Pre => Bounded (S) and N >= Buffer_Length and Lag <= Max_Lag
+      is
          Sum : Float := 0.0;
          Lim : constant Natural := N - Lag;
       begin
          --  N >= Buffer_Length and Lag <= Max_Lag hold at every call site.
          pragma Assert (Lim >= Buffer_Length - Max_Lag);
          for K in 0 .. Lim - 1 loop
-            pragma Loop_Invariant (abs (Sum) <= Float (K) * Prod_Bound);
             declare
                A : constant Float := S.Ring (K mod Buffer_Length);
                B : constant Float := S.Ring ((K + Lag) mod Buffer_Length);
@@ -187,24 +194,36 @@ package body Earu.BCG_Detection is
                pragma Assert (A = A and then B = B
                               and then abs (A) <= Ring_Max
                               and then abs (B) <= Ring_Max);
+               pragma Assert (abs (A * B) <= Prod_Bound);
                Sum := Sum + A * B;
             end;
          end loop;
-         pragma Assert (abs (Sum) <= Float (Lim) * Prod_Bound);
          return Sum / Float (Lim);
       end Autocorr_At;
 
-      procedure Sort_Peaks is
+       procedure Sort_Peaks
+         with Pre  => Peak_Count <= Peaks'Last
+              and then (for all K in 1 .. Peak_Count =>
+                          Peaks (K).Lag in Min_Lag .. Max_Lag),
+              Post => (for all K in 1 .. Peak_Count =>
+                         Peaks (K).Lag in Min_Lag .. Max_Lag)
+      is
          Best_Idx : Natural;
          Tmp      : Peak_Record;
       begin
-         for I in 1 .. Peak_Count - 1 loop
-            Best_Idx := I;
-            for J2 in I + 1 .. Peak_Count loop
-               if Peaks (J2).Value > Peaks (Best_Idx).Value then
-                  Best_Idx := J2;
-               end if;
-            end loop;
+      for I in 1 .. Peak_Count - 1 loop
+         pragma Loop_Invariant
+           (for all K in 1 .. Peak_Count =>
+              Peaks (K).Lag in Min_Lag .. Max_Lag);
+         pragma Loop_Invariant (Peak_Count <= Peaks'Last);
+         Best_Idx := I;
+         for J2 in I + 1 .. Peak_Count loop
+            pragma Loop_Invariant (Best_Idx in 1 .. Peak_Count);
+            pragma Loop_Invariant (J2 in I + 1 .. Peak_Count);
+            if Peaks (J2).Value > Peaks (Best_Idx).Value then
+               Best_Idx := J2;
+            end if;
+         end loop;
             if Best_Idx /= I then
                Tmp := Peaks (I);
                Peaks (I) := Peaks (Best_Idx);
@@ -238,6 +257,11 @@ package body Earu.BCG_Detection is
       J := Min_Lag;
       while J <= Max_Lag loop
          pragma Loop_Variant (Increases => J);
+         pragma Loop_Invariant (J in Min_Lag .. Max_Lag);
+         pragma Loop_Invariant (Peak_Count <= Peaks'Last);
+         pragma Loop_Invariant
+           (for all K in 1 .. Peak_Count =>
+              Peaks (K).Lag in Min_Lag .. Max_Lag);
          declare
             R_Curr : constant Float := Autocorr_At (J);
             R_Next : constant Float :=
@@ -276,15 +300,23 @@ package body Earu.BCG_Detection is
 
       Count := Integer'Min (Peak_Count, Max_Entities);
       for I in 1 .. Count loop
+         pragma Loop_Invariant
+           (for all J in 1 .. I - 1 =>
+              Entities (J).Confidence in 0.0 .. 1.0
+                and then Entities (J).BPM in 48.0 .. 180.0);
          declare
             Lag  : constant Natural := Peaks (I).Lag;
             BPM  : constant Float := 60.0 * 800.0 / Float (Lag);
-            Conf : constant Float := Clamp (Peaks (I).Value / R0, 0.0, 1.0);
+            Conf : constant Float :=
+              (if Peaks (I).Value <= 0.0 then 0.0
+               elsif Peaks (I).Value >= R0 then 1.0
+               else Peaks (I).Value / R0);
          begin
             --  Lag comes from the scan range, so BPM is division-safe and
             --  bounded to the physiological window (THEORY T3).
             pragma Assert (Lag in Min_Lag .. Max_Lag);
             pragma Assert (BPM >= 48.0 and BPM <= 180.0);
+            pragma Assert (Conf in 0.0 .. 1.0);
             Entities (I) := (BPM => BPM, Confidence => Conf);
          end;
       end loop;
