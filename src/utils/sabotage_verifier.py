@@ -2969,6 +2969,231 @@ def _build_coq_proof_patterns() -> list[Pattern]:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# COQ .v COMPILATION CHECK — ACTUALLY RUNS coqc
+# ══════════════════════════════════════════════════════════════════════════
+
+def _check_coq_compilation(src_dir: str) -> list["Violation"]:
+    """ACTUALLY compile .v files with coqc — not just text pattern checking.
+    
+    Every .v file MUST compile without errors. If coqc is not installed,
+    this is a CRITICAL violation.
+    """
+    violations = []
+    
+    # Check if coqc is available
+    coqc_path = None
+    for candidate in ["coqc", "opam exec -- coqc"]:
+        try:
+            result = subprocess.run(
+                candidate.split() + ["--version"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                coqc_path = candidate
+                break
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    
+    if coqc_path is None:
+        violations.append(Violation(
+            severity=Severity.CRITICAL,
+            category="COQC_MISSING",
+            filepath=src_dir, line=0,
+            message=(
+                "coqc NOT INSTALLED — Cannot compile Coq .v proof files. "
+                "Install with: opam install coq  OR  brew install coq"
+            ),
+            standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
+        ))
+        return violations
+    
+    # Find all .v files
+    v_files = []
+    for root, _dirs, files in os.walk(src_dir):
+        # Skip build artifacts and vendor
+        skip_dirs = ["vendor", "node_modules", "__pycache__", ".git", "build", "_build"]
+        if any(sd in root for sd in skip_dirs):
+            continue
+        for fname in files:
+            if fname.endswith(".v"):
+                v_files.append(os.path.join(root, fname))
+    
+    if not v_files:
+        violations.append(Violation(
+            severity=Severity.HIGH,
+            category="NO_PROOF_FILES",
+            filepath=src_dir, line=0,
+            message=(
+                "No Coq .v proof files found in project. "
+                "Every Ada/Python/C unit MUST have a corresponding .v proof file."
+            ),
+            standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
+        ))
+        return violations
+    
+    # Actually compile each .v file with coqc
+    for v_file in v_files:
+        try:
+            cmd = coqc_path.split() + [v_file]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr.strip()[:500] if result.stderr else "Unknown error"
+                violations.append(Violation(
+                    severity=Severity.CRITICAL,
+                    category="COQ_COMPILATION_FAILED",
+                    filepath=v_file, line=0,
+                    message=(
+                        f"Coq .v file FAILED to compile with coqc:\n"
+                        f"Command: {' '.join(cmd)}\n"
+                        f"Error: {error_msg}"
+                    ),
+                    standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
+                ))
+        except subprocess.TimeoutExpired:
+            violations.append(Violation(
+                severity=Severity.HIGH,
+                category="COQ_COMPILATION_TIMEOUT",
+                filepath=v_file, line=0,
+                message=f"Coq .v file compilation TIMED OUT (120s limit): {v_file}",
+                standard="DO-178C §5.2.2",
+            ))
+        except Exception as e:
+            violations.append(Violation(
+                severity=Severity.HIGH,
+                category="COQ_COMPILATION_ERROR",
+                filepath=v_file, line=0,
+                message=f"Coq .v file compilation error: {e}",
+                standard="DO-178C §5.2.2",
+            ))
+    
+    return violations
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ADA → COQ CONVERTER / TRANSLATOR
+# ══════════════════════════════════════════════════════════════════════════
+
+def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
+    """Verify Ada→Coq converter exists and works.
+    
+    Every Ada unit MUST have a Coq proof. The converter generates
+    proof stubs from Ada contract annotations (Pre/Post/Priority).
+    """
+    violations = []
+    
+    # Look for converter script
+    converter_candidates = [
+        os.path.join(src_dir, "utils", "ada_to_coq.py"),
+        os.path.join(src_dir, "tools", "ada_to_coq.py"),
+        os.path.join(src_dir, "scripts", "ada_to_coq.py"),
+        os.path.join(src_dir, "ada_to_coq.py"),
+        os.path.expanduser("~/.local/share/opencode/ada_to_coq.py"),
+    ]
+    
+    converter_path = None
+    for candidate in converter_candidates:
+        if os.path.exists(candidate):
+            converter_path = candidate
+            break
+    
+    if converter_path is None:
+        violations.append(Violation(
+            severity=Severity.CRITICAL,
+            category="NO_ADA_TO_COQ_CONVERTER",
+            filepath=src_dir, line=0,
+            message=(
+                "Ada→Coq converter NOT FOUND. Every project MUST have an "
+                "ada_to_coq.py converter that generates .v proof stubs from "
+                "Ada contract annotations.\n"
+                "Expected locations:\n"
+                "  - src/utils/ada_to_coq.py\n"
+                "  - src/tools/ada_to_coq.py\n"
+                "  - ~/.local/share/opencode/ada_to_coq.py"
+            ),
+            standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
+        ))
+        return violations
+    
+    # Verify converter is executable and has required functions
+    try:
+        result = subprocess.run(
+            [sys.executable, converter_path, "--help"],
+            capture_output=True, text=True, timeout=10
+        )
+        # Check if it has the expected interface
+        if result.returncode != 0 and "usage" not in result.stdout.lower() and "usage" not in result.stderr.lower():
+            violations.append(Violation(
+                severity=Severity.MEDIUM,
+                category="CONVERTER_BROKEN",
+                filepath=converter_path, line=0,
+                message=(
+                    f"Ada→Coq converter exists but may not work correctly.\n"
+                    f"Return code: {result.returncode}\n"
+                    f"Stderr: {result.stderr[:300]}"
+                ),
+                standard="DO-178C §5.2.2",
+            ))
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        violations.append(Violation(
+            severity=Severity.MEDIUM,
+            category="CONVERTER_ERROR",
+            filepath=converter_path, line=0,
+            message=f"Ada→Coq converter error when testing: {e}",
+            standard="DO-178C §5.2.2",
+        ))
+    
+    # Check that every Ada unit has a corresponding .v file
+    ada_files = []
+    for root, _dirs, files in os.walk(src_dir):
+        skip_dirs = ["vendor", "node_modules", "__pycache__", ".git", "build"]
+        if any(sd in root for sd in skip_dirs):
+            continue
+        for fname in files:
+            if fname.endswith((".adb", ".ads")):
+                ada_files.append(os.path.join(root, fname))
+    
+    proof_dirs = [
+        os.path.join(src_dir, "proofs"),
+        os.path.join(src_dir, "coq_proofs"),
+        os.path.join(src_dir, "src", "proofs"),
+        os.path.join(src_dir, "src", "coq_proofs"),
+    ]
+    
+    for ada_file in ada_files:
+        unit_name = os.path.splitext(os.path.basename(ada_file))[0]
+        # Skip specs (only check bodies)
+        if unit_name.endswith("s") and not unit_name.endswith("ss"):
+            continue
+        
+        found_proof = False
+        for proof_dir in proof_dirs:
+            for ext in ["_proof.v", ".v"]:
+                candidate = os.path.join(proof_dir, f"{unit_name}{ext}")
+                if os.path.exists(candidate):
+                    found_proof = True
+                    break
+            if found_proof:
+                break
+        
+        if not found_proof:
+            violations.append(Violation(
+                severity=Severity.CRITICAL,
+                category="ADA_NO_COQ_PROOF",
+                filepath=ada_file, line=1,
+                message=(
+                    f"Ada unit '{unit_name}' has NO corresponding Coq .v proof file. "
+                    f"Run: python {converter_path} {ada_file} to generate proof stub.\n"
+                    f"Expected: proofs/{unit_name}_proof.v or proofs/{unit_name}.v"
+                ),
+                standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
+            ))
+    
+    return violations
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # BEHAVIORAL CHANGE DETECTION PATTERNS
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -12048,6 +12273,8 @@ def run_checklist_enforcement(src_dir: str) -> list["Violation"]:
     checks = [
         ("Section 1: Language", _check_language_version),
         ("Section 3: Timing", _check_timing_analysis),
+        ("Section 3: Coq Compilation", _check_coq_compilation),
+        ("Section 3: Ada→Coq Converter", _check_ada_to_coq_converter),
         ("Section 5: Safe Fallback", _check_safe_fallback),
         ("Section 5: Dual Watchdog", _check_dual_watchdog),
         ("Section 5: Segfault Resurrection", _check_segfault_resurrection),

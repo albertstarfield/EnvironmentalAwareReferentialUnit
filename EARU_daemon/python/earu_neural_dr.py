@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+import json
 import struct
 import subprocess
 import sys
@@ -35,6 +36,11 @@ OUTPUT_DIM = 2  # cov_lat, cov_up (measurement covariance)
 # Sampling rate
 FS = 800.0
 DT = 1.0 / FS
+
+# Local gravity nominal (m/s^2). The Ada daemon now exports the *calibrated*
+# local gravity as `calibrated_g` (m/s^2) in EARU_data.dat; when available we
+# use that value instead of this nominal constant (see IMU_SHM_Reader).
+STANDARD_GRAVITY = 9.80665
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +237,41 @@ class DR_SHM_Writer:
 # ---------------------------------------------------------------------------
 # IMU SHM Reader (Read raw IMU from Ada daemon)
 # ---------------------------------------------------------------------------
+def read_calibrated_g() -> float:
+    """
+    Read the daemon's calibrated local gravity (m/s^2) from EARU_data.dat.
+
+    Murphy's Law: the file may be missing, unreadable, partially written, or
+    contain an out-of-range value. On ANY failure we fall back to
+    STANDARD_GRAVITY so dead reckoning never crashes and never uses a
+    nonsensical gravity. The exported value is already in m/s^2 (Ada R1 fix),
+    which is exactly the unit needed to convert raw g-units -> m/s^2.
+    """
+    for candidate in (os.path.join(BASE_PATH, "EARU_data.dat"), "EARU_data.dat"):
+        try:
+            with open(candidate, "r") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        # EARU_data.dat is JSON: either a single object or newline-delimited
+        # JSON. Try the whole file first, then the last non-empty line.
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            lines = [ln for ln in content.splitlines() if ln.strip()]
+            if not lines:
+                continue
+            try:
+                data = json.loads(lines[-1])
+            except json.JSONDecodeError:
+                continue
+        loc = data.get("location", {}) if isinstance(data, dict) else {}
+        g = loc.get("calibrated_g", None) if isinstance(loc, dict) else None
+        if isinstance(g, (int, float)) and g > 0.0 and math.isfinite(g):
+            return float(g)
+    return STANDARD_GRAVITY
+
+
 class IMU_SHM_Reader:
     """Read IMU data from Ada daemon's shared memory ring buffer."""
 
@@ -240,6 +281,10 @@ class IMU_SHM_Reader:
         self.last_total: int = 0
         self.accel_name = accel_name
         self.gyro_name = gyro_name
+        # Local gravity used to convert raw g-units -> m/s^2. Seeded with the
+        # nominal constant and refreshed from telemetry (~1 Hz) when available.
+        self.gravity: float = STANDARD_GRAVITY
+        self._gravity_refresh_cnt: int = 0
 
     def open(self) -> bool:
         """Open IMU shared memory segments."""
@@ -284,9 +329,17 @@ class IMU_SHM_Reader:
 
         self.last_total = total
 
+        # Periodically refresh local gravity from the daemon's calibrated value
+        # (~1 Hz, i.e. every ~800 new samples). read_calibrated_g() can never
+        # raise; it falls back to STANDARD_GRAVITY on any failure.
+        self._gravity_refresh_cnt += 1
+        if self._gravity_refresh_cnt >= int(FS):
+            self._gravity_refresh_cnt = 0
+            self.gravity = read_calibrated_g()
+
         # Convert to SI units
         gyro = np.array([gx, gy, gz]) * (math.pi / 180.0)  # deg/s -> rad/s
-        accel = np.array([ax, ay, az]) * 9.80665  # g -> m/s²
+        accel = np.array([ax, ay, az]) * self.gravity  # g -> m/s² (calibrated local g)
 
         return gyro, accel, True
 

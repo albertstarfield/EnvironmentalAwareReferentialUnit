@@ -5,6 +5,12 @@ package Earu.Types is
 
    type Real is new Long_Float;  -- static: derived numeric type, no allocation
 
+   -- Nominal Earth surface gravity (m/s^2). Converts the internal g-unit
+   -- gravity estimate (Calibrated_G) into m/s^2 for telemetry export.
+   -- AXIOM: local gravity ∈ [9.764, 9.834] m/s^2 (WGS84); 9.80665 is the
+   --   conventional standard value. CITATION: ISO 80000-3 / WGS84 normal gravity.
+   Standard_Gravity : constant Real := 9.80665;
+
    --  Fixed-width integer type matching C int32_t (for CoreWLAN C interop)
    subtype Integer_32 is Interfaces.Integer_32;
 
@@ -92,6 +98,9 @@ package Earu.Types is
       Alt_Delta_M          : aliased Real := 0.0;  -- GPS alt minus terrain alt (m)
       Baro_Corrected_Pressure : aliased Real := 0.0;  -- ISA-corrected pressure (hPa)
       Calibrated_G  : aliased Real := 1.0;
+      -- True once Calibrated_G has been initialized (WGS84 seed or first
+      -- stationary snap). Replaces the fragile "= 1.0 sentinel" comparison.
+      Gravity_Calibrated : aliased Boolean := False;
       Pos           : aliased Vector3 := (others => <>);
       Total_Dist    : aliased Real := 0.0;
       Odometer_30m  : aliased Real := 0.0;

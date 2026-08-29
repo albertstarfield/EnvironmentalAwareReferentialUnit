@@ -21,6 +21,11 @@ package body Earu.Math is
 
    PI : constant Real := 3.14159265358979323846;
 
+   -- Gravity-calibration tuning constants (no magic numbers; code-quality req).
+   Gyro_Still_Threshold  : constant Real := 0.5;   -- rad/s angular-rate gate for stillness
+   Accel_Still_Threshold : constant Real := 0.1;   -- m/s^2 residual-linear-accel gate for stillness
+   Freefall_Ratio        : constant Real := 0.1;   -- Raw_Mag < 0.1*Calibrated_G ⇒ free-fall / micro-g hold
+
    --  ─────────────────────────────────────────────────────────────────────
    --  Multi-Time-Scale Pressure Tendency Tracker
    --  ─────────────────────────────────────────────────────────────────────
@@ -1092,23 +1097,34 @@ package body Earu.Math is
                     Motion_Type (Motion_Type'First .. Motion_Type'First + 16) = "Stowed / Passive ";
 
       -- === STAGE B: Dynamic Gravity Calibration (EMA IIR Filter) ===
-      -- When gyro is quiet (< 0.5 rad/s), slowly adapt Calibrated_G to the
-      -- observed raw accelerometer magnitude. This compensates for per-unit
-      -- gravity variations and MEMS scale-factor drift over temperature.
-      -- Time constant: ~10 seconds at 800Hz (Alpha = 0.001).
-      -- Uses Loc.Is_Stationary from PREVIOUS sample — 1-sample delay is
-      -- acceptable for a 10-second EMA.
-      if Gyro_Mag < 0.5 then
-         declare
-            Raw_Mag : constant Real := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
-         begin
-            if Loc.Calibrated_G = 1.0 then
-               Loc.Calibrated_G := Raw_Mag;
+      -- Calibrated_G is maintained in G-UNITS (local gravity ≈ 1.0 g); the
+      -- exported "calibrated_g" (m/s^2) = Calibrated_G * Standard_Gravity.
+      -- AXIOM: calibration must occur only when TRULY stationary — low angular
+      --   rate AND low residual linear acceleration after gravity removal.
+      --   A single gyro check alone let walking / vehicle motion corrupt the
+      --   estimate. CITATION: EARU audit (gravity units + stillness gate).
+      -- FREE-FALL GUARD: if Raw_Mag << Calibrated_G the IMU is in micro-g /
+      --   free-fall; hold the last estimate instead of collapsing toward zero.
+      -- WCET: O(1) per 800 Hz sample; one extra Rotate call, fixed arithmetic.
+      declare
+         Raw_Mag  : constant Real := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
+         W_Tmp    : constant Vector3 := Rotate_And_Subtract_Gravity (Q, Accel, Loc.Calibrated_G);
+         A_Dyn    : constant Real :=
+            Sqrt ((W_Tmp.X*G_Const)**2 + (W_Tmp.Y*G_Const)**2 + (W_Tmp.Z*G_Const)**2);
+         Is_Still : constant Boolean :=
+            Gyro_Mag < Gyro_Still_Threshold
+              and then A_Dyn < Accel_Still_Threshold
+              and then Raw_Mag > Freefall_Ratio * Loc.Calibrated_G;
+      begin
+         if Is_Still then
+            if not Loc.Gravity_Calibrated then
+               Loc.Calibrated_G := Raw_Mag;          -- first valid snap
+               Loc.Gravity_Calibrated := True;
             else
-               Loc.Calibrated_G := Loc.Calibrated_G * 0.999 + Raw_Mag * 0.001;
+               Loc.Calibrated_G := Loc.Calibrated_G * 0.999 + Raw_Mag * 0.001;  -- IIR EMA ~10 s
             end if;
-         end;
-      end if;
+         end if;
+      end;
 
       -- === STAGE C: Gravity Removal ===
       -- Rotate gravity vector from world frame to body frame via quaternion,
@@ -1313,9 +1329,9 @@ package body Earu.Math is
       declare
          Damping_V : Real;
       begin
-         if Gyro_Mag < 1.0E-16 then
+         if Gyro_Mag < 1.0E-3 then
             Raw_Mag := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
-            if Abs (Raw_Mag - Loc.Calibrated_G) < 1.0E-16 and not Is_Moving_Type then
+            if Abs (Raw_Mag - Loc.Calibrated_G) < 0.05 and then not Is_Moving_Type then
                -- Stationary: 50% loss per second -> Damping = 0.5 ** (1/fs)
                Damping := Exp (Log (0.5) / FS);
                Damping_V := Exp (Log (0.01) / FS); -- Aggressive vertical damping when stationary (99% decay per second)
@@ -1753,6 +1769,28 @@ package body Earu.Math is
       Loc.Lat := New_Lat;
       Loc.Lon := New_Lon;
       Loc.Alt := New_Alt;
+
+      -- 4b. Seed gravity estimate from WGS84 normal gravity when GPS is valid
+      --     and not yet calibrated. Provides a physically correct initial
+      --     Calibrated_G (g-units) instead of the 1.0 default, improving the
+      --     first samples before the EMA converges (it still refines later).
+      -- AXIOM: WGS84 normal gravity g0(φ,h) in m/s^2; divide by Standard_Gravity
+      --   to express in g-units (Calibrated_G's unit convention).
+      -- CITATION: Somigliana / WGS84 normal-gravity formula (IOC 1980).
+      -- WCET: O(1); two Sin evaluations, fixed arithmetic, bounded CPU.
+      if not Loc.Gravity_Calibrated then
+         declare
+            Phi   : constant Real := Loc.Lat * PI / 180.0;
+            S     : constant Real := Real_Funcs.Sin (Phi);
+            S2    : constant Real := S * S;
+            S22   : constant Real := Real_Funcs.Sin (2.0 * Phi) ** 2;
+            G_WGS : constant Real :=
+               9.780327 * (1.0 + 0.0053024 * S2 - 0.0000058 * S22) - 3.086e-6 * Loc.Alt;
+         begin
+            Loc.Calibrated_G := G_WGS / Standard_Gravity;
+            Loc.Gravity_Calibrated := True;
+         end;
+      end if;
    end Process_GPS_Update;
 
    --  ─────────────────────────────────────────────────────────────────────

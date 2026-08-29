@@ -59,7 +59,7 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `v_mag` | m/s | Horizontally scaled ground speed magnitude. | |
 | `vel` | List | Individual velocity components: `[vel_x, vel_y, vel_z]` in m/s. | |
 | `mach` | Mach | Speed relative to the speed of sound. | |
-| `calibrated_g` | m/s² | The local gravity constant used for IMU calibration. | ~9.80 |
+| `calibrated_g` | m/s² | Locally-calibrated gravity in m/s² (NOT raw g-units). Seeded from WGS84 normal gravity at the first GPS fix, refined by EMA while the device is stationary, and held during freefall. Raw IMU g-units are multiplied by this value to obtain m/s². | ~9.80 |
 | `pos` | Meters | Relative Cartesian position `[x, y, z]`. | |
 | `total_distance_m` | Meters | Odometer for total distance traveled. | |
 | `odometer_30m` | Meters | Distance traveled in the last 30 seconds. | |

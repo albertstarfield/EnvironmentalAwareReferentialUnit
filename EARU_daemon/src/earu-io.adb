@@ -510,7 +510,9 @@ package body Earu.IO is
       AP ("mach",           F (State.Location.Mach));
       AP ("odometer_30m",   F (State.Location.Odometer_30m));
       AP ("v_mag",          F (State.Location.V_Mag));
-      AP ("calibrated_g",   F (State.Location.Calibrated_G));
+      -- calibrated_g is reported in m/s^2: internal Calibrated_G is in g-units,
+      -- multiplied by Standard_Gravity. AXIOM: g-unit estimate * 9.80665 = m/s^2.
+      AP ("calibrated_g",   F (State.Location.Calibrated_G * Standard_Gravity));
       AP ("pressure_hpa",   F (State.Location.Pressure_HPa));
       AP ("terrain_altitude_m", F (State.Location.Terrain_Alt));
       --  Altitude delta: positive means laptop is above ground level (e.g.
