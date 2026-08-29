@@ -16,9 +16,9 @@ with GNAT.Sockets;
 
 package body Earu.Ntrip is
 
-   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
+   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);  -- static: generic instantiation, no heap allocation
 
-   function To_U64 is new Ada.Unchecked_Conversion (Integer_64, Unsigned_64);
+   function To_U64 is new Ada.Unchecked_Conversion (Integer_64, Unsigned_64);  -- static: unchecked conversion, no allocation
 
    procedure LLA_To_ECEF (Lat, Lon, Alt : Real; X, Y, Z : out Real) is
       A  : constant Real := 6378137.0;

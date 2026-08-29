@@ -3,7 +3,7 @@ with Earu.Shm;
 with Interfaces.C;
 
 package Earu.IO is
-   pragma SPARK_Mode (Off);
+   pragma SPARK_Mode (Off);  -- shm: shared-memory IO layer requires unsafe features
 
    --  Centralized run directory for ephemeral runtime artifacts (NVRAM caches,
    --  battery cross-checks, etc.).  Replaces scattered /tmp/ paths.

@@ -12,7 +12,7 @@
 with Interfaces.C;
 
 package Earu.System_Bridge is
-   pragma SPARK_Mode (Off);
+   pragma SPARK_Mode (Off);  -- c_binding: C imports from system_metrics.c
 
    --  C imports from system_metrics.c: CPU, memory, loadavg, uptime
    function Get_CPU_Usage return Interfaces.C.double;

@@ -38,7 +38,7 @@ procedure Earu_Daemon is
    use Interfaces;
    use type Interfaces.C.int;
 
-   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
+   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);  -- static: generic instantiation, no heap allocation
    use Real_Funcs;
 
    -- C import: returns Unix epoch time in seconds (time(NULL)).
@@ -1214,7 +1214,7 @@ procedure Earu_Daemon is
             "name=$(basename ""$f""); " &
             "if [ ! -e ""$name"" ] && [ ! -L ""$name"" ]; then " &
             "ln -sf ""$f"" ""$name""; " &
-            "echo ""[*] Dynamically linked new sensor: $name -> $f""; " &
+            "echo ""[*] Dynamically linked new sensor: $name -> $f""; " &  -- static: shell string literal, not Ada dynamic allocation
             "fi; " &
             "fi; " &
             "done"

@@ -8,7 +8,7 @@ with Earu.IO;
 
 package body Earu.Math is
 
-   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
+   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);  -- static: generic instantiation, no heap allocation
    use Real_Funcs;
 
    --  Rate-limit counter for Dead_Reckon_Update logging (800 Hz procedure).

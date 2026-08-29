@@ -6,7 +6,7 @@
 with Interfaces;
 
 package Earu.CoreWLAN is
-   pragma SPARK_Mode (Off);  --  C interfacing, mutable state
+   pragma SPARK_Mode (Off);  --  C interfacing, mutable state (c_binding)
 
    --  Max networks per scan (must match WIFI_SCAN_MAX in corewlan_scanner.h)
    WIFI_SCAN_MAX : constant := 64;

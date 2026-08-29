@@ -61,7 +61,7 @@ package Earu.BCG_Detection with
   SPARK_Mode => On
 is
 
-   package Math is new Ada.Numerics.Generic_Elementary_Functions (Float);
+   package Math is new Ada.Numerics.Generic_Elementary_Functions (Float);  -- static: generic instantiation, no heap allocation
    use Math;
 
    Max_Entities : constant := 3;

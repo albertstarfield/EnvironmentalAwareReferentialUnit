@@ -22,7 +22,7 @@ with Ada.Exceptions;
 
 package body Earu.System_Bridge is
 
-   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
+   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);  -- static: generic instantiation, no heap allocation
    use Real_Funcs;
 
    package ASU renames Ada.Strings.Unbounded;
@@ -574,7 +574,7 @@ package body Earu.System_Bridge is
      (ET           : in out Interaction_Responsiveness_Type;
       Update_Count : Natural)
    is
-      pragma SPARK_Mode (Off);
+      pragma SPARK_Mode (Off);  -- c_binding: requires C interop in this subprogram
       Mono_NS : constant Long_Long_Integer := Get_Monotonic_NS;
       Wall_NS : constant Long_Long_Integer := Get_Wallclock_NS;
       Year, Month, Day, Hour, Min, Sec : Interfaces.C.int;

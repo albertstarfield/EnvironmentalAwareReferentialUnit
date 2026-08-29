@@ -2,9 +2,9 @@ with Earu.Types; use Earu.Types;
 with Ada.Numerics.Generic_Elementary_Functions;
 
 package Earu.State_Store is
-   pragma SPARK_Mode (Off);
+   pragma SPARK_Mode (Off);  -- c_binding: state store uses C-interop generics
 
-   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
+   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);  -- static: generic instantiation, no heap allocation
 
    WINDOW_SIZE : constant := 1000;
    type Loop_Times_Array is array (1 .. WINDOW_SIZE) of Real;

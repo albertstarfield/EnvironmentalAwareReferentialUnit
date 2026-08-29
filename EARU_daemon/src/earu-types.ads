@@ -3,7 +3,7 @@ with Interfaces;
 package Earu.Types is
    --  pragma SPARK_Mode (On); -- Temporarily off for String/Array flexibility in events if needed, but I'll try to keep it on.
 
-   type Real is new Long_Float;
+   type Real is new Long_Float;  -- static: derived numeric type, no allocation
 
    --  Fixed-width integer type matching C int32_t (for CoreWLAN C interop)
    subtype Integer_32 is Interfaces.Integer_32;

@@ -3,7 +3,7 @@ with Ada.Numerics.Generic_Elementary_Functions;
 
 package body Earu.Bridge is
 
-   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);
+   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);  -- static: generic instantiation, no heap allocation
 
    procedure Update_Structural_Fatigue (State : in out Earu_State) is
 

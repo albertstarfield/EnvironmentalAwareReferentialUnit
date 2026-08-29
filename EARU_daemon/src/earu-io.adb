@@ -25,7 +25,7 @@ package body Earu.IO is
    use type Interfaces.Unsigned_8;
    use Ada.Strings.Unbounded;
 
-   package Real_IO is new Ada.Text_IO.Float_IO (Real);
+   package Real_IO is new Ada.Text_IO.Float_IO (Real);  -- static: generic instantiation, no heap allocation
 
    function F (R : Real) return String is
       S : String (1 .. 128) := (others => ' ');
@@ -1065,7 +1065,7 @@ package body Earu.IO is
       use Ada.Text_IO;
       File : File_Type;
       Val  : Integer := 0;
-      package Int_IO is new Ada.Text_IO.Integer_IO (Integer);
+      package Int_IO is new Ada.Text_IO.Integer_IO (Integer);  -- static: generic instantiation, no heap allocation
    begin
       begin
           Open (File, In_File, "/Volumes/EARU_dataIO/" & Filename);
