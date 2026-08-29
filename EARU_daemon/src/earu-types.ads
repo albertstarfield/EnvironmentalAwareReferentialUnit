@@ -137,6 +137,14 @@ package Earu.Types is
       Cov_Trace     : aliased Real := 0.0;  -- Sum of diagonal covariance elements
       Is_Stationary : aliased Boolean := True;
       Stationary_Cnt: aliased Integer := 0;
+
+      -- Gravity-anomaly / TAN cross-check fields (see earu-math-gravity_nav).
+      -- Anomaly (m/s^2): calibrated gravity - expected (WGS84 + free-air + Bouguer).
+      Gravity_Anomaly : aliased Real := 0.0;
+      -- True when the current gravity fingerprint matches a sparse-grid cell.
+      Gravity_Grid_Match : aliased Boolean := False;
+      -- Spurious-DR-motion indicator (0.0 = consistent, 1.0 = conflict).
+      Gravity_Motion_Conflict : aliased Real := 0.0;
    end record;
 
    type Weather_Type is record

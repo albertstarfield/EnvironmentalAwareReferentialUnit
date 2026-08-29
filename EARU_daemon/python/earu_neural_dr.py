@@ -29,7 +29,12 @@ DR_SHM_NAME = "earu_v2_dr_shm"
 BASE_PATH = "/usr/local/EnvironmentalAwareReferentialUnit"
 
 # Neural adapter dimensions (matching AI-IMU-DR MesNet architecture)
-INPUT_DIM = 6  # gyro_xyz + accel_xyz
+# 8 = gyro_xyz (3) + accel_xyz (3) + gravity_anomaly_m_s2 (1) + gravity_motion_conflict (1).
+# The two gravity channels are fed from the Ada Gravity_Nav (TAN) module so the adapter can
+# tighten zero-velocity covariance when the gravity fingerprint says we are truly stationary
+# (motion_conflict == 0) and flag spurious DR drift when gravity is flat but the IMU reports
+# motion (motion_conflict == 1). See earu-math-gravity_nav.ads.
+INPUT_DIM = 8  # gyro_xyz + accel_xyz + gravity_anomaly_m_s2 + gravity_motion_conflict
 HIDDEN_DIM = 32
 OUTPUT_DIM = 2  # cov_lat, cov_up (measurement covariance)
 
@@ -92,7 +97,7 @@ class NeuralNoiseAdapter:
     - Real-time performance at 800 Hz
 
     Architecture:
-    - Input: 6D IMU signal (gyro_xyz, accel_xyz)
+    - Input: 8D signal (gyro_xyz, accel_xyz, gravity_anomaly_m_s2, gravity_motion_conflict)
     - 1D Convolution (kernel=5) for temporal features
     - ReLU activation
     - Linear projection to 2D covariance output
@@ -100,20 +105,20 @@ class NeuralNoiseAdapter:
     """
 
     def __init__(self) -> None:
-        # Convolutional layer weights (5-tap kernel)
-        self.conv_weight: np.ndarray = np.random.randn(6, 5) * 0.1
-        self.conv_bias: np.ndarray = np.zeros(6)
+        # Convolutional layer weights (5-tap kernel); INPUT_DIM channels.
+        self.conv_weight: np.ndarray = np.random.randn(INPUT_DIM, 5) * 0.1
+        self.conv_bias: np.ndarray = np.zeros(INPUT_DIM)
 
         # Linear projection weights
-        self.linear_weight: np.ndarray = np.random.randn(6, 2) * 0.01
+        self.linear_weight: np.ndarray = np.random.randn(INPUT_DIM, 2) * 0.01
         self.linear_bias: np.ndarray = np.zeros(2)
 
         # Input normalization
-        self.u_loc: np.ndarray = np.zeros(6)
-        self.u_std: np.ndarray = np.ones(6)
+        self.u_loc: np.ndarray = np.zeros(INPUT_DIM)
+        self.u_std: np.ndarray = np.ones(INPUT_DIM)
 
         # Buffers
-        self.input_buffer: np.ndarray = np.zeros((6, 10))
+        self.input_buffer: np.ndarray = np.zeros((INPUT_DIM, 10))
         self.buffer_idx: int = 0
 
         # Output scaling (base covariances from AI-IMU-DR)
@@ -126,9 +131,9 @@ class NeuralNoiseAdapter:
 
     def conv1d(self, x: np.ndarray) -> np.ndarray:
         """Simple 1D convolution with causal padding."""
-        # x shape: (6, 10) -> (6,) after conv
-        out = np.zeros(6)
-        for ch in range(6):
+        # x shape: (INPUT_DIM, 10) -> (INPUT_DIM,) after per-channel conv
+        out = np.zeros(INPUT_DIM)
+        for ch in range(INPUT_DIM):
             for k in range(5):
                 idx = self.buffer_idx - k
                 if idx >= 0:
@@ -136,19 +141,28 @@ class NeuralNoiseAdapter:
             out[ch] += self.conv_bias[ch]
         return out
 
-    def forward(self, gyro: np.ndarray, accel: np.ndarray) -> tuple[float, float]:
+    def forward(
+        self,
+        gyro: np.ndarray,
+        accel: np.ndarray,
+        gravity_anomaly: float = 0.0,
+        gravity_motion_conflict: float = 0.0,
+    ) -> tuple[float, float]:
         """
-        Forward pass: IMU signal -> covariance parameters.
+        Forward pass: IMU signal + gravity-fingerprint channels -> covariance.
 
         Args:
             gyro: 3D gyroscope reading (rad/s)
             accel: 3D accelerometer reading (m/s²)
+            gravity_anomaly: gravity anomaly vs expected model (m/s²) from Ada TAN.
+            gravity_motion_conflict: 0 = gravity agrees with stationary, 1 = spurious DR
+                motion (IMU reports translation but gravity fingerprint is unchanged).
 
         Returns:
             (cov_lat, cov_up): Measurement covariance for zero-velocity constraints
         """
-        # Stack IMU inputs
-        raw = np.concatenate([gyro, accel])
+        # Stack IMU inputs + gravity-fingerprint channels (8D)
+        raw = np.concatenate([gyro, accel, [gravity_anomaly, gravity_motion_conflict]])
 
         # Normalize
         x = self.normalize_input(raw)
@@ -177,19 +191,32 @@ class NeuralNoiseAdapter:
         self.u_std = u_std.copy()
 
     def load_weights(self, path: str) -> bool:
-        """Load pre-trained weights from .npz file."""
+        """Load pre-trained weights from .npz file.
+
+        Murphy's Law: a weights file trained for the OLD 6-channel input must NOT
+        crash the new 8-channel model. We only adopt an array if its leading
+        dimension matches INPUT_DIM; otherwise we keep the random initialization
+        and report a soft failure so dead reckoning stays alive.
+        """
         if not os.path.exists(path):
             return False
         try:
             data = np.load(path)
-            self.conv_weight = data["conv_weight"]
-            self.conv_bias = data["conv_bias"]
-            self.linear_weight = data["linear_weight"]
-            self.linear_bias = data["linear_bias"]
-            if "u_loc" in data:
+            ok = True
+            if data["conv_weight"].shape == (INPUT_DIM, 5):
+                self.conv_weight = data["conv_weight"]
+                self.conv_bias = data["conv_bias"]
+            else:
+                ok = False
+            if data["linear_weight"].shape == (INPUT_DIM, 2):
+                self.linear_weight = data["linear_weight"]
+                self.linear_bias = data["linear_bias"]
+            else:
+                ok = False
+            if "u_loc" in data and data["u_loc"].shape == (INPUT_DIM,):
                 self.u_loc = data["u_loc"]
                 self.u_std = data["u_std"]
-            return True
+            return ok
         except Exception:
             return False
 
@@ -237,15 +264,11 @@ class DR_SHM_Writer:
 # ---------------------------------------------------------------------------
 # IMU SHM Reader (Read raw IMU from Ada daemon)
 # ---------------------------------------------------------------------------
-def read_calibrated_g() -> float:
-    """
-    Read the daemon's calibrated local gravity (m/s^2) from EARU_data.dat.
+def _read_dat_location() -> dict:
+    """Return the 'location' dict from EARU_data.dat, or {} on ANY failure (Murphy).
 
-    Murphy's Law: the file may be missing, unreadable, partially written, or
-    contain an out-of-range value. On ANY failure we fall back to
-    STANDARD_GRAVITY so dead reckoning never crashes and never uses a
-    nonsensical gravity. The exported value is already in m/s^2 (Ada R1 fix),
-    which is exactly the unit needed to convert raw g-units -> m/s^2.
+    EARU_data.dat is JSON: either a single object or newline-delimited JSON. We try
+    the whole file first, then the last non-empty line, and never raise.
     """
     for candidate in (os.path.join(BASE_PATH, "EARU_data.dat"), "EARU_data.dat"):
         try:
@@ -253,8 +276,6 @@ def read_calibrated_g() -> float:
                 content = fh.read()
         except OSError:
             continue
-        # EARU_data.dat is JSON: either a single object or newline-delimited
-        # JSON. Try the whole file first, then the last non-empty line.
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
@@ -265,11 +286,42 @@ def read_calibrated_g() -> float:
                 data = json.loads(lines[-1])
             except json.JSONDecodeError:
                 continue
-        loc = data.get("location", {}) if isinstance(data, dict) else {}
-        g = loc.get("calibrated_g", None) if isinstance(loc, dict) else None
-        if isinstance(g, (int, float)) and g > 0.0 and math.isfinite(g):
-            return float(g)
+        if isinstance(data, dict):
+            loc = data.get("location", {})
+            if isinstance(loc, dict):
+                return loc
+    return {}
+
+
+def read_calibrated_g() -> float:
+    """
+    Read the daemon's calibrated local gravity (m/s^2) from EARU_data.dat.
+
+    Murphy's Law: the file may be missing, unreadable, partially written, or
+    contain an out-of-range value. On ANY failure we fall back to
+    STANDARD_GRAVITY so dead reckoning never crashes and never uses a
+    nonsensical gravity. The exported value is already in m/s^2 (Ada R1 fix),
+    which is exactly the unit needed to convert raw g-units -> m/s^2.
+    """
+    g = _read_dat_location().get("calibrated_g", None)
+    if isinstance(g, (int, float)) and g > 0.0 and math.isfinite(g):
+        return float(g)
     return STANDARD_GRAVITY
+
+
+def read_gravity_features() -> tuple[float, float]:
+    """Read (gravity_anomaly_m_s2, gravity_motion_conflict) from telemetry.
+
+    Murphy's Law: the file may be missing/unreadable/partial, or the values may be
+    out of range. On ANY failure we return the safe defaults (0.0, 0.0) so the
+    neural adapter never sees NaN/Inf and dead reckoning stays alive.
+    """
+    loc = _read_dat_location()
+
+    def _f(x: Any) -> float:
+        return float(x) if isinstance(x, (int, float)) and math.isfinite(x) else 0.0
+
+    return _f(loc.get("gravity_anomaly_m_s2")), _f(loc.get("gravity_motion_conflict"))
 
 
 class IMU_SHM_Reader:
@@ -284,6 +336,10 @@ class IMU_SHM_Reader:
         # Local gravity used to convert raw g-units -> m/s^2. Seeded with the
         # nominal constant and refreshed from telemetry (~1 Hz) when available.
         self.gravity: float = STANDARD_GRAVITY
+        # Gravity-fingerprint channels from the Ada TAN module (refreshed ~1 Hz).
+        # Safe defaults until telemetry is available.
+        self.gravity_anomaly: float = 0.0
+        self.gravity_motion_conflict: float = 0.0
         self._gravity_refresh_cnt: int = 0
 
     def open(self) -> bool:
@@ -336,6 +392,8 @@ class IMU_SHM_Reader:
         if self._gravity_refresh_cnt >= int(FS):
             self._gravity_refresh_cnt = 0
             self.gravity = read_calibrated_g()
+            # Refresh the gravity-fingerprint channels from the Ada TAN module.
+            self.gravity_anomaly, self.gravity_motion_conflict = read_gravity_features()
 
         # Convert to SI units
         gyro = np.array([gx, gy, gz]) * (math.pi / 180.0)  # deg/s -> rad/s
@@ -386,8 +444,11 @@ def main() -> None:
             gyro, accel, new_data = imu_reader.read_latest()
 
             if new_data:
-                # Run neural adapter
-                cov_lat, cov_up = adapter.forward(gyro, accel)
+                # Run neural adapter, feeding the gravity-fingerprint channels from
+                # the Ada TAN module so it can tighten/flag the zero-velocity covariance.
+                cov_lat, cov_up = adapter.forward(
+                    gyro, accel, imu_reader.gravity_anomaly, imu_reader.gravity_motion_conflict
+                )
 
                 # Write to shared memory
                 update_count += 1

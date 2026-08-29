@@ -60,6 +60,9 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `vel` | List | Individual velocity components: `[vel_x, vel_y, vel_z]` in m/s. | |
 | `mach` | Mach | Speed relative to the speed of sound. | |
 | `calibrated_g` | m/s² | Locally-calibrated gravity in m/s² (NOT raw g-units). Seeded from WGS84 normal gravity at the first GPS fix, refined by EMA while the device is stationary, and held during freefall. Raw IMU g-units are multiplied by this value to obtain m/s². | ~9.80 |
+| `gravity_anomaly_m_s2` | m/s² | Gravity anomaly = calibrated gravity − expected local gravity (WGS84 normal gravity − free-air altitude correction + Bouguer slab for terrain mass). ≈0 when calibrated correctly; a persistent non-zero value hints mis-calibration or a real local mass anomaly. 0.0 until gravity is calibrated. | ~±0.05 |
+| `gravity_grid_match` | 0/1 | 1 when the current gravity fingerprint matches a cell in the sparse visited-location grid (Terrain-Aided Navigation map), 0 otherwise. Confirms the device is at a previously-mapped spot. | 0 or 1 |
+| `gravity_motion_conflict` | 0/1 | Spurious-DR / vibration indicator: 1 when dead reckoning reports translation but the gravity anomaly (fingerprint) is unchanged → likely vibration-without-translation or DR drift; 0 when gravity agrees with stationary. Always 0 until seeded + calibrated. Fed into the neural DR adapter as an input channel. | 0 or 1 |
 | `pos` | Meters | Relative Cartesian position `[x, y, z]`. | |
 | `total_distance_m` | Meters | Odometer for total distance traveled. | |
 | `odometer_30m` | Meters | Distance traveled in the last 30 seconds. | |

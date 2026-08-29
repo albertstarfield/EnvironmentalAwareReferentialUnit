@@ -513,6 +513,11 @@ package body Earu.IO is
       -- calibrated_g is reported in m/s^2: internal Calibrated_G is in g-units,
       -- multiplied by Standard_Gravity. AXIOM: g-unit estimate * 9.80665 = m/s^2.
       AP ("calibrated_g",   F (State.Location.Calibrated_G * Standard_Gravity));
+      -- Gravity-anomaly cross-check (see earu-math-gravity_nav): anomaly vs
+      -- expected model, sparse-grid match, and spurious-DR-motion indicator.
+      AP ("gravity_anomaly_m_s2",    F (State.Location.Gravity_Anomaly));
+      AP ("gravity_grid_match",      F (Real (Boolean'Pos (State.Location.Gravity_Grid_Match))));
+      AP ("gravity_motion_conflict", F (State.Location.Gravity_Motion_Conflict));
       AP ("pressure_hpa",   F (State.Location.Pressure_HPa));
       AP ("terrain_altitude_m", F (State.Location.Terrain_Alt));
       --  Altitude delta: positive means laptop is above ground level (e.g.

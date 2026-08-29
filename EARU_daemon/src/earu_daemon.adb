@@ -1,5 +1,6 @@
 with Earu.Math;
 with Earu.Math.BlueMarble;
+with Earu.Math.Gravity_Nav;
 with Earu.Shm;
 with Earu.Types;
 with Earu.IO;
@@ -385,9 +386,12 @@ procedure Earu_Daemon is
                               Ambient_Temp_K => Full_State.SMC.Ambient_Temp_K,
                               Gas_R          => Full_State.SMC.Gas_Constants.R,
                               Gas_Gamma      => Full_State.SMC.Gas_Constants.Gamma
-                           );
+                            );
 
-                           -- Dynamic override for transportation codenames from the bridge
+                            -- Gravity-anomaly / TAN sparse-grid cross-check (see earu-math-gravity_nav)
+                            Earu.Math.Gravity_Nav.Update (Loc, Real (C_Time (null)));
+
+                            -- Dynamic override for transportation codenames from the bridge
                            declare
                               W_Code : constant Integer := Full_State.Weather.Weather_Code;
                            begin
