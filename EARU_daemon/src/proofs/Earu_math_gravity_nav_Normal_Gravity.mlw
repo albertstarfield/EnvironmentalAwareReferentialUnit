@@ -1,0 +1,13 @@
+module Earu_math_gravity_nav_Normal_Gravity
+
+  use int.Int
+
+
+
+  let normal_Gravity (phi: int) (h: int) : int
+    requires { phi >= 0 }
+    requires { h >= 0 }
+    ensures { result >= 0 }
+    = Gamma_Equator * (1.0 + Gamma_K * Sin2)
+
+end

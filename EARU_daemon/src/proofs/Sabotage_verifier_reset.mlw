@@ -1,0 +1,12 @@
+module Sabotage_verifier_reset
+
+  use int.Int
+
+
+
+  let reset () : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

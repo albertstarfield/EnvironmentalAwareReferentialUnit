@@ -1,0 +1,14 @@
+module Earu_state_store_Update_Damage
+
+  use int.Int
+
+
+
+  let update_Damage (cumulative: int) (risk: int) (peak: int) : int
+    requires { cumulative >= 0 }
+    requires { risk >= 0 }
+    requires { peak >= 0 }
+    ensures { result >= 0 }
+    = cumulative
+
+end

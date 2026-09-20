@@ -1,0 +1,12 @@
+module Earu_weather_fetcher_Write_Weather_Pressure
+
+  use int.Int
+
+
+
+  let write_Weather_Pressure (pressure_HPa: real) : int
+    requires { true }
+    ensures { true }
+    = 0
+
+end

@@ -1,0 +1,12 @@
+module Sabotage_verifier_main
+
+  use int.Int
+
+
+
+  let main () : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

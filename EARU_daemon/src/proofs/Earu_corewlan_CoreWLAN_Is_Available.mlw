@@ -1,0 +1,12 @@
+module Earu_corewlan_CoreWLAN_Is_Available
+
+  use int.Int
+
+
+
+  let coreWLAN_Is_Available () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

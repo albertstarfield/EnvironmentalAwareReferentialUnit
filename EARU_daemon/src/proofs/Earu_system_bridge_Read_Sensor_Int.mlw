@@ -1,0 +1,13 @@
+module Earu_system_bridge_Read_Sensor_Int
+
+  use int.Int
+
+  use string.String
+
+
+  let read_Sensor_Int (filename: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = Earu.IO.Read_Sensor_Integer (filename)
+
+end

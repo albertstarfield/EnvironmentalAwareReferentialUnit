@@ -1,0 +1,13 @@
+module Earu_state_store_Load_Sig_Loc
+
+  use int.Int
+
+
+
+  let load_Sig_Loc (index: int) (loc: int) : int
+    requires { index >= 0 }
+    requires { loc >= 0 }
+    ensures { result >= 0 }
+    = index
+
+end

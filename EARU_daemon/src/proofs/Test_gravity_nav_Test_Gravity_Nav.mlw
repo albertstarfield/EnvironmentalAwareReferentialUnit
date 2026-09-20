@@ -1,0 +1,12 @@
+module Test_gravity_nav_Test_Gravity_Nav
+
+  use int.Int
+
+
+
+  let test_Gravity_Nav () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

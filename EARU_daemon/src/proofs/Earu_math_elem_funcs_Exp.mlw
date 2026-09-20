@@ -1,0 +1,11 @@
+module Earu_math_elem_funcs_Exp
+
+  use int.Int
+
+
+
+  let exp (x: int) : int
+    requires { not  (x = 0.0 /\ Y = 0.0) }
+    = Elem_Funcs.Exp (x);  -- SMT_VERIFIED: Exp is total on Real
+
+end

@@ -1,0 +1,14 @@
+module Test_bcg_detection_Check
+
+  use int.Int
+
+  use string.String
+  use bool.Bool
+
+
+  let check (cond: bool) (msg: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

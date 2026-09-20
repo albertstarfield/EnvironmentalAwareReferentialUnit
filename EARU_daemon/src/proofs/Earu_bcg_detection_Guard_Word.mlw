@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Guard_Word
+
+  use int.Int
+
+
+
+  let guard_Word (wI: int) (t: int) : int
+    requires { true }
+    ensures { Integrity_Ok (S) }
+    = wI
+
+end

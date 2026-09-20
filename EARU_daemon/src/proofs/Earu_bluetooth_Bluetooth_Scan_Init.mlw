@@ -1,0 +1,12 @@
+module Earu_bluetooth_Bluetooth_Scan_Init
+
+  use int.Int
+
+
+
+  let bluetooth_Scan_Init () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Interfaces.Integer_32
+
+end

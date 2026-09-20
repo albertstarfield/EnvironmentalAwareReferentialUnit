@@ -1,0 +1,12 @@
+module Earu_system_bridge_Read_Power_Tracking
+
+  use int.Int
+
+
+
+  let read_Power_Tracking (sMC: int) : int
+    requires { sMC >= 0 }
+    ensures { result >= 0 }
+    = sMC
+
+end

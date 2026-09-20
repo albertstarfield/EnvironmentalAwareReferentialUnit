@@ -1,0 +1,12 @@
+module Earu_sig_loc_store_Extract_String
+
+  use int.Int
+
+
+
+  let extract_String () : int
+    requires { true }
+    ensures { result >= 0 }
+    = String
+
+end

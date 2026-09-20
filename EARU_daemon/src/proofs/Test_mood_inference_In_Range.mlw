@@ -1,0 +1,12 @@
+module Test_mood_inference_In_Range
+
+  use int.Int
+
+
+
+  let in_Range (v: real) (lo: real) (hi: real) : int
+    requires { true }
+    ensures { result >= 0 }
+    = v >= lo /\  v <= hi
+
+end

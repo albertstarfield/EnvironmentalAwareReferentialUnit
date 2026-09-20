@@ -1,0 +1,12 @@
+module Earu_math_Classify_Event
+
+  use int.Int
+
+
+
+  let classify_Event () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

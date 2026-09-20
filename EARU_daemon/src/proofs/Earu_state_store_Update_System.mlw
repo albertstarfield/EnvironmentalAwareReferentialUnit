@@ -1,0 +1,13 @@
+module Earu_state_store_Update_System
+
+  use int.Int
+
+
+
+  let update_System (s: int) (e: int) : int
+    requires { s >= 0 }
+    requires { e >= 0 }
+    ensures { result >= 0 }
+    = s
+
+end

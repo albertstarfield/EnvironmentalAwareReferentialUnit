@@ -1,0 +1,12 @@
+module Spu_sensor_reader_on_gyro_report
+
+  use int.Int
+
+
+
+  let on_gyro_report (context: unit) (result: int) (sender: unit) (type: int) (reportID: int) (report: int) (reportLength: int) (timeStamp: int) : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

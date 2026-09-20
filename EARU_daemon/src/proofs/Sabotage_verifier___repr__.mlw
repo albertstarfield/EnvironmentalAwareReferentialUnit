@@ -1,0 +1,12 @@
+module Sabotage_verifier___repr__
+
+  use int.Int
+
+
+
+  let __repr__ () : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

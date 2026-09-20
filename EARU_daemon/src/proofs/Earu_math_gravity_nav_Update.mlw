@@ -1,0 +1,13 @@
+module Earu_math_gravity_nav_Update
+
+  use int.Int
+
+
+
+  let update (loc: int) (now_T: int) : int
+    requires { loc >= 0 }
+    requires { now_T >= 0 }
+    ensures { result >= 0 }
+    = loc
+
+end

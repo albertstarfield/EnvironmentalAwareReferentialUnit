@@ -1,0 +1,12 @@
+module Earu_weather_fetcher_Format_Coord
+
+  use int.Int
+
+
+
+  let format_Coord (value: int) : int
+    requires { true }
+    ensures { result'Length > 0 }
+    = Ada.Strings.Fixed.Trim (Img, Ada.Strings.Left)
+
+end

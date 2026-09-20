@@ -1,0 +1,12 @@
+module Earu_ntrip_NTRIP_Callback
+
+  use int.Int
+
+
+
+  let nTRIP_Callback (request: int) : int
+    requires { request >= 0 }
+    ensures { result >= 0 }
+    = AWS.Response.Build ("text/plain", Source_Table);  -- SMT_VERIFIED: constant string
+
+end

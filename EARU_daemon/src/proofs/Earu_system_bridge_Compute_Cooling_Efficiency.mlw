@@ -1,0 +1,12 @@
+module Earu_system_bridge_Compute_Cooling_Efficiency
+
+  use int.Int
+
+
+
+  let compute_Cooling_Efficiency (sMC: int) : int
+    requires { sMC >= 0 }
+    ensures { result >= 0 }
+    = sMC
+
+end

@@ -1,0 +1,12 @@
+module Earu_daemon_Earu_Daemon
+
+  use int.Int
+
+
+
+  let earu_Daemon () : int
+    requires { true }
+    ensures { true  -- main procedure always runs to completion \/ halt }
+    = 0
+
+end

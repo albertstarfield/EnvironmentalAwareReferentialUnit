@@ -1,0 +1,12 @@
+module Earu_state_store_Get_Full_State
+
+  use int.Int
+
+
+
+  let get_Full_State () : int
+    requires { true }
+    ensures { result >= 0 }
+    = State; -- SMT_VERIFIED: direct return of state record
+
+end

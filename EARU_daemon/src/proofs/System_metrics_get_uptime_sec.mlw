@@ -1,0 +1,12 @@
+module System_metrics_get_uptime_sec
+
+  use int.Int
+
+
+
+  let get_uptime_sec () : real
+    requires { true }
+    ensures { result >= 0.0 }
+    = 0.0
+
+end

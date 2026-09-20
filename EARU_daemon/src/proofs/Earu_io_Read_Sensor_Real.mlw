@@ -1,0 +1,13 @@
+module Earu_io_Read_Sensor_Real
+
+  use int.Int
+
+  use string.String
+
+
+  let read_Sensor_Real (filename: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = Val /= 0.0; -- Success if we got a non-zero value
+
+end

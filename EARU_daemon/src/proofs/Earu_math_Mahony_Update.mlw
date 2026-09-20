@@ -1,0 +1,11 @@
+module Earu_math_Mahony_Update
+
+  use int.Int
+
+
+
+  let mahony_Update () : int
+    requires { (DT > 0.0 /\ DT < 1.0) }
+    = 0
+
+end

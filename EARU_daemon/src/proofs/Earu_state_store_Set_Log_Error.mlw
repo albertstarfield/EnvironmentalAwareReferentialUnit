@@ -1,0 +1,13 @@
+module Earu_state_store_Set_Log_Error
+
+  use int.Int
+
+  use bool.Bool
+
+
+  let set_Log_Error (detected: bool) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

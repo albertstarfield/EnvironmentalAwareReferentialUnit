@@ -1,0 +1,11 @@
+module Earu_math_elem_funcs_Sin
+
+  use int.Int
+
+
+
+  let sin (x: int) : int
+    requires { not  (x = 0.0 /\ Y = 0.0) }
+    = Elem_Funcs.Sin (x);  -- SMT_VERIFIED: Sin is total on Real
+
+end

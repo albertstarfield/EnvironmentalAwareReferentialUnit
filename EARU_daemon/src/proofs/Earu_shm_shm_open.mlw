@@ -1,0 +1,14 @@
+module Earu_shm_shm_open
+
+  use int.Int
+
+
+
+  let shm_open (name: int) (oflag: int) (mode: int) : int
+    requires { name >= 0 }
+    requires { oflag >= 0 }
+    requires { mode >= 0 }
+    ensures { result >= 0 }
+    = System.Null_Address
+
+end

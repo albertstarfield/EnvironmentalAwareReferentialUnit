@@ -1,0 +1,13 @@
+module Earu_network_status_Set
+
+  use int.Int
+
+
+
+  let set (index: int) (status: int) : int
+    requires { index >= 0 }
+    requires { status >= 0 }
+    ensures { result >= 0 }
+    = index
+
+end

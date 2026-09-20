@@ -1,0 +1,13 @@
+module Earu_io_C_Popen
+
+  use int.Int
+
+
+
+  let c_Popen (command: int) (mode: int) : int
+    requires { command >= 0 }
+    requires { mode >= 0 }
+    ensures { result >= 0 }
+    = command
+
+end

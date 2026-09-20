@@ -1,0 +1,14 @@
+module Earu_io_Bucket
+
+  use int.Int
+
+  use string.String
+  use bool.Bool
+
+
+  let bucket (key: string) (bkt: int) (comma: bool) : int
+    requires { bkt >= 0 }
+    ensures { result >= 0 }
+    = bkt
+
+end

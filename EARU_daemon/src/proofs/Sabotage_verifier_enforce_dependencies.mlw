@@ -1,0 +1,13 @@
+module Sabotage_verifier_enforce_dependencies
+
+  use int.Int
+
+  use bool.Bool
+
+
+  let enforce_dependencies () : bool
+    requires { true }
+    ensures { result = true \/ result = false }
+    = true
+
+end

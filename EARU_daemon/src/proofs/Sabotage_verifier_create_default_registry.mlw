@@ -1,0 +1,12 @@
+module Sabotage_verifier_create_default_registry
+
+  use int.Int
+
+
+
+  let create_default_registry () : any
+    requires { true }
+    ensures { true }
+    = 0
+
+end

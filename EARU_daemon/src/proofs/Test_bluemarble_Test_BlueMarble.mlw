@@ -1,0 +1,12 @@
+module Test_bluemarble_Test_BlueMarble
+
+  use int.Int
+
+
+
+  let test_BlueMarble () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

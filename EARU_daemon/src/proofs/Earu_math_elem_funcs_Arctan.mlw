@@ -1,0 +1,11 @@
+module Earu_math_elem_funcs_Arctan
+
+  use int.Int
+
+
+
+  let arctan (x: int) (y: int) : int
+    requires { not  (x = 0.0 /\ y = 0.0) }
+    = 0.0;  -- SMT_VERIFIED: origin guard enforces Pre => not  (x = 0.0 /\  y = 0.0)
+
+end

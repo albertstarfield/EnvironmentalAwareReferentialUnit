@@ -1,0 +1,12 @@
+module Earu_io_End_Realtime_Loop_Cycle
+
+  use int.Int
+
+
+
+  let end_Realtime_Loop_Cycle () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

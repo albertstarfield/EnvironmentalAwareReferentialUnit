@@ -1,0 +1,13 @@
+module Earu_shm_Create_And_Map_Generic
+
+  use int.Int
+
+  use string.String
+
+
+  let create_And_Map_Generic (name: string) (size: int) : int
+    requires { size >= 0 }
+    ensures { result >= 0 }
+    = System.Null_Address
+
+end

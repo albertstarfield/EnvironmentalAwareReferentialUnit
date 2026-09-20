@@ -1,0 +1,13 @@
+module Earu_state_store_Update_Vibration
+
+  use int.Int
+
+
+
+  let update_Vibration (v: int) (mag: int) : int
+    requires { v >= 0 }
+    requires { mag >= 0 }
+    ensures { result >= 0 }
+    = v
+
+end

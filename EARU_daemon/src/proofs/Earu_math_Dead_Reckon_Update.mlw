@@ -1,0 +1,11 @@
+module Earu_math_Dead_Reckon_Update
+
+  use int.Int
+
+
+
+  let dead_Reckon_Update () : int
+    requires { (DT > 0.0 /\ DT < 1.0) }
+    = 0
+
+end

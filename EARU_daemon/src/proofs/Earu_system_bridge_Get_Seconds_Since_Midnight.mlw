@@ -1,0 +1,12 @@
+module Earu_system_bridge_Get_Seconds_Since_Midnight
+
+  use int.Int
+
+
+
+  let get_Seconds_Since_Midnight () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

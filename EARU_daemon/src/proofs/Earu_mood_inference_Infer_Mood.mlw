@@ -1,0 +1,12 @@
+module Earu_mood_inference_Infer_Mood
+
+  use int.Int
+
+
+
+  let infer_Mood () : int
+    requires { BPM_Avg >= 0.0 /\ then RMS >= 0.0 }
+    ensures { Arousal in -1.0 .. 1.0 }
+    = 0
+
+end

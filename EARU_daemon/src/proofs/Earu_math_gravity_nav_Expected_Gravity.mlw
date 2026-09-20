@@ -1,0 +1,12 @@
+module Earu_math_gravity_nav_Expected_Gravity
+
+  use int.Int
+
+
+
+  let expected_Gravity () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Base + Bouguer_Grad * Thick
+
+end

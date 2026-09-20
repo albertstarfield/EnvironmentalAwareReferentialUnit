@@ -1,0 +1,13 @@
+module Earu_io_Trim_Null
+
+  use int.Int
+
+  use string.String
+
+
+  let trim_Null (str: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

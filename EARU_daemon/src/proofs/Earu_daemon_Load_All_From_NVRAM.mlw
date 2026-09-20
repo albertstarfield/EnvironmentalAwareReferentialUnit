@@ -1,0 +1,12 @@
+module Earu_daemon_Load_All_From_NVRAM
+
+  use int.Int
+
+
+
+  let load_All_From_NVRAM (state: int) : int
+    requires { true }
+    ensures { true  -- state is updated from NVRAM \/ left unchanged on error }
+    = state
+
+end

@@ -1,0 +1,12 @@
+module Test_bcg_detection_Test_BCG_Detection
+
+  use int.Int
+
+
+
+  let test_BCG_Detection () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

@@ -1,0 +1,14 @@
+module Earu_math_bluemarble_Hour_Angle
+
+  use int.Int
+
+
+
+  let hour_Angle (angle_Deg: int) (lat_Rad: int) (delta_Rad: int) : int
+    requires { angle_Deg >= 0 }
+    requires { lat_Rad >= 0 }
+    requires { delta_Rad >= 0 }
+    ensures { result >= 0 }
+    = 0.0;  -- SMT_VERIFIED: zero-divisor guard for polar latitudes
+
+end

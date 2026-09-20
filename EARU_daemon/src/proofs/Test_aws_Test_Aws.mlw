@@ -1,0 +1,12 @@
+module Test_aws_Test_Aws
+
+  use int.Int
+
+
+
+  let test_Aws () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

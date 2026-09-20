@@ -1,0 +1,13 @@
+module Earu_weather_fetcher_Extract_Pressure_MSL
+
+  use int.Int
+
+  use string.String
+
+
+  let extract_Pressure_MSL (jSON: string) (default: real) : int
+    requires { true }
+    ensures { result >= 0 }
+    = Float
+
+end

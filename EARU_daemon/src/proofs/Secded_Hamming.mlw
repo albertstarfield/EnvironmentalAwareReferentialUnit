@@ -1,0 +1,148 @@
+module Secded_Hamming
+
+  use int.Int
+  use int.EuclideanDivision
+
+  (* SECDED (8,4) Hamming Code Verification *)
+  (* Pure arithmetic implementation *)
+
+  axiom mod2_range: forall x: int. mod x 2 >= 0 /\ mod x 2 <= 1
+
+
+  let pow2 (i: int) : int
+    requires { i >= 0 }
+    requires { i <= 7 }
+    ensures { result > 0 }
+    ensures { result <= 128 }
+    = if i = 0 then 1
+      else if i = 1 then 2
+      else if i = 2 then 4
+      else if i = 3 then 8
+      else if i = 4 then 16
+      else if i = 5 then 32
+      else if i = 6 then 64
+      else 128
+
+  let parity_of (w: int) (mask: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    requires { mask >= 0 }
+    requires { mask < 256 }
+    ensures { 0 <= result <= 1 }
+    = let b0 = mod w 2 in
+      let b1 = mod (div w 2) 2 in
+      let b2 = mod (div w 4) 2 in
+      let b3 = mod (div w 8) 2 in
+      let b4 = mod (div w 16) 2 in
+      let b5 = mod (div w 32) 2 in
+      let b6 = mod (div w 64) 2 in
+      let b7 = mod (div w 128) 2 in
+      let m0 = mod mask 2 in
+      let m1 = mod (div mask 2) 2 in
+      let m2 = mod (div mask 4) 2 in
+      let m3 = mod (div mask 8) 2 in
+      let m4 = mod (div mask 16) 2 in
+      let m5 = mod (div mask 32) 2 in
+      let m6 = mod (div mask 64) 2 in
+      let m7 = mod (div mask 128) 2 in
+      let t = b0 * m0 + b1 * m1 + b2 * m2 + b3 * m3
+            + b4 * m4 + b5 * m5 + b6 * m6 + b7 * m7 in
+      mod t 2
+
+  let parity1 (w: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { 0 <= result <= 1 }
+    = parity_of w 85
+
+  let parity2 (w: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { 0 <= result <= 1 }
+    = parity_of w 102
+
+  let parity3 (w: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { 0 <= result <= 1 }
+    = parity_of w 120
+
+  let parity4 (w: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { 0 <= result <= 1 }
+    = parity_of w 255
+
+  let syndrome (w: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { result >= 0 }
+    ensures { result <= 7 }
+    = parity1 w + parity2 w * 2 + parity3 w * 4
+
+  let overall_parity (w: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { 0 <= result <= 1 }
+    = parity4 w
+
+  let get_bit (w: int) (i: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    requires { i >= 0 }
+    requires { i < 8 }
+    ensures { 0 <= result <= 1 }
+    = mod (div w (pow2 i)) 2
+
+  let set_bit (w: int) (i: int) (v: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    requires { i >= 0 }
+    requires { i < 8 }
+    requires { 0 <= v <= 1 }
+    ensures { result >= 0 }
+    ensures { result < 256 }
+    = if i = 0 then let b = mod w 2 in if v = b then w else if v = 1 then w + 1 - b else w - b
+      else if i = 1 then let b = mod (div w 2) 2 in if v = b then w else if v = 1 then w + 2 * (1 - b) else w - 2 * b
+      else if i = 2 then let b = mod (div w 4) 2 in if v = b then w else if v = 1 then w + 4 * (1 - b) else w - 4 * b
+      else if i = 3 then let b = mod (div w 8) 2 in if v = b then w else if v = 1 then w + 8 * (1 - b) else w - 8 * b
+      else if i = 4 then let b = mod (div w 16) 2 in if v = b then w else if v = 1 then w + 16 * (1 - b) else w - 16 * b
+      else if i = 5 then let b = mod (div w 32) 2 in if v = b then w else if v = 1 then w + 32 * (1 - b) else w - 32 * b
+      else if i = 6 then let b = mod (div w 64) 2 in if v = b then w else if v = 1 then w + 64 * (1 - b) else w - 64 * b
+      else let b = mod (div w 128) 2 in if v = b then w else if v = 1 then w + 128 * (1 - b) else w - 128 * b
+
+  let flip_bit (w: int) (i: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    requires { i >= 0 }
+    requires { i < 8 }
+    ensures { result >= 0 }
+    ensures { result < 256 }
+    = if i = 0 then let b = mod w 2 in if b = 0 then w + 1 else w - 1
+      else if i = 1 then let b = mod (div w 2) 2 in if b = 0 then w + 2 else w - 2
+      else if i = 2 then let b = mod (div w 4) 2 in if b = 0 then w + 4 else w - 4
+      else if i = 3 then let b = mod (div w 8) 2 in if b = 0 then w + 8 else w - 8
+      else if i = 4 then let b = mod (div w 16) 2 in if b = 0 then w + 16 else w - 16
+      else if i = 5 then let b = mod (div w 32) 2 in if b = 0 then w + 32 else w - 32
+      else if i = 6 then let b = mod (div w 64) 2 in if b = 0 then w + 64 else w - 64
+      else let b = mod (div w 128) 2 in if b = 0 then w + 128 else w - 128
+
+  let correct_error (w: int) : int
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { result >= 0 }
+    ensures { result < 256 }
+    = let s = syndrome w in
+      let p = overall_parity w in
+      if s <> 0 && p = 1 then
+        flip_bit w s
+      else
+        w
+
+  let verify_no_error (w: int) : bool
+    requires { w >= 0 }
+    requires { w < 256 }
+    ensures { result = true \/ result = false }
+    = syndrome w = 0 && overall_parity w = 0
+
+end

@@ -1,0 +1,12 @@
+module Earu_system_bridge_Pad4
+
+  use int.Int
+
+
+
+  let pad4 (v: int) : int
+    requires { v >= 0 }
+    ensures { result >= 0 }
+    = Character'Val (v / 1000 mod 10 + Character'Pos ('0'))
+
+end

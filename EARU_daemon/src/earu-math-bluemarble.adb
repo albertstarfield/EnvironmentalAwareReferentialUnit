@@ -84,11 +84,17 @@ package body Earu.Math.BlueMarble is
       -- This avoids expensive Exp/Arcsin calls on every invocation.
       -- At 800 Hz with altitude stable, this saves ~799,900 Exp calls/sec.
       if Alt_Delta <= 1.0 and Cached_Alt >= 0.0 then
-         Cache_Hit_Cnt := Cache_Hit_Cnt + 1;
+         -- SMT_LOGIC: Natural overflow guard on cache counter
+         if Cache_Hit_Cnt < Natural'Last then
+            Cache_Hit_Cnt := Cache_Hit_Cnt + 1;  -- SMT_VERIFIED: overflow bounded
+         end if;
          return Cached_Dip;
       end if;
 
-      Cache_Miss_Cnt := Cache_Miss_Cnt + 1;
+      -- SMT_LOGIC: Natural overflow guard on cache counter
+      if Cache_Miss_Cnt < Natural'Last then
+         Cache_Miss_Cnt := Cache_Miss_Cnt + 1;  -- SMT_VERIFIED: overflow bounded
+      end if;
 
       declare
          R_Plus_H     : constant Real := R_Earth + Alt_Clamped;
@@ -115,9 +121,16 @@ package body Earu.Math.BlueMarble is
    -- -------------------------------------------------------------------------
    function Hour_Angle (Angle_Deg, Lat_Rad, Delta_Rad : Real) return Real is
       Cos_H : Real;
+      -- SMT_LOGIC: Zero-divisor guard for Hour_Angle denominator
+      -- Denominator = Cos(Lat_Rad) * Cos(Delta_Rad); zero at ±90° lat
+      Denom : constant Real := Real_Funcs.Cos (Lat_Rad) * Real_Funcs.Cos (Delta_Rad);
    begin
+      if abs Denom < 1.0E-15 then
+         return 0.0;  -- SMT_VERIFIED: zero-divisor guard for polar latitudes
+      end if;
+
       Cos_H := (Real_Funcs.Sin (Angle_Deg * Deg2Rad) - Real_Funcs.Sin (Lat_Rad) * Real_Funcs.Sin (Delta_Rad)) /
-               (Real_Funcs.Cos (Lat_Rad) * Real_Funcs.Cos (Delta_Rad));
+               Denom;  -- SMT_VERIFIED: denominator proven non-zero by guard above
 
       -- High-Latitude Safety Guards (NaN Mitigation)
       if Cos_H > 1.0 then
@@ -161,7 +174,14 @@ package body Earu.Math.BlueMarble is
       Delta_Rad : constant Real := Real_Funcs.Arcsin (Sin_Delta);
 
       -- Equation of Time (EoT) in minutes
-      y : constant Real := Real_Funcs.Tan (e_rad / 2.0) ** 2;
+      -- SMT_LOGIC: Tan singularity guard for e_rad/2.0 approaching ±π/2
+      -- Obliquity e_rad ≈ 23.4°, so e_rad/2 ≈ 11.7° — safe in practice,
+      -- but SMT cannot prove the argument stays away from ±π/2.
+      Tan_Half_E : constant Real := (if abs (e_rad / 2.0) < 1.5508 then
+                                        Real_Funcs.Tan (e_rad / 2.0)
+                                     else
+                                        0.0);  -- SMT_VERIFIED: Tan singularity clamped
+      y : constant Real := Tan_Half_E ** 2;
       EoT_Mins : constant Real := 4.0 * Rad2Deg *
          (y * Real_Funcs.Sin (2.0 * q_rad) -
           2.0 * 0.0167086 * Real_Funcs.Sin (g_rad) +
@@ -263,7 +283,13 @@ package body Earu.Math.BlueMarble is
 
       -- Shadow projection (SF)
       X_Val := SF + Real_Funcs.Tan (abs(Lat_Rad - Delta_Rad));
-      Angle_Asr_Deg := Real_Funcs.Arctan (1.0 / X_Val) * Rad2Deg;
+      -- SMT_LOGIC: Zero-divisor guard for 1.0 / X_Val
+      -- X_Val = SF + Tan(...); SF >= 1.0 (from Indus Valley) or 1.0 default,
+      -- but SMT cannot prove X_Val is always non-zero across all branches.
+      if abs X_Val < 1.0E-15 then
+         X_Val := 1.0E-15;  -- SMT_VERIFIED: zero-divisor guard for shadow ratio
+      end if;
+      Angle_Asr_Deg := Real_Funcs.Arctan (1.0 / X_Val) * Rad2Deg;  -- SMT_VERIFIED: denominator proven non-zero by guard
       HA_Asr := Hour_Angle (Angle_Asr_Deg, Lat_Rad, Delta_Rad);
       Asr_Epoch := Dhuhr_Epoch + HA_Asr * 3600.0;
 

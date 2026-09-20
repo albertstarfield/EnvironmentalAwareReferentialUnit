@@ -1,0 +1,14 @@
+module Earu_io_ABool
+
+  use int.Int
+
+  use string.String
+  use bool.Bool
+
+
+  let aBool (key: string) (val: bool) (comma: bool) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

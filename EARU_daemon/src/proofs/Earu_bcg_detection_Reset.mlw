@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Reset
+
+  use int.Int
+
+
+
+  let reset (s: int) : int
+    requires { true }
+    ensures { Samples_Buffered (s) = 0 /\ then not  Ready (s) }
+    = s
+
+end

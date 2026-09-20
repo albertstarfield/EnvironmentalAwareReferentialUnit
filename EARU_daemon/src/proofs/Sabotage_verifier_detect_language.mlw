@@ -1,0 +1,13 @@
+module Sabotage_verifier_detect_language
+
+  use int.Int
+
+  use string.String
+
+
+  let detect_language (filepath: string) : string
+    requires { true }
+    ensures { result = "python" \/ result = "ada" \/ result = "c" }
+    = lang_map.get(ext, "python")
+
+end

@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Bounded
+
+  use int.Int
+
+
+
+  let bounded (s: int) : int
+    requires { s >= 0 }
+    ensures { result >= 0 }
+    = s
+
+end

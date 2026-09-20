@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Clamp
+
+  use int.Int
+
+
+
+  let clamp (v: real) (lo: real) (hi: real) : int
+    requires { lo <= hi }
+    ensures { Clamp'mem Result lo .. hi }
+    = 0
+
+end

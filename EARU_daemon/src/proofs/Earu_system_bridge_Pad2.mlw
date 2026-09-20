@@ -1,0 +1,12 @@
+module Earu_system_bridge_Pad2
+
+  use int.Int
+
+
+
+  let pad2 (v: int) : int
+    requires { v >= 0 }
+    ensures { result >= 0 }
+    = Character'Val (Hi + Character'Pos ('0'))
+
+end

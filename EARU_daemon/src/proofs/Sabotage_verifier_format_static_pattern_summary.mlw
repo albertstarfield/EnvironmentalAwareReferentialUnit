@@ -1,0 +1,13 @@
+module Sabotage_verifier_format_static_pattern_summary
+
+  use int.Int
+
+  use string.String
+
+
+  let format_static_pattern_summary (violations: any) (registry: any) : string
+    requires { true }
+    ensures { result = "" }
+    = ""
+
+end

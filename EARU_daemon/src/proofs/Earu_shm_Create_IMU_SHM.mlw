@@ -1,0 +1,13 @@
+module Earu_shm_Create_IMU_SHM
+
+  use int.Int
+
+  use string.String
+
+
+  let create_IMU_SHM (name: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = Result
+
+end

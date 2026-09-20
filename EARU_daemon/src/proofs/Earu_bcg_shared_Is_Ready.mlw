@@ -1,0 +1,12 @@
+module Earu_bcg_shared_Is_Ready
+
+  use int.Int
+
+
+
+  let is_Ready () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Earu.BCG_Detection.Ready (State);  -- SMT_VERIFIED
+
+end

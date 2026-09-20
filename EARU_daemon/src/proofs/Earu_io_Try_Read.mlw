@@ -1,0 +1,13 @@
+module Earu_io_Try_Read
+
+  use int.Int
+
+  use string.String
+
+
+  let try_Read (path: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = Val /= 0.0; -- Success if we got a non-zero value
+
+end

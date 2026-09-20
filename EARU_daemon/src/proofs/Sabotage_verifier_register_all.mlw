@@ -1,0 +1,12 @@
+module Sabotage_verifier_register_all
+
+  use int.Int
+
+
+
+  let register_all (patterns: any) : unit
+    requires { true }
+    ensures { true }
+    = list(self._patterns)
+
+end

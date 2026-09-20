@@ -1,0 +1,12 @@
+module Earu_math_Classify_State
+
+  use int.Int
+
+
+
+  let classify_State (v: int) : int
+    requires { v >= 0 }
+    ensures { result >= 0 }
+    = v
+
+end

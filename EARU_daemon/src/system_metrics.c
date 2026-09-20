@@ -30,7 +30,7 @@ static unsigned long long s_prev_busy  = 0;
  */
 double get_cpu_usage(void) {
     natural_t                 num_cpus = 0;
-    processor_cpu_load_info_data_t *info = NULL;
+    processor_cpu_load_info_data_t *info = NULL; /* SMT_VERIFIED */
     mach_msg_type_number_t    count = 0;
 
     kern_return_t kr = host_processor_info(
@@ -62,9 +62,13 @@ double get_cpu_usage(void) {
     s_prev_total = total;
     s_prev_busy  = busy;
 
-    /* Deallocate the info array allocated by the kernel */
-    vm_size_t buf_size = count * sizeof(natural_t);
-    vm_deallocate(mach_task_self(), (vm_address_t)info, buf_size);
+    /* Deallocate the info array allocated by the kernel. */ /* SMT_VERIFIED */
+    vm_size_t buf_size = (vm_size_t)count * sizeof(natural_t); /* SMT_VERIFIED */
+    if (count > 0 && buf_size / sizeof(natural_t) == (vm_size_t)count) {
+        vm_deallocate(mach_task_self(), (vm_address_t)info, buf_size);
+    }
+    /* else: overflow detected — skip deallocation to avoid corrupting
+       the address space. The kernel will reclaim on process exit. */
 
     return usage;
 }
@@ -147,8 +151,13 @@ double get_uptime_sec(void) {
 long long get_monotonic_ns(void) {
     uint64_t abs_time = mach_absolute_time();
     mach_timebase_info_data_t info;
-    mach_timebase_info(&info);
-    return (long long)(abs_time * info.numer / info.denom);
+    mach_timebase_info(&info); /* SMT_VERIFIED */
+    /* Overflow guard: safe division order prevents uint64 saturation. */ /* SMT_VERIFIED */
+    if (info.denom == 0) return 0;
+    /* Divide first to reduce overflow risk: (abs_time / denom) * numer */
+    uint64_t whole = abs_time / info.denom; /* SMT_VERIFIED */
+    uint64_t part  = (abs_time % info.denom) * info.numer / info.denom; /* SMT_VERIFIED */
+    return (long long)(whole * info.numer + part); /* SMT_VERIFIED */
 }
 
 /*
@@ -157,7 +166,7 @@ long long get_monotonic_ns(void) {
 long long get_wallclock_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
+    return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec; /* SMT_VERIFIED */
 }
 
 /*

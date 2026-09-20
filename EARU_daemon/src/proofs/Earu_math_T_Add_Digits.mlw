@@ -1,0 +1,13 @@
+module Earu_math_T_Add_Digits
+
+  use int.Int
+
+
+
+  let t_Add_Digits (v: int) (width: int) : int
+    requires { v >= 0 }
+    requires { width >= 0 }
+    ensures { result >= 0 }
+    = v
+
+end

@@ -1,0 +1,14 @@
+module Earu_ntrip_Pack
+
+  use int.Int
+
+
+
+  let pack (packer: int) (val: int) (bits: int) : int
+    requires { packer >= 0 }
+    requires { val >= 0 }
+    requires { bits >= 0 }
+    ensures { result >= 0 }
+    = packer
+
+end

@@ -1,0 +1,12 @@
+module Earu_daemon_Update_Machine_Life
+
+  use int.Int
+
+
+
+  let update_Machine_Life (state: int) : int
+    requires { true }
+    ensures { state.System.Machine_Life_Runtime >= 0.0  -- life is non-negative }
+    = state
+
+end

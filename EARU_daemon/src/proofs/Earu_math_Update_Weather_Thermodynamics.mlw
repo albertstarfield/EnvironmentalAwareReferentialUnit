@@ -1,0 +1,12 @@
+module Earu_math_Update_Weather_Thermodynamics
+
+  use int.Int
+
+
+
+  let update_Weather_Thermodynamics () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

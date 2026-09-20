@@ -1,0 +1,13 @@
+module Earu_math_T_Add
+
+  use int.Int
+
+  use string.String
+
+
+  let t_Add (s: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

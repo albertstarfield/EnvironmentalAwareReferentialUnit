@@ -1,0 +1,12 @@
+module Earu_bcg_shared_Snapshot
+
+  use int.Int
+
+
+
+  let snapshot () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

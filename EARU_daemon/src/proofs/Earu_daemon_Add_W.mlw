@@ -1,0 +1,13 @@
+module Earu_daemon_Add_W
+
+  use int.Int
+
+  use string.String
+
+
+  let add_W (msg: string) : int
+    requires { msg'Length > 0 /\ then msg'Length <= 255 }
+    ensures { true  -- buffer append always completes }
+    = 0
+
+end

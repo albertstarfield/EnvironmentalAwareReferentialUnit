@@ -1,0 +1,13 @@
+module Earu_io_B
+
+  use int.Int
+
+  use bool.Bool
+
+
+  let b (val: bool) : int
+    requires { true }
+    ensures { result >= 0 }
+    = (if val then "true" else "false")
+
+end

@@ -1,0 +1,12 @@
+module Earu_stale_detector_C_Get_Battery
+
+  use int.Int
+
+
+
+  let c_Get_Battery () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

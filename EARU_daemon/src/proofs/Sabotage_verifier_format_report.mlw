@@ -1,0 +1,13 @@
+module Sabotage_verifier_format_report
+
+  use int.Int
+
+  use string.String
+
+
+  let format_report (violations: any) (target: any) : string
+    requires { true }
+    ensures { result = "" }
+    = ""
+
+end

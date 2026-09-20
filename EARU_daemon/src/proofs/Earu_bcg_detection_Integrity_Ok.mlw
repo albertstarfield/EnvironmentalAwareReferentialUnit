@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Integrity_Ok
+
+  use int.Int
+
+
+
+  let integrity_Ok (s: int) : int
+    requires { s >= 0 }
+    ensures { result >= 0 }
+    = s
+
+end

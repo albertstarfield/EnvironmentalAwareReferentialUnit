@@ -1,0 +1,13 @@
+module Earu_system_bridge_Read_Ioreg_Real
+
+  use int.Int
+
+  use string.String
+
+
+  let read_Ioreg_Real (command: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = Earu.IO.Execute_And_Read_Real (command, 0.0)
+
+end

@@ -1,0 +1,12 @@
+module Earu_corewlan_CoreWLAN_Get_Scan_Count
+
+  use int.Int
+
+
+
+  let coreWLAN_Get_Scan_Count () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

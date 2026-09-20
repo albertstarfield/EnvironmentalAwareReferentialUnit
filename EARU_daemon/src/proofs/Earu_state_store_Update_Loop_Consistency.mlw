@@ -1,0 +1,12 @@
+module Earu_state_store_Update_Loop_Consistency
+
+  use int.Int
+
+
+
+  let update_Loop_Consistency (duration_Ms: int) : int
+    requires { duration_Ms >= 0 }
+    ensures { result >= 0 }
+    = duration_Ms
+
+end

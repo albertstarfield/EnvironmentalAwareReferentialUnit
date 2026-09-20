@@ -1,0 +1,12 @@
+module Earu_system_bridge_Get_HID_Idle_Time_NS
+
+  use int.Int
+
+
+
+  let get_HID_Idle_Time_NS () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

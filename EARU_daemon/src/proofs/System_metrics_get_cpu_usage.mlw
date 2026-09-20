@@ -1,0 +1,12 @@
+module System_metrics_get_cpu_usage
+
+  use int.Int
+
+
+
+  let get_cpu_usage () : real
+    requires { true }
+    ensures { result >= 0.0 }
+    = 0.0
+
+end

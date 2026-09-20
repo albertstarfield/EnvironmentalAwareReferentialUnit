@@ -1,7 +1,10 @@
+pragma SPARK_Mode (On);
+-- File-top pragma overrides config/earu_spark.adc default (SPARK_Mode Off).
+-- All types in this package are SPARK-compatible numeric/record types.
+
 with Interfaces;
 
 package Earu.Types is
-   --  pragma SPARK_Mode (On); -- Temporarily off for String/Array flexibility in events if needed, but I'll try to keep it on.
 
    type Real is new Long_Float;  -- static: derived numeric type, no allocation
 
@@ -190,8 +193,8 @@ package Earu.Types is
       --  from the same sensor data used for Category/Condition_Icon.
       --  Axiom: [ICAO Doc 8585] METAR format:  Station ddHHMMZ wind vis clouds temp/dp altim.
       --  Axiom: [WMO-No. 49 Vol I] TAF format: Station ddHH/ddHH wind vis clouds.
-      Metar_Report          : aliased String (1 .. 80) := (others => ' ');
-      Taf_Report            : aliased String (1 .. 80) := (others => ' ');
+       Metar_Report          : aliased String (1 .. 120) := (others => ' ');
+       Taf_Report            : aliased String (1 .. 120) := (others => ' ');
       Wind_Speed_Kts        : aliased Real := 0.0;
       Wind_Dir_Deg          : aliased Real := 0.0;
       Wind_Map              : aliased Wind_Grid := (others => (others => (0.0, (0.0, 0.0, 0.0), 1013.25, 293.15, 0.0, 0.0)));

@@ -1,0 +1,12 @@
+module Earu_math_bluemarble_Calculate_Time_Anchors
+
+  use int.Int
+
+
+
+  let calculate_Time_Anchors () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

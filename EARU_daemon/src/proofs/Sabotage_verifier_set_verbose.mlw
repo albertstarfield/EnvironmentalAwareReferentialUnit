@@ -1,0 +1,13 @@
+module Sabotage_verifier_set_verbose
+
+  use int.Int
+
+  use bool.Bool
+
+
+  let set_verbose (enabled: bool) : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

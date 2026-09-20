@@ -1,0 +1,12 @@
+module Earu_stale_detector_C_System
+
+  use int.Int
+
+
+
+  let c_System (cmd: int) : int
+    requires { cmd >= 0 }
+    ensures { result >= 0 }
+    = cmd
+
+end

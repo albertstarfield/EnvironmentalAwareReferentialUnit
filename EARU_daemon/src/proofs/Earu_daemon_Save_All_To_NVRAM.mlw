@@ -1,0 +1,12 @@
+module Earu_daemon_Save_All_To_NVRAM
+
+  use int.Int
+
+
+
+  let save_All_To_NVRAM (state: int) : int
+    requires { true }
+    ensures { state.System.NVRAM_Write_Cycles = }
+    = state
+
+end

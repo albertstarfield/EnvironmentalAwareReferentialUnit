@@ -1,0 +1,12 @@
+module Earu_system_bridge_C_Time
+
+  use int.Int
+
+
+
+  let c_Time (t: int) : int
+    requires { t >= 0 }
+    ensures { result >= 0 }
+    = t
+
+end

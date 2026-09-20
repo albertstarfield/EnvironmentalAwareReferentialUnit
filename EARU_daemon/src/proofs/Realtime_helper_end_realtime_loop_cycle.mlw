@@ -1,0 +1,12 @@
+module Realtime_helper_end_realtime_loop_cycle
+
+  use int.Int
+
+
+
+  let end_realtime_loop_cycle () : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

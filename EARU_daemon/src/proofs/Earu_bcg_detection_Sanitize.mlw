@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Sanitize
+
+  use int.Int
+
+
+
+  let sanitize (v: real) (lo: real) (hi: real) : int
+    requires { lo <= hi }
+    ensures { result = result }
+    = 0
+
+end

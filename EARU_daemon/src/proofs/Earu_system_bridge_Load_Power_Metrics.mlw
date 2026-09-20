@@ -1,0 +1,12 @@
+module Earu_system_bridge_Load_Power_Metrics
+
+  use int.Int
+
+
+
+  let load_Power_Metrics () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

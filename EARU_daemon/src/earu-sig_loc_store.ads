@@ -1,34 +1,38 @@
---  Significant Location persistence for the EARU daemon.
+-- Purpose: Significant Location persistence for the EARU daemon.
+--          Owns the JSON file at BASE_PATH/save_state/significant_locations.json.
+--          This replaces the Python sidecar's file I/O: detection happens in Python
+--          (in-memory cache), packing into shared memory happens in Python, but
+--          durable read/write of the JSON file is done here in Ada for:
+--            1. Atomic writes (no partial JSON on crash)
+--            2. Single owner (no race between Python write and Ada read)
+--            3. Startup recovery (load cached locations from last session)
 --
---  Owns the JSON file at BASE_PATH/save_state/significant_locations.json.
---  This replaces the Python sidecar's file I/O: detection happens in Python
---  (in-memory cache), packing into shared memory happens in Python, but
---  durable read/write of the JSON file is done here in Ada for:
---    1. Atomic writes (no partial JSON on crash)
---    2. Single owner (no race between Python write and Ada read)
---    3. Startup recovery (load cached locations from last session)
---
---  JSON format (array of objects):
---  [
---    {
---      "timestamp": "2026-05-15T10:30:00Z",
---      "lat": 12.3456,
---      "lon": 78.9012,
---      "alt": 100.0
---    }
---  ]
+-- JSON format (array of objects):
+-- [
+--   {
+--     "timestamp": "2026-05-15T10:30:00Z",
+--     "lat": 12.3456,
+--     "lon": 78.9012,
+--     "alt": 100.0
+--   }
+-- ]
 
+with Earu.IO;
 package Earu.Sig_Loc_Store is
 
-   SIG_LOC_JSON_PATH : constant String :=
-     "/usr/local/EnvironmentalAwareReferentialUnit/save_state/significant_locations.json";
+   -- Purpose: Return the filesystem path to the significant_locations JSON file.
+   -- Returns: String containing the full path to the JSON persistence file.
+   function Sig_Loc_Json_Path return String;
 
-   --  Load significant locations from JSON file into State.
-   --  Called once on daemon startup.
+   -- Purpose: Load significant locations from the JSON file into the
+   --          daemon's in-memory state buffer. Called once on daemon startup.
+   -- Returns: None (procedure, populates State_Buffer via Load_Sig_Loc).
    procedure Load_Sig_Locs;
 
-   --  Save current significant locations from State to JSON file.
-   --  Called after each ML cycle when Sig_Loc_Count > 0.
+   -- Purpose: Save the current significant locations from the daemon's
+   --          in-memory state buffer to the JSON file. Called after each ML
+   --          cycle when Sig_Loc_Count > 0.
+   -- Returns: None (procedure, writes to disk atomically).
    procedure Save_Sig_Locs;
 
 end Earu.Sig_Loc_Store;

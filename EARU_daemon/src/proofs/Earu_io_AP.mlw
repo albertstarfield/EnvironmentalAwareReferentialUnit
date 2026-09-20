@@ -1,0 +1,14 @@
+module Earu_io_AP
+
+  use int.Int
+
+  use string.String
+  use bool.Bool
+
+
+  let aP (key: string) (val: string) (comma: bool) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

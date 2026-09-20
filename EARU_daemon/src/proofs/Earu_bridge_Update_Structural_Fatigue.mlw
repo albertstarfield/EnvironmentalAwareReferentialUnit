@@ -1,0 +1,12 @@
+module Earu_bridge_Update_Structural_Fatigue
+
+  use int.Int
+
+
+
+  let update_Structural_Fatigue (state: int) : int
+    requires { state >= 0 }
+    ensures { result >= 0 }
+    = state
+
+end

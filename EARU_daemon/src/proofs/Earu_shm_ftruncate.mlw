@@ -1,0 +1,13 @@
+module Earu_shm_ftruncate
+
+  use int.Int
+
+
+
+  let ftruncate (fd: int) (length: int) : int
+    requires { fd >= 0 }
+    requires { length >= 0 }
+    ensures { result >= 0 }
+    = System.Null_Address
+
+end

@@ -1,0 +1,12 @@
+module Bridge_mock_earu_fatigue_update_csharp
+
+  use int.Int
+
+
+
+  let earu_fatigue_update_csharp (cumulative_damage: int) (aggregated_risk: int) (peak_g: real) : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

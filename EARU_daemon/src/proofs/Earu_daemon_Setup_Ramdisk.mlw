@@ -1,0 +1,12 @@
+module Earu_daemon_Setup_Ramdisk
+
+  use int.Int
+
+
+
+  let setup_Ramdisk () : int
+    requires { true }
+    ensures { true  -- always completes; errors are logged, not  raised }
+    = 0
+
+end

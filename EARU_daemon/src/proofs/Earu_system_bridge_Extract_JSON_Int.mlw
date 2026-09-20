@@ -1,0 +1,12 @@
+module Earu_system_bridge_Extract_JSON_Int
+
+  use int.Int
+
+
+
+  let extract_JSON_Int () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Integer
+
+end

@@ -1,0 +1,12 @@
+module Earu_math_gravity_nav_Gravity_Anomaly
+
+  use int.Int
+
+
+
+  let gravity_Anomaly (loc: int) : int
+    requires { loc >= 0 }
+    ensures { result >= 0 }
+    = 0.0;  -- safe default until calibrated
+
+end

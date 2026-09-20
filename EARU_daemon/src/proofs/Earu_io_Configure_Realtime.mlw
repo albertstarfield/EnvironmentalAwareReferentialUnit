@@ -1,0 +1,14 @@
+module Earu_io_Configure_Realtime
+
+  use int.Int
+
+
+
+  let configure_Realtime (period_Ms: int) (computation_Ms: int) (constraint_Ms: int) : int
+    requires { period_Ms >= 0 }
+    requires { computation_Ms >= 0 }
+    requires { constraint_Ms >= 0 }
+    ensures { result >= 0 }
+    = period_Ms
+
+end

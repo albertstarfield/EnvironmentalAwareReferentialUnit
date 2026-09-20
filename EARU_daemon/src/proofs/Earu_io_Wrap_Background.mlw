@@ -1,0 +1,13 @@
+module Earu_io_Wrap_Background
+
+  use int.Int
+
+  use string.String
+
+
+  let wrap_Background (command: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = To_String (Result)
+
+end

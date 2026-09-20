@@ -1,0 +1,13 @@
+module Earu_io_Lookup_Cache
+
+  use int.Int
+
+  use string.String
+
+
+  let lookup_Cache (name: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

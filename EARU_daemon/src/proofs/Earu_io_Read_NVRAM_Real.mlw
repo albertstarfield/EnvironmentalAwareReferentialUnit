@@ -1,0 +1,13 @@
+module Earu_io_Read_NVRAM_Real
+
+  use int.Int
+
+  use string.String
+
+
+  let read_NVRAM_Real (name: string) (default: int) : int
+    requires { default >= 0 }
+    ensures { result >= 0 }
+    = Real'Value (To_String (Line))
+
+end

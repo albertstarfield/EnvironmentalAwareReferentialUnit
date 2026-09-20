@@ -1,0 +1,12 @@
+module Earu_system_bridge_Compute_Battery_Survival
+
+  use int.Int
+
+
+
+  let compute_Battery_Survival () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

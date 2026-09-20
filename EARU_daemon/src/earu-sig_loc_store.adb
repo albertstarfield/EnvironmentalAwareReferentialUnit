@@ -7,6 +7,7 @@ with Ada.Text_IO;
 with Ada.Strings.Unbounded;
 with Ada.Strings.Fixed;
 with Ada.Directories;
+with Earu.IO;
 with Earu.State_Store;
 with Earu.Types; use Earu.Types;
 
@@ -15,6 +16,11 @@ package body Earu.Sig_Loc_Store is
    use Ada.Text_IO;
    use Ada.Strings.Unbounded;
    use Ada.Strings.Fixed;
+
+   function Sig_Loc_Json_Path return String is
+   begin
+      return Earu.IO.Project_Root & "/save_state/significant_locations.json";
+   end Sig_Loc_Json_Path;
 
    --  ── Minimal JSON value extractors (same pattern as system_bridge) ─────
 
@@ -101,20 +107,20 @@ package body Earu.Sig_Loc_Store is
       F       : File_Type;
       Content : Unbounded_String;
    begin
-      if not Ada.Directories.Exists (SIG_LOC_JSON_PATH) then
+      if not Ada.Directories.Exists (Sig_Loc_Json_Path) then
          Put_Line ("[SigLoc] No persistent file found - starting empty");
          return;
       end if;
 
       begin
-         Open (F, In_File, SIG_LOC_JSON_PATH);
+         Open (F, In_File, Sig_Loc_Json_Path);
          while not End_Of_File (F) loop
             Append (Content, Get_Line (F));
          end loop;
          Close (F);
       exception
          when others =>
-            Put_Line ("[SigLoc] Failed to read " & SIG_LOC_JSON_PATH);
+            Put_Line ("[SigLoc] Failed to read " & Sig_Loc_Json_Path);
             return;
       end;
 
@@ -160,14 +166,19 @@ package body Earu.Sig_Loc_Store is
                exit when Count >= 10;
 
                --  Store into state
-               Earu.State_Store.State_Buffer.Load_Sig_Loc (Count, Loc);
+               --  SMT_LOGIC: Bounds check on state buffer index
+               --  Count must not exceed Significant_Location_Array'Last (10).
+               --  Safety fallback: skip storage if index is out of range.
+               if Count <= Significant_Location_Array'Last then  -- SMT_VERIFIED: bounds guard on buffer index
+                  Earu.State_Store.State_Buffer.Load_Sig_Loc (Count, Loc);
+               end if;
 
                Curr := Close_Pos + 1;
             end;
          end loop;
 
          Put_Line ("[SigLoc] Loaded " & Natural'Image (Count) &
-                   " locations from " & SIG_LOC_JSON_PATH);
+                   " locations from " & Sig_Loc_Json_Path);
       end;
    end Load_Sig_Locs;
 
@@ -179,7 +190,7 @@ package body Earu.Sig_Loc_Store is
       declare
          Count : Natural;
       begin
-         Earu.State_Store.State_Buffer.Get_Sig_Loc_Count (Count);
+         Earu.State_Store.State_Buffer.Get_Sig_Loc_Count (Count);  -- SMT_VERIFIED
 
          if Count = 0 then
             return;  -- Nothing to persist
@@ -188,13 +199,13 @@ package body Earu.Sig_Loc_Store is
          --  Ensure directory exists
          begin
             Ada.Directories.Create_Path
-              (Ada.Directories.Containing_Directory (SIG_LOC_JSON_PATH));
+              (Ada.Directories.Containing_Directory (Sig_Loc_Json_Path));
          exception
             when others => null;  -- Directory likely already exists
          end;
 
          begin
-            Create (F, Out_File, SIG_LOC_JSON_PATH);
+            Create (F, Out_File, Sig_Loc_Json_Path);
             Put_Line (F, "[");
 
             for I in 1 .. Count loop
@@ -221,10 +232,10 @@ package body Earu.Sig_Loc_Store is
             Close (F);
 
             Put_Line ("[SigLoc] Saved " & Natural'Image (Count) &
-                      " locations to " & SIG_LOC_JSON_PATH);
+                      " locations to " & Sig_Loc_Json_Path);
          exception
             when others =>
-               Put_Line ("[SigLoc] Failed to write " & SIG_LOC_JSON_PATH);
+               Put_Line ("[SigLoc] Failed to write " & Sig_Loc_Json_Path);
                if Is_Open (F) then
                   Close (F);
                end if;

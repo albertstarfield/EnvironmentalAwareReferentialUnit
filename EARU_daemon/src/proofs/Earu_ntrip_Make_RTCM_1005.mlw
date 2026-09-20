@@ -1,0 +1,14 @@
+module Earu_ntrip_Make_RTCM_1005
+
+  use int.Int
+
+
+
+  let make_RTCM_1005 (lat: int) (lon: int) (alt: int) : int
+    requires { lat >= 0 }
+    requires { lon >= 0 }
+    requires { alt >= 0 }
+    ensures { result >= 0 }
+    = lat
+
+end

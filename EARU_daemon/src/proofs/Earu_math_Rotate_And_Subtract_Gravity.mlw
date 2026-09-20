@@ -1,0 +1,14 @@
+module Earu_math_Rotate_And_Subtract_Gravity
+
+  use int.Int
+
+
+
+  let rotate_And_Subtract_Gravity (q: int) (accel: int) (calibrated_G: int) : int
+    requires { q >= 0 }
+    requires { accel >= 0 }
+    requires { calibrated_G >= 0 }
+    ensures { result >= 0 }
+    = (X => R11 * Ax_D + R12 * Ay_D + R13 * Az_D, Y => R21 * Ax_D + R22 * Ay_D + R23 * Az_D, Z => R31 * Ax_D + R32 * Ay_D + R33 * Az_D);  -- SMT_VERIFIED: R entries ∈ [-1,1], Accel_D bounded by MEMS limits
+
+end

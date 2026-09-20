@@ -1,0 +1,13 @@
+module Earu_io_rename
+
+  use int.Int
+
+
+
+  let rename (old_path: int) (new_path: int) : int
+    requires { old_path >= 0 }
+    requires { new_path >= 0 }
+    ensures { result >= 0 }
+    = old_path
+
+end

@@ -1,0 +1,12 @@
+module Earu_daemon_Ensure_Sidecars_Running
+
+  use int.Int
+
+
+
+  let ensure_Sidecars_Running () : int
+    requires { true }
+    ensures { true }
+    = 0
+
+end

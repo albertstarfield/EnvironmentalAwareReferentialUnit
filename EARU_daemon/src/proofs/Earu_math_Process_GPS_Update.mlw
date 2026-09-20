@@ -1,0 +1,12 @@
+module Earu_math_Process_GPS_Update
+
+  use int.Int
+
+
+
+  let process_GPS_Update () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

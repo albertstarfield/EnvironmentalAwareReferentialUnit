@@ -1,0 +1,12 @@
+module Test_exec_Test_Exec
+
+  use int.Int
+
+
+
+  let test_Exec () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

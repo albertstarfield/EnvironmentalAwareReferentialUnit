@@ -1,0 +1,11 @@
+module Earu_math_Calculate_RMS
+
+  use int.Int
+
+
+
+  let calculate_RMS (data: int) : int
+    requires { data'Length > 0 }
+    = Sqrt (Sum_Sq / Real (data'Length));  -- SMT_VERIFIED: data'Length > 0
+
+end

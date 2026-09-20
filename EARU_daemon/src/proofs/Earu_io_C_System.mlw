@@ -1,0 +1,12 @@
+module Earu_io_C_System
+
+  use int.Int
+
+
+
+  let c_System (command: int) : int
+    requires { command >= 0 }
+    ensures { result >= 0 }
+    = To_String (Result)
+
+end

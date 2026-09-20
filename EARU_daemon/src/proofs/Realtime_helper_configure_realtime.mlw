@@ -1,0 +1,12 @@
+module Realtime_helper_configure_realtime
+
+  use int.Int
+
+
+
+  let configure_realtime (period_ms: int) (computation_ms: int) (constraint_ms: int) : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

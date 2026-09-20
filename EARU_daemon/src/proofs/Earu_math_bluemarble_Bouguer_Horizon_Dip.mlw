@@ -1,0 +1,12 @@
+module Earu_math_bluemarble_Bouguer_Horizon_Dip
+
+  use int.Int
+
+
+
+  let bouguer_Horizon_Dip (alt_Meters: int) : int
+    requires { alt_Meters >= 0 }
+    ensures { result >= 0 }
+    = Cached_Dip
+
+end

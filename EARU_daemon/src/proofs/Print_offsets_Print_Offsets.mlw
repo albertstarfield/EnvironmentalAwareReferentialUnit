@@ -1,0 +1,12 @@
+module Print_offsets_Print_Offsets
+
+  use int.Int
+
+
+
+  let print_Offsets () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

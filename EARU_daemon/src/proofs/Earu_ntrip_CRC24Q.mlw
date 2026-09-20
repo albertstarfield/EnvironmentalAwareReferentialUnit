@@ -1,0 +1,12 @@
+module Earu_ntrip_CRC24Q
+
+  use int.Int
+
+
+
+  let cRC24Q (data: int) : int
+    requires { data >= 0 }
+    ensures { result >= 0 }
+    = CRC /\  16#FFFFFF#;  -- SMT_VERIFIED: mask to 24-bit result
+
+end

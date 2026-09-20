@@ -1,0 +1,12 @@
+module Earu_system_bridge_Extract_JSON_Float
+
+  use int.Int
+
+
+
+  let extract_JSON_Float () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Real
+
+end

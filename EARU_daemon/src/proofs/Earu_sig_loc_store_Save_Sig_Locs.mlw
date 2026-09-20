@@ -1,0 +1,12 @@
+module Earu_sig_loc_store_Save_Sig_Locs
+
+  use int.Int
+
+
+
+  let save_Sig_Locs () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

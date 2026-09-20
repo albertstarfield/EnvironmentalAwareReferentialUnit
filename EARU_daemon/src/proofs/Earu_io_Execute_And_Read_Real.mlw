@@ -1,0 +1,13 @@
+module Earu_io_Execute_And_Read_Real
+
+  use int.Int
+
+  use string.String
+
+
+  let execute_And_Read_Real (command: string) (default: int) : int
+    requires { default >= 0 }
+    ensures { result >= 0 }
+    = default
+
+end

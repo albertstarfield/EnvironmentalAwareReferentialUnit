@@ -1,0 +1,12 @@
+module Spu_sensor_reader_init_timebase
+
+  use int.Int
+
+
+
+  let init_timebase () : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

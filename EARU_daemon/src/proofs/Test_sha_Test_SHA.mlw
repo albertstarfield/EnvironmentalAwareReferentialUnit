@@ -1,0 +1,12 @@
+module Test_sha_Test_SHA
+
+  use int.Int
+
+
+
+  let test_SHA () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

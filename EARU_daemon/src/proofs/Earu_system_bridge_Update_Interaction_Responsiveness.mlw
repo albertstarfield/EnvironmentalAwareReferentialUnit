@@ -1,0 +1,12 @@
+module Earu_system_bridge_Update_Interaction_Responsiveness
+
+  use int.Int
+
+
+
+  let update_Interaction_Responsiveness () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

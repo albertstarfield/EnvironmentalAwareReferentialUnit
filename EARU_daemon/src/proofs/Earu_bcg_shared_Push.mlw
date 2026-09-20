@@ -1,0 +1,12 @@
+module Earu_bcg_shared_Push
+
+  use int.Int
+
+
+
+  let push (ax: real) (ay: real) (az: real) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

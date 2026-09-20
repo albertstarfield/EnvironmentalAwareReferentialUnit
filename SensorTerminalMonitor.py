@@ -1635,9 +1635,34 @@ class PrimaryFlightDisplay:
                     lines = f.readlines()
                 if lines:
                     return lines
-            except (OSError, PermissionError, ValueError):
-                pass
+            except UnicodeDecodeError as e:
+                # [Citation: Python 3.12 unicodeHowto - https://docs.python.org/3/howto/unicode.html]
+                # VERBOSE: Non-UTF-8 byte detected in data file (daemon writes raw bytes via Ada Stream_IO)
+                print(f"[{datetime.datetime.now()}] ████████ UNICODE DECODE ERROR (attempt {attempt+1}/3) ████████")
+                print(f"  File: {self.data_path}")
+                print(f"  Error: {e}")
+                print("  Cause: Daemon wrote non-UTF-8 byte(s) (likely degree symbol 0xEA in METAR string)")
+                print(f"  Position: byte {e.start} to {e.end}")
+                print(f"  Context: ...{e.object[max(0,e.start-20):e.end+20]}...")
+                print(f"  Raw bytes around error: {' '.join(f'{b:02x}' for b in e.object[max(0,e.start-10):e.end+10])}")
+                print("  Fix: Add encoding='latin-1' or errors='replace' to open(), or fix daemon METAR output")
+                print("  Retrying with latin-1 fallback...")
+                try:
+                    # Fallback: Try reading with latin-1 which accepts all byte values 0-255
+                    # [Citation: Python codecs - https://docs.python.org/3/library/codecs.html#text-encodings]
+                    with open(self.data_path, 'r', encoding='latin-1') as f:
+                        lines = f.readlines()
+                    if lines:
+                        print(f"  ✓ latin-1 fallback succeeded on attempt {attempt+1}")
+                        return lines
+                except Exception as fallback_e:
+                    print(f"  ✗ latin-1 fallback also failed: {fallback_e}")
+            except (OSError, PermissionError) as e:
+                print(f"[{datetime.datetime.now()}] FILE READ ERROR (attempt {attempt+1}/3): {type(e).__name__}: {e}")
+            except ValueError as e:
+                print(f"[{datetime.datetime.now()}] VALUE ERROR (attempt {attempt+1}/3): {e}")
             time.sleep(0.05)
+        print(f"[{datetime.datetime.now()}] ✗ GAVE UP reading {self.data_path} after 3 attempts")
         return None
 
     def update_data(self) -> None:
@@ -1679,9 +1704,28 @@ class PrimaryFlightDisplay:
 
                 if data is None:
                     if primary_error:
-                        print(f"[{datetime.datetime.now()}] DATA ERROR: Failed to parse primary JSON from {self.data_path}")
-                        print(f"  Error: {primary_error}")
-                        print(f"  Line: {lines[0].strip()[:200]}...") # Truncate for log safety
+                        print(f"[{datetime.datetime.now()}] ████████ JSON PARSE FAILURE ████████")
+                        print(f"  File: {self.data_path}")
+                        print(f"  Error type: {type(primary_error).__name__}: {primary_error}")
+                        raw_line = lines[0].strip()
+                        print(f"  Line length: {len(raw_line)} chars")
+                        if hasattr(primary_error, 'colno') and hasattr(primary_error, 'lineno'):
+                            print(f"  Position: line {primary_error.lineno}, col {primary_error.colno}")
+                            # Show context around the error
+                            start = max(0, primary_error.colno - 30)
+                            end = min(len(raw_line), primary_error.colno + 30)
+                            print(f"  Context: ...{raw_line[start:end]}...")
+                        print(f"  First 200 chars: {raw_line[:200]}...")
+                        print(f"  Last 200 chars: ...{raw_line[-200:]}")
+                        # Check for common issues
+                        if 'UnicodeDecodeError' in str(type(primary_error)):
+                            print("  DIAGNOSIS: Non-UTF-8 byte in file — daemon writes raw bytes via Ada Stream_IO")
+                        elif 'Unterminated string' in str(primary_error):
+                            print("  DIAGNOSIS: Truncated JSON — daemon may be mid-write (race condition)")
+                        elif 'Expecting value' in str(primary_error):
+                            print("  DIAGNOSIS: Empty or malformed JSON — file may be empty or corrupted")
+                    else:
+                        print(f"[{datetime.datetime.now()}] DATA ERROR: No data and no parse error reported")
                     return
 
                 def clean_none(val):
@@ -4475,12 +4519,17 @@ class PrimaryFlightDisplay:
         cond_icon = str(weather.get('condition_icon', '')).strip() or 'SHINY'
 
         # Background color mapping (visual only — logic lives in earu-math.adb)
+        # [Citation: WMO CIMO Guide Ch.9 — visibility thresholds for color coding]
         if cond_icon == "SNOWING":
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
         elif cond_icon == "RAINING":
             self.canvas.create_rectangle(0, 0, w, h, fill="#0a1a2a", outline="")
+        elif cond_icon == "DRIZZLE":
+            self.canvas.create_rectangle(0, 0, w, h, fill="#0a2a2a", outline="")
         elif cond_icon == "FOGGY":
             self.canvas.create_rectangle(0, 0, w, h, fill="#2c2c2c", outline="")
+        elif cond_icon == "HAZY":
+            self.canvas.create_rectangle(0, 0, w, h, fill="#2c2a1a", outline="")
         elif cond_icon == "CLOUDY":
             self.canvas.create_rectangle(0, 0, w, h, fill="#1a3a5a", outline="")
         else:
@@ -4497,19 +4546,59 @@ class PrimaryFlightDisplay:
             # Fallback local calculation
             now = datetime.datetime.now(datetime.timezone.utc); time_str = now.strftime("%d%H%MZ")
             vis_val = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
+            # [ICAO Doc 8585 §4.3] Cloud classification from dew-point spread
+            # LCL height ≈ spread × 4.1 hundreds of feet AGL [Bolton 1980]
+            cl_h = max(5, min(99, int(spread * 4.1)))
             clouds = "CLR"
-            if spread < 2: clouds = "VV001"
-            elif spread < 5: clouds = "BKN015"
-            elif spread < 10: clouds = "SCT035"
+            if spread < 0.5 and hum > 95: clouds = f"VV0{cl_h:02d}"
+            elif spread < 2: clouds = f"OVC{cl_h:03d}"
+            elif spread < 5: clouds = f"BKN{cl_h:03d}"
+            elif spread < 10: clouds = f"SCT{cl_h:03d}"
+            # Secondary FEW layer at 3x primary height when humidity > 70%
+            # and primary is not VV0/OVC/CLR (no FEW above overcast)
+            sec_cloud = ""
+            if hum > 70 and spread >= 2 and spread < 10:
+                sec_h = min(99, cl_h * 3)
+                sec_cloud = f" FEW{sec_h:03d}"
+            # Present weather phenomena based on condition icon
+            ww = ""
+            if cond_icon == "RAINING": ww = "RA"
+            elif cond_icon == "DRIZZLE": ww = "-DZ"
+            elif cond_icon == "SNOWING": ww = "SN"
+            elif cond_icon == "FOGGY": ww = "FG"
+            elif cond_icon == "HAZY": ww = "BR"
+            elif cond_icon == "CLOUDY" and hum > 80: ww = "BR"
+            # Wind from daemon data
+            wind_dir = metar_taf.get('wind_dir_deg', 0)
+            wind_spd = metar_taf.get('wind_speed_kts', 0)
+            wind_str = f"{int(wind_dir) % 360:03d}{int(wind_spd):02d}KT" if wind_spd > 0.5 else "00000KT"
             temp_part = f"{round(t_c):02d}/{round(dp_c):02d}"
             if t_c < 0: temp_part = f"M{int(abs(t_c)):02d}/{int(abs(dp_c)):02d}"
-            metar_report = f"METAR EARU {time_str} 00000KT {vis_val} {clouds} {temp_part} A{int(altim*100):04d}"
+            metar_report = f"METAR AUTO EARU {time_str} {wind_str} {vis_val} {ww} {clouds}{sec_cloud} {temp_part} A{int(altim*100):04d}"
 
         if not taf_report:
+            # [ICAO Doc 8585 §4.3] Fallback TAF using on-board sensor values
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             start_time = now_utc.strftime("%d%H")
             end_time = (now_utc + datetime.timedelta(hours=24)).strftime("%d%H")
-            taf_report = f"TAF EARU {now_utc.strftime('%d%H%MZ')} {start_time}/{end_time} 00000KT 10SM CLR"
+            # Recompute TAF components from available data (same logic as METAR fallback)
+            taf_wind = metar_taf.get('wind_speed_kts', 0)
+            taf_wdir = metar_taf.get('wind_dir_deg', 0)
+            taf_wstr = f"{int(taf_wdir) % 360:03d}{int(taf_wind):02d}KT" if taf_wind > 0.5 else "00000KT"
+            taf_vis = "10SM" if spread > 3 else ("3SM" if spread > 1 else "1/2SM")
+            # [ICAO Doc 8585 §4.3] Cloud from dew-point spread using LCL
+            taf_clh = max(5, min(99, int(spread * 4.1)))
+            taf_clouds = "CLR"
+            if spread < 0.5 and hum > 95: taf_clouds = f"VV0{taf_clh:02d}"
+            elif spread < 2: taf_clouds = f"OVC{taf_clh:03d}"
+            elif spread < 5: taf_clouds = f"BKN{taf_clh:03d}"
+            elif spread < 10: taf_clouds = f"SCT{taf_clh:03d}"
+            # Secondary FEW layer (same as METAR fallback)
+            taf_sec = ""
+            if hum > 70 and spread >= 2 and spread < 10:
+                taf_sec_h = min(99, taf_clh * 3)
+                taf_sec = f" FEW{taf_sec_h:03d}"
+            taf_report = f"TAF EARU {start_time}/{end_time} {taf_wstr} {taf_vis} {taf_clouds}{taf_sec}"
 
         y = 100.0
         self.canvas.create_text(50, y, anchor="nw", text="CURRENT REPORT (METAR):", fill="cyan", font=("Monaco", 12, "bold"))

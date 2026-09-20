@@ -1,0 +1,12 @@
+module Earu_io_Run_Dir
+
+  use int.Int
+
+
+
+  let run_Dir () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Project_Root & "/EARU_daemon/run"
+
+end

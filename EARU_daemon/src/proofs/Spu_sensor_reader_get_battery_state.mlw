@@ -1,0 +1,12 @@
+module Spu_sensor_reader_get_battery_state
+
+  use int.Int
+
+
+
+  let get_battery_state (percent: int) (state: int) (out_buf: int) (max_len: int) : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

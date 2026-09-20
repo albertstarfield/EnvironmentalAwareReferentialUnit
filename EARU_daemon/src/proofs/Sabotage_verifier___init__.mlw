@@ -1,0 +1,12 @@
+module Sabotage_verifier___init__
+
+  use int.Int
+
+
+
+  let __init__ (registry: any) : unit
+    requires { true }
+    ensures { true }
+    = violations
+
+end

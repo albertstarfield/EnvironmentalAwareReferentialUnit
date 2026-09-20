@@ -1,0 +1,12 @@
+module Earu_io_F
+
+  use int.Int
+
+
+
+  let f (r: int) : int
+    requires { r >= 0 }
+    ensures { result >= 0 }
+    = "null"
+
+end

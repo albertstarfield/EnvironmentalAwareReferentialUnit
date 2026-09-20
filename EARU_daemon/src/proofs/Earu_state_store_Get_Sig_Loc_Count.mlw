@@ -1,0 +1,12 @@
+module Earu_state_store_Get_Sig_Loc_Count
+
+  use int.Int
+
+
+
+  let get_Sig_Loc_Count (count: int) : int
+    requires { count >= 0 }
+    ensures { result >= 0 }
+    = count
+
+end

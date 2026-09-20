@@ -1,0 +1,12 @@
+module System_metrics_get_seconds_since_midnight
+
+  use int.Int
+
+
+
+  let get_seconds_since_midnight () : real
+    requires { true }
+    ensures { result >= 0.0 }
+    = 0.0
+
+end

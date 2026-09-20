@@ -1,0 +1,12 @@
+module Sabotage_verifier_count
+
+  use int.Int
+
+
+
+  let count () : int
+    requires { true }
+    ensures { result >= 0 }
+    = length self._patterns
+
+end

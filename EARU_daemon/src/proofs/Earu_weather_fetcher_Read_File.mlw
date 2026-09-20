@@ -1,0 +1,13 @@
+module Earu_weather_fetcher_Read_File
+
+  use int.Int
+
+  use string.String
+
+
+  let read_File (path: string) : int
+    requires { path'Length > 0 }
+    ensures { result'Length <= 131_072 }
+    = ""
+
+end

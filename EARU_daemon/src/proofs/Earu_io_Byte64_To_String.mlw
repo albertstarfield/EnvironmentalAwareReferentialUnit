@@ -1,0 +1,12 @@
+module Earu_io_Byte64_To_String
+
+  use int.Int
+
+
+
+  let byte64_To_String (arr: int) : int
+    requires { arr >= 0 }
+    ensures { result >= 0 }
+    = Result
+
+end

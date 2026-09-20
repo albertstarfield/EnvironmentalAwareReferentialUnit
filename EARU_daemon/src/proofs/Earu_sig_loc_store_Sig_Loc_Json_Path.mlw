@@ -1,0 +1,12 @@
+module Earu_sig_loc_store_Sig_Loc_Json_Path
+
+  use int.Int
+
+
+
+  let sig_Loc_Json_Path () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Earu.IO.Project_Root & "/save_state/significant_locations.json"
+
+end

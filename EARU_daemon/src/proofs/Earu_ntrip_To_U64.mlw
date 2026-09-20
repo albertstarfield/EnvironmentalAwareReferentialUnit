@@ -1,0 +1,12 @@
+module Earu_ntrip_To_U64
+
+  use int.Int
+
+
+
+  let to_U64 () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

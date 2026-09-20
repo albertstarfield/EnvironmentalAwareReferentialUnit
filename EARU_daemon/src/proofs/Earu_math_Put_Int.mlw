@@ -1,0 +1,13 @@
+module Earu_math_Put_Int
+
+  use int.Int
+
+
+
+  let put_Int (v: int) (width: int) : int
+    requires { v >= 0 }
+    requires { width >= 0 }
+    ensures { result >= 0 }
+    = v
+
+end

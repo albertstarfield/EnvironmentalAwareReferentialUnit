@@ -1,6 +1,10 @@
 with Ada.Text_IO; use Ada.Text_IO;
 with Earu.Shm; use Earu.Shm;
 
+-- Purpose: Utility procedure to print the memory layout offsets of shared
+--          memory record types (Stats_SHM, Weather_SHM) for debugging
+--          cross-language shared memory alignment.
+-- Returns: None (procedure)
 procedure Print_Offsets is
    pragma Warnings (Off);
    S : Stats_SHM;

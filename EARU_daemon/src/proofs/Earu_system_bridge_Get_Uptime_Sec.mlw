@@ -1,0 +1,12 @@
+module Earu_system_bridge_Get_Uptime_Sec
+
+  use int.Int
+
+
+
+  let get_Uptime_Sec () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

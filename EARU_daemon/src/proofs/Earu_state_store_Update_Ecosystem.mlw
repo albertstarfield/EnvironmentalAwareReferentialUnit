@@ -1,0 +1,12 @@
+module Earu_state_store_Update_Ecosystem
+
+  use int.Int
+
+
+
+  let update_Ecosystem (e: int) : int
+    requires { e >= 0 }
+    ensures { result >= 0 }
+    = e
+
+end

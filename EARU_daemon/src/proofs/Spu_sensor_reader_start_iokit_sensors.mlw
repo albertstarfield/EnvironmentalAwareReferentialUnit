@@ -1,0 +1,12 @@
+module Spu_sensor_reader_start_iokit_sensors
+
+  use int.Int
+
+
+
+  let start_iokit_sensors (accel: int) (gyro: int) (lid: int) (als: int) : unit
+    requires { true }
+    ensures { true }
+    = ()
+
+end

@@ -1,0 +1,12 @@
+module Earu_corewlan_CoreWLAN_Scan_Init
+
+  use int.Int
+
+
+
+  let coreWLAN_Scan_Init () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

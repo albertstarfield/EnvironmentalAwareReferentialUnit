@@ -1,0 +1,13 @@
+module Earu_io_Read_Sensor_Integer
+
+  use int.Int
+
+  use string.String
+
+
+  let read_Sensor_Integer (filename: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = Cache_Turbo
+
+end

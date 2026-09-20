@@ -1,0 +1,17 @@
+module Earu_shm_mmap
+
+  use int.Int
+
+
+
+  let mmap (addr: int) (len: int) (prot: int) (flags: int) (fd: int) (offset: int) : int
+    requires { addr >= 0 }
+    requires { len >= 0 }
+    requires { prot >= 0 }
+    requires { flags >= 0 }
+    requires { fd >= 0 }
+    requires { offset >= 0 }
+    ensures { result >= 0 }
+    = System.Null_Address
+
+end

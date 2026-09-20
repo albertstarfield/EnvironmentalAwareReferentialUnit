@@ -1,0 +1,13 @@
+module Earu_state_store_Update_Weather
+
+  use int.Int
+
+
+
+  let update_Weather (w: int) (l: int) : int
+    requires { w >= 0 }
+    requires { l >= 0 }
+    ensures { result >= 0 }
+    = w
+
+end

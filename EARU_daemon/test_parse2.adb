@@ -1,7 +1,7 @@
 with Ada.Text_IO;
 with Interfaces;
 procedure Test_Parse2 is
-   type Real is new Interfaces.IEEE_Float_64;
+   type Real is new Interfaces.IEEE_Float_64;  -- static: derived numeric type, no allocation
    Val : Real;
 begin
    Val := Real'Value ("1.07392E+04");

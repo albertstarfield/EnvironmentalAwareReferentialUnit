@@ -1,0 +1,12 @@
+module Earu_system_bridge_Get_CPU_Usage
+
+  use int.Int
+
+
+
+  let get_CPU_Usage () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

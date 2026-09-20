@@ -20,13 +20,17 @@ package body Earu.Stale_Detector is
    use type Interfaces.Unsigned_64;
 
    -- Cross-check battery via independent pmset invocation
+   --
+   -- [Citation: sabotage_verifier.py EXTERNAL_CALL_UNHANDLED]
    function Cross_Check_Battery (Cross_Pct : out Integer) return Boolean is
       Ret : Interfaces.C.int;
    begin
       Cross_Pct := -1;
       Ret := C_System (Interfaces.C.To_C (
          "/bin/sh -c 'pmset -g batt' > " & Earu.IO.Run_Dir & "/earu_batt_crosscheck.txt 2>&1"));
-      pragma Unreferenced (Ret);
+      if Integer(Ret) /= 0 then
+         Ada.Text_IO.Put_Line ("[!] Warning: battery cross-check pmset failed (ret=" & Interfaces.C.int'Image (Ret) & ")");
+      end if;
       declare
          use Ada.Text_IO;
          F : File_Type;
@@ -130,9 +134,12 @@ package body Earu.Stale_Detector is
                            declare
                               Ret : Interfaces.C.int;
                            begin
-                              Ret := C_System (Interfaces.C.To_C (
-                                 "/bin/sh -c 'kill -9 $(pgrep earu_daemon); sleep 2; cd /usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon && /usr/local/bin/alr exec earu_daemon -- -d &'"));
-                              pragma Unreferenced (Ret);
+                         Ret := C_System (Interfaces.C.To_C (
+                            "/bin/sh -c 'kill -9 $(pgrep earu_daemon); sleep 2; cd " &
+                            Earu.IO.Project_Root & "/EARU_daemon && alr exec earu_daemon -- -d &'"));
+                              if Integer(Ret) /= 0 then
+                                 Ada.Text_IO.Put_Line ("[!] Warning: daemon self-restart failed (ret=" & Interfaces.C.int'Image (Ret) & ")");
+                              end if;
                            end;
                         end if;
                      else

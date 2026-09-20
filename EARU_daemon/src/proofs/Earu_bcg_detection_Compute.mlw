@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Compute
+
+  use int.Int
+
+
+
+  let compute () : int
+    requires { Bounded (S) }
+    ensures { mem Count 0 .. Max_Entities }
+    = 0
+
+end

@@ -1,0 +1,12 @@
+module Earu_network_status_Get_All
+
+  use int.Int
+
+
+
+  let get_All () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Current_Statuses
+
+end

@@ -1,0 +1,12 @@
+module Spu_sensor_reader_get_hid_idle_time_ns
+
+  use int.Int
+
+
+
+  let get_hid_idle_time_ns () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

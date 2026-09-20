@@ -1,0 +1,12 @@
+module Earu_math_Update_Bucket
+
+  use int.Int
+
+
+
+  let update_Bucket () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

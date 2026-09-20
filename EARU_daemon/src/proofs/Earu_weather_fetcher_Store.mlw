@@ -1,0 +1,13 @@
+module Earu_weather_fetcher_Store
+
+  use int.Int
+
+  use string.String
+
+
+  let store (jSON: string) : int
+    requires { jSON'Length >= 0 }
+    ensures { Len <= Data'Length }
+    = 0
+
+end

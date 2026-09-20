@@ -1,0 +1,13 @@
+module Earu_weather_fetcher_Trim_Null
+
+  use int.Int
+
+  use string.String
+
+
+  let trim_Null (s: string) : int
+    requires { s'Length >= 0 }
+    ensures { result'Length <= s'Length }
+    = s (First .. Last)
+
+end

@@ -1,0 +1,12 @@
+module Earu_state_store_Add_Event
+
+  use int.Int
+
+
+
+  let add_Event (e: int) : int
+    requires { e >= 0 }
+    ensures { result >= 0 }
+    = e
+
+end

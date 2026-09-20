@@ -1,0 +1,12 @@
+module Earu_bluetooth_Bluetooth_Scan_Cleanup
+
+  use int.Int
+
+
+
+  let bluetooth_Scan_Cleanup () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

@@ -316,17 +316,150 @@ package Earu.Shm is
    end record;
    type DR_SHM_Ptr is access all DR_SHM;
 
+   -- ==========================================================================
+   -- Memory_Health_SHM — Memory corruption / stain / prevention telemetry
+   -- ==========================================================================
+   -- AXIOM 1: Memory corruption is inevitable (Murphy's Law) -> must be detected.
+   -- AXIOM 2: Detection must be independent of the thing being monitored.
+   -- AXIOM 3: Prevention state must be visible to detection in real-time.
+   --
+   -- THEOREM 1: Update_Count monotonicity guarantees torn-read detection.
+   -- THEOREM 2: Single-writer (247AO) + single-writer (Warden) on disjoint fields
+   --            => no data races when readers check Update_Count before/after.
+   --
+   -- Written by: 247AO (prevention fields) + Warden (detection fields)
+   -- Read by:    Warden (correlation) + 247AO (feedback)
+   -- Segment:    /earu_memory_health
+   -- CITATIONS:
+   --   - internal design doc (EARU Communication Architecture)
+   --   - POSIX shared memory (IEEE Std 1003.1 shm_open/mmap)
+   --   - Ada 2012 RM B.3 (Interfacing with C)
+   -- ==========================================================================
+   type Memory_Health_SHM is record
+      Header               : SHM_Header;
+
+      -- Corruption detection signals (written by Warden)
+      Corruption_Event_Count : Interfaces.Unsigned_32;    -- Total corruption events
+      Last_Corruption_Time   : Interfaces.IEEE_Float_64; -- Unix epoch of last event
+      Corruption_Source_PID  : Interfaces.Integer_32;    -- PID of offending process
+
+      -- Memory stain detection (written by Warden)
+      Stain_Detected         : Interfaces.Unsigned_8;    -- 0=no, 1=yes
+      Stain_Padding_1        : Interfaces.Unsigned_8;    -- Alignment padding
+      Stain_Padding_2        : Interfaces.Unsigned_8;    -- Alignment padding
+      Stain_Padding_3        : Interfaces.Unsigned_8;    -- Alignment padding
+      Stain_Address          : Interfaces.Unsigned_64;   -- Memory address of stain
+      Stain_Process_Name     : String_64;               -- Process name (C string, 64 bytes)
+
+      -- Framebuffer integrity (written by Warden)
+      FB_CRC_Mismatch        : Interfaces.Unsigned_32;   -- CRC mismatch count
+      FB_Last_Check_Time     : Interfaces.IEEE_Float_64; -- Last CRC check timestamp
+
+      -- Prevention status (written by 247AO)
+      Throttled_PID          : Interfaces.Integer_32;    -- PID currently throttled
+      Throttle_Reason        : Interfaces.Unsigned_8;    -- 0=none,1=leak,2=overflow,3=stain
+      Prev_Padding_1         : Interfaces.Unsigned_8;    -- Alignment padding
+      Prev_Padding_2         : Interfaces.Unsigned_8;    -- Alignment padding
+      Prev_Padding_3         : Interfaces.Unsigned_8;    -- Alignment padding
+      Memory_Cap_Active      : Interfaces.Unsigned_8;    -- 0=off, 1=on
+      Cap_Padding_1          : Interfaces.Unsigned_8;    -- Alignment padding
+      Cap_Padding_2          : Interfaces.Unsigned_8;    -- Alignment padding
+      Cap_Padding_3          : Interfaces.Unsigned_8;    -- Alignment padding
+      Memory_Cap_Limit_MB    : Interfaces.Unsigned_32;   -- Memory cap in MB
+
+      -- Monotonic update counter for torn-read detection
+      Update_Count           : Interfaces.Unsigned_32;
+   end record with Convention => C;
+
+   for Memory_Health_SHM use record
+      Header               at 0   range 0 .. 1599;    -- SHM_Header (200 bytes)
+      Corruption_Event_Count at 200 range 0 .. 31;
+      Last_Corruption_Time   at 204 range 0 .. 63;
+      Corruption_Source_PID  at 212 range 0 .. 31;
+      Stain_Detected         at 216 range 0 .. 7;
+      Stain_Padding_1        at 217 range 0 .. 7;
+      Stain_Padding_2        at 218 range 0 .. 7;
+      Stain_Padding_3        at 219 range 0 .. 7;
+      Stain_Address          at 220 range 0 .. 63;
+      Stain_Process_Name     at 228 range 0 .. 511;   -- 64 bytes * 8
+      FB_CRC_Mismatch        at 292 range 0 .. 31;
+      FB_Last_Check_Time     at 296 range 0 .. 63;
+      Throttled_PID          at 304 range 0 .. 31;
+      Throttle_Reason        at 308 range 0 .. 7;
+      Prev_Padding_1         at 309 range 0 .. 7;
+      Prev_Padding_2         at 310 range 0 .. 7;
+      Prev_Padding_3         at 311 range 0 .. 7;
+      Memory_Cap_Active      at 312 range 0 .. 7;
+      Cap_Padding_1          at 313 range 0 .. 7;
+      Cap_Padding_2          at 314 range 0 .. 7;
+      Cap_Padding_3          at 315 range 0 .. 7;
+      Memory_Cap_Limit_MB    at 316 range 0 .. 31;
+      Update_Count           at 320 range 0 .. 31;
+   end record;
+   -- Total size: 324 bytes (padded to 324 for alignment)
+
+   type Memory_Health_SHM_Ptr is access all Memory_Health_SHM;
+
    -- Shared Memory Management
+
+   -- Purpose: Open an existing IMU shared memory segment for reading.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: IMU_SHM_Ptr access to the mapped segment, or null on failure.
    function Open_IMU_SHM (Name : String) return IMU_SHM_Ptr;
+
+   -- Purpose: Open an existing Stats shared memory segment for reading.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: Stats_SHM_Ptr access to the mapped segment, or null on failure.
    function Open_Stats_SHM (Name : String) return Stats_SHM_Ptr;
+
+   -- Purpose: Open an existing Weather shared memory segment for reading.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: Weather_SHM_Ptr access to the mapped segment, or null on failure.
    function Open_Weather_SHM (Name : String) return Weather_SHM_Ptr;
+
+   -- Purpose: Open an existing ML shared memory segment for reading.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: ML_SHM_Ptr access to the mapped segment, or null on failure.
    function Open_ML_SHM (Name : String) return ML_SHM_Ptr;
+
+   -- Purpose: Open an existing Lid shared memory segment for reading.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: Lid_SHM_Ptr access to the mapped segment, or null on failure.
    function Open_Lid_SHM (Name : String) return Lid_SHM_Ptr;
+
+   -- Purpose: Open an existing ALS shared memory segment for reading.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: ALS_SHM_Record_Ptr access to the mapped segment, or null on failure.
    function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
 
+   -- Purpose: Create (or open) an IMU shared memory segment for writing.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: IMU_SHM_Ptr access to the mapped segment.
    function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr;
+
+   -- Purpose: Create (or open) a Lid shared memory segment for writing.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: Lid_SHM_Ptr access to the mapped segment.
    function Create_Lid_SHM (Name : String) return Lid_SHM_Ptr;
+
+   -- Purpose: Create (or open) an ALS shared memory segment for writing.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: ALS_SHM_Record_Ptr access to the mapped segment.
    function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
+
+   -- Purpose: Create (or open) a Dead Reckoning shared memory segment.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: DR_SHM_Ptr access to the mapped segment.
    function Create_DR_SHM (Name : String) return DR_SHM_Ptr;
+
+   -- Purpose: Open an existing Memory Health shared memory segment.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: Memory_Health_SHM_Ptr access to the mapped segment.
+   function Open_Memory_Health_SHM (Name : String) return Memory_Health_SHM_Ptr;
+
+   -- Purpose: Create (or open) a Memory Health shared memory segment.
+   -- Parameters: Name : String -- POSIX shared memory name.
+   -- Returns: Memory_Health_SHM_Ptr access to the mapped segment.
+   function Create_Memory_Health_SHM (Name : String) return Memory_Health_SHM_Ptr;
 
 end Earu.Shm;

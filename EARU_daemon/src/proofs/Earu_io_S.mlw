@@ -1,0 +1,13 @@
+module Earu_io_S
+
+  use int.Int
+
+  use string.String
+
+
+  let s (str: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = To_String (Result)
+
+end

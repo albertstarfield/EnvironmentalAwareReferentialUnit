@@ -1,0 +1,13 @@
+module Earu_io_Write_NVRAM_Real
+
+  use int.Int
+
+  use string.String
+
+
+  let write_NVRAM_Real (name: string) (value: int) : int
+    requires { value >= 0 }
+    ensures { result >= 0 }
+    = value
+
+end

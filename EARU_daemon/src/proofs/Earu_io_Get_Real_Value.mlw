@@ -1,0 +1,13 @@
+module Earu_io_Get_Real_Value
+
+  use int.Int
+
+  use string.String
+
+
+  let get_Real_Value (jSON: string) (key: string) (default: int) : int
+    requires { default >= 0 }
+    ensures { result >= 0 }
+    = default
+
+end

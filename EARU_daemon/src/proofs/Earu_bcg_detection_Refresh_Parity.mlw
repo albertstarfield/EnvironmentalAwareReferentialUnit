@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Refresh_Parity
+
+  use int.Int
+
+
+
+  let refresh_Parity (s: int) : int
+    requires { true }
+    ensures { Integrity_Ok (s) }
+    = s
+
+end

@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Sort_Peaks
+
+  use int.Int
+
+
+
+  let sort_Peaks () : int
+    requires { Peak_Count <= Peaks'Last }
+    ensures { (for all mem K 1 .. Peak_Count => }
+    = 0
+
+end

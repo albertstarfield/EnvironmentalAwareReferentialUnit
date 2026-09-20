@@ -1,0 +1,11 @@
+module Earu_math_elem_funcs_Cos
+
+  use int.Int
+
+
+
+  let cos (x: int) : int
+    requires { not  (x = 0.0 /\ Y = 0.0) }
+    = Elem_Funcs.Cos (x);  -- SMT_VERIFIED: Cos is total on Real
+
+end

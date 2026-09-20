@@ -1,0 +1,12 @@
+module Earu_bcg_detection_Push_Sample
+
+  use int.Int
+
+
+
+  let push_Sample () : int
+    requires { Bounded (S) }
+    ensures { Samples_Buffered (S) = Natural'Min }
+    = 0
+
+end

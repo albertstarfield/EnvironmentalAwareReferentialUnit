@@ -1,0 +1,12 @@
+module Earu_ntrip_Finalize
+
+  use int.Int
+
+
+
+  let finalize (packer: int) : int
+    requires { packer >= 0 }
+    ensures { result >= 0 }
+    = packer
+
+end

@@ -1,0 +1,12 @@
+module Earu_state_store_Initialize_State
+
+  use int.Int
+
+
+
+  let initialize_State () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

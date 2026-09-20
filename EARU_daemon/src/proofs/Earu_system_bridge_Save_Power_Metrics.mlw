@@ -1,0 +1,12 @@
+module Earu_system_bridge_Save_Power_Metrics
+
+  use int.Int
+
+
+
+  let save_Power_Metrics () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

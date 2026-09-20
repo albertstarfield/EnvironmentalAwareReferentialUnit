@@ -1,0 +1,13 @@
+module Sabotage_verifier_format_json
+
+  use int.Int
+
+  use string.String
+
+
+  let format_json (violations: any) : string
+    requires { true }
+    ensures { result = "" }
+    = json.dumps(data, indent=2)
+
+end

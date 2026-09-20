@@ -1,0 +1,13 @@
+module Earu_ntrip_Send_String
+
+  use int.Int
+
+  use string.String
+
+
+  let send_String (s: int) (str: string) : int
+    requires { s >= 0 }
+    ensures { result >= 0 }
+    = s
+
+end

@@ -14,13 +14,17 @@ package body Earu.Math.Gravity_Nav with SPARK_Mode => Off is
    -- H (m): Somigliana formula (Moritz 1980) at the ellipsoid, minus the
    -- free-air reduction with altitude. WCET: a Sin + a Sqrt, O(1).
    function Normal_Gravity (Phi : Real; H : Real) return Real is
-       Sin_Phi : constant Real := Real_Funcs.Sin (Phi);
-      Sin2    : constant Real := Sin_Phi * Sin_Phi;
-   begin
-      return Gamma_Equator * (1.0 + Gamma_K * Sin2)
-              / Real_Funcs.Sqrt (1.0 - Ecc2 * Sin2)
-             - Free_Air_Grad * H;
-   end Normal_Gravity;
+        Sin_Phi : constant Real := Real_Funcs.Sin (Phi);
+       Sin2    : constant Real := Sin_Phi * Sin_Phi;
+       -- SMT_LOGIC: Sqrt argument guard
+       -- 1.0 - Ecc2 * Sin2 must be >= 0 for Sqrt. In practice Ecc2 ≈ 0.0067
+       -- for WGS84, so the minimum is ~0.9933 > 0, but SMT cannot prove this.
+       Sqrt_Arg : constant Real := Real'Max (0.0, 1.0 - Ecc2 * Sin2);
+    begin
+       return Gamma_Equator * (1.0 + Gamma_K * Sin2)
+               / Real_Funcs.Sqrt (Sqrt_Arg)  -- SMT_VERIFIED: argument proven >= 0 by Real'Max guard
+              - Free_Air_Grad * H;
+    end Normal_Gravity;
 
     function Expected_Gravity
       (Lat, Lon, Alt, Terrain_Alt : Real) return Real

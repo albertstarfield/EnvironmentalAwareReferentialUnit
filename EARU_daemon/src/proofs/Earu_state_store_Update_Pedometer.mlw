@@ -1,0 +1,12 @@
+module Earu_state_store_Update_Pedometer
+
+  use int.Int
+
+
+
+  let update_Pedometer (p: int) : int
+    requires { p >= 0 }
+    ensures { result >= 0 }
+    = p
+
+end

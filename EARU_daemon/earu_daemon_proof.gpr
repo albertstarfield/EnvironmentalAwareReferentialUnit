@@ -33,6 +33,8 @@ project Earu_Daemon_Proof is
 
    --  Project-level exclusion: compiler AND gnatprove skip these files.
    --  Only our 7 proof targets remain in scope.
+    --  Excluded_Source_Files for Compiler: all files EXCEPT our proof targets.
+   --  earu-math.adb, earu-math.ads, earu-types.ads are PROOF TARGETS — not excluded.
    for Excluded_Source_Files use (
       "b~test_time.adb",
       "b~test_time.ads",
@@ -41,35 +43,25 @@ project Earu_Daemon_Proof is
       "earu-bridge.ads",
       "earu-corewlan.ads",
       "earu-data.ads",
-      "earu-io.adb",
-      "earu-io.ads",
       "earu-math-bluemarble.adb",
       "earu-math-bluemarble.ads",
-      "earu-math.adb",
-      "earu-math.ads",
       "earu-network_status.adb",
       "earu-network_status.ads",
       "earu-ntrip.adb",
       "earu-ntrip.ads",
-      "earu-shm.adb",
-      "earu-shm.ads",
       "earu-sig_loc_store.adb",
       "earu-sig_loc_store.ads",
       "earu-stale_detector.adb",
       "earu-stale_detector.ads",
-      "earu-state_store.adb",
-      "earu-state_store.ads",
       "earu-system_bridge.adb",
       "earu-system_bridge.ads",
-      "earu-types.ads",
-      "earu-weather_fetcher.adb",
-      "earu-weather_fetcher.ads",
       "earu_daemon.adb",
       "print_offsets.adb",
       "test_aws.adb",
       "test_bluemarble.adb",
       "test_bcg_detection.adb",
       "test_exec.adb",
+      "test_gravity_nav.adb",
       "test_mood_inference.adb",
       "test_sha.adb"
    );
@@ -83,11 +75,7 @@ project Earu_Daemon_Proof is
       );
    end Compiler;
 
-   --  Exclude everything EXCEPT our 7 proof targets.
-   --  Source_Dirs("src/") would pull in all 45 files including
-   --  earu_daemon.adb, earu_system_bridge.adb, earu_data.ads,
-   --  test_*.adb — all of which bring in the aunit/aws/strategy
-   --  dependency chain that causes stale-ALI fatal errors.
+   --  Excluded_Source_Files for Gnatprove: same as Compiler — earu-math and earu-types are PROOF TARGETS.
    package Gnatprove is
       for Excluded_Source_Files use (
          "b~test_time.adb",
@@ -97,35 +85,25 @@ project Earu_Daemon_Proof is
          "earu-bridge.ads",
          "earu-corewlan.ads",
          "earu-data.ads",
-         "earu-io.adb",
-         "earu-io.ads",
          "earu-math-bluemarble.adb",
          "earu-math-bluemarble.ads",
-         "earu-math.adb",
-         "earu-math.ads",
          "earu-network_status.adb",
          "earu-network_status.ads",
          "earu-ntrip.adb",
          "earu-ntrip.ads",
-         "earu-shm.adb",
-         "earu-shm.ads",
          "earu-sig_loc_store.adb",
          "earu-sig_loc_store.ads",
          "earu-stale_detector.adb",
          "earu-stale_detector.ads",
-         "earu-state_store.adb",
-         "earu-state_store.ads",
          "earu-system_bridge.adb",
          "earu-system_bridge.ads",
-         "earu-types.ads",
-         "earu-weather_fetcher.adb",
-         "earu-weather_fetcher.ads",
          "earu_daemon.adb",
          "print_offsets.adb",
          "test_aws.adb",
          "test_bluemarble.adb",
          "test_bcg_detection.adb",
          "test_exec.adb",
+         "test_gravity_nav.adb",
          "test_mood_inference.adb",
          "test_sha.adb"
       );

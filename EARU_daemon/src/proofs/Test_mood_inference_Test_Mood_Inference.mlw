@@ -1,0 +1,12 @@
+module Test_mood_inference_Test_Mood_Inference
+
+  use int.Int
+
+
+
+  let test_Mood_Inference () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

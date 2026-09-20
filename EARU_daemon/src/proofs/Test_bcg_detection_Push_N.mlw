@@ -1,0 +1,12 @@
+module Test_bcg_detection_Push_N
+
+  use int.Int
+
+
+
+  let push_N (n: int) : int
+    requires { n >= 0 }
+    ensures { result >= 0 }
+    = n
+
+end

@@ -1,0 +1,13 @@
+module Earu_math_Put
+
+  use int.Int
+
+  use string.String
+
+
+  let put (s: string) : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

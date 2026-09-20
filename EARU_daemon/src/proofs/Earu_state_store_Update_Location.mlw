@@ -1,0 +1,12 @@
+module Earu_state_store_Update_Location
+
+  use int.Int
+
+
+
+  let update_Location (l: int) : int
+    requires { l >= 0 }
+    ensures { result >= 0 }
+    = l
+
+end

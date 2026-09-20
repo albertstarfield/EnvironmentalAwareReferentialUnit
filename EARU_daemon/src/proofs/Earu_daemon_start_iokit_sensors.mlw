@@ -1,0 +1,12 @@
+module Earu_daemon_start_iokit_sensors
+
+  use int.Int
+
+
+
+  let start_iokit_sensors () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

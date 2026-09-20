@@ -1,0 +1,12 @@
+module Earu_math_Compute_Wind_Grid_From_SMC
+
+  use int.Int
+
+
+
+  let compute_Wind_Grid_From_SMC () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

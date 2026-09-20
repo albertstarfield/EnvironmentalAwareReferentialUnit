@@ -1,0 +1,12 @@
+module Earu_io_Python3_Exec
+
+  use int.Int
+
+
+
+  let python3_Exec () : int
+    requires { true }
+    ensures { result >= 0 }
+    = Ada.Environment_Variables.Value ("EARU_PYTHON3")
+
+end

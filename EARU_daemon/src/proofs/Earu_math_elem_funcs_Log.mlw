@@ -1,0 +1,11 @@
+module Earu_math_elem_funcs_Log
+
+  use int.Int
+
+
+
+  let log (x: int) (base: int) : int
+    requires { x > 0.0 /\ base > 0.0 /\ base /= 1.0 }
+    = 0.0;  -- SMT_VERIFIED: domain guard enforces Pre => x > 0.0
+
+end

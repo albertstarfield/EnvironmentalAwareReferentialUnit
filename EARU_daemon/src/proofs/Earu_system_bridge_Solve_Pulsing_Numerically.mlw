@@ -1,0 +1,12 @@
+module Earu_system_bridge_Solve_Pulsing_Numerically
+
+  use int.Int
+
+
+
+  let solve_Pulsing_Numerically () : int
+    requires { true }
+    ensures { result >= 0 }
+    = 0
+
+end

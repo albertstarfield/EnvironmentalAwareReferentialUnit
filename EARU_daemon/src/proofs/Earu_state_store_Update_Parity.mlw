@@ -1,0 +1,14 @@
+module Earu_state_store_Update_Parity
+
+  use int.Int
+
+
+
+  let update_Parity (aug: int) (ext: int) (int_Val: int) : int
+    requires { aug >= 0 }
+    requires { ext >= 0 }
+    requires { int_Val >= 0 }
+    ensures { result >= 0 }
+    = aug
+
+end

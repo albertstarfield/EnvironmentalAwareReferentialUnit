@@ -1,0 +1,12 @@
+module Earu_daemon_Start_ML_Bridge
+
+  use int.Int
+
+
+
+  let start_ML_Bridge () : int
+    requires { true }
+    ensures { true  -- always completes; failure is logged, not  raised }
+    = 0
+
+end

@@ -1,0 +1,13 @@
+module Earu_io_Update_Cache
+
+  use int.Int
+
+  use string.String
+
+
+  let update_Cache (name: string) (value: int) : int
+    requires { value >= 0 }
+    ensures { result >= 0 }
+    = value
+
+end
