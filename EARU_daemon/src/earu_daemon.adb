@@ -82,18 +82,22 @@ is
       Ret : Interfaces.C.int;
    begin
       Ada.Text_IO.Put_Line ("[*] Cleaning up stale RAM disks...");
+      --  AXIOM: Before creating a fresh RAM disk, we must fully tear down all
+      --  previous EARU_dataIO volumes. The sequence is:
+      --    1. Back up EARU_data.dat from the live volume (if mounted).
+      --    2. Force-unmount every /Volumes/EARU_dataIO* mount point.
+      --    3. Delete every APFS volume named EARU_dataIO (including suffixed
+      --       duplicates like "EARU_dataIO 1") via diskutil apfs deleteVolume.
+      --    4. Detach any orphaned RAM disk images via hdiutil.
+      --  Without this sequence, stale volumes survive and macOS appends
+      --  " 1" to the new volume name.
       Ret := C_System (Interfaces.C.To_C ("if [ -f /Volumes/EARU_dataIO/EARU_data.dat ]; then cp /Volumes/EARU_dataIO/EARU_data.dat ./EARU_data_backup.dat; fi"));
       if Ret /= 0 then
          Ada.Text_IO.Put_Line ("[!] Warning: backup copy failed (ret=" & Interfaces.C.int'Image (Ret) & ")");
       end if;
       Ret := C_System (Interfaces.C.To_C ("for d in /Volumes/EARU_dataIO*; do diskutil unmount force ""$d"" 2>/dev/null; done"));
-      if Ret /= 0 then
-         Ada.Text_IO.Put_Line ("[!] Warning: unmount stale volumes failed (ret=" & Interfaces.C.int'Image (Ret) & ")");
-      end if;
-      Ret := C_System (Interfaces.C.To_C ("hdiutil detach -force /dev/disk* 2>/dev/null"));
-      if Ret /= 0 then
-         Ada.Text_IO.Put_Line ("[!] Warning: detach stale disks failed (ret=" & Interfaces.C.int'Image (Ret) & ")");
-      end if;
+      Ret := C_System (Interfaces.C.To_C ("for v in $(diskutil list 2>/dev/null | grep 'EARU_dataIO' | awk '{print $NF}'); do diskutil apfs deleteVolume ""$v"" 2>/dev/null; done"));
+      Ret := C_System (Interfaces.C.To_C ("for img in $(diskutil list 2>/dev/null | grep 'disk image' | awk '{print $1}' | sort -u); do hdiutil detach -force ""/dev/$img"" 2>/dev/null; done"));
       Ada.Text_IO.Put_Line ("[*] Initializing fresh EARU RAM Disk...");
       Ret := C_System (Interfaces.C.To_C ("DEV=$(hdiutil attach -nomount ram://131072 | awk '{print $1}'); if [ -n ""$DEV"" ]; then diskutil apfs create ""$DEV"" EARU_dataIO; fi"));
       if Ret /= 0 then
