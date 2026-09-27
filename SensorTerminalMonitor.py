@@ -3801,8 +3801,26 @@ class PrimaryFlightDisplay:
         self.alt += (self.targets['alt'] - self.alt) * self.lerp_factor
         self.speed += (self.targets['speed'] - self.speed) * self.lerp_factor
         self.heading = self.lerp_angle(self.heading, self.targets['heading'], self.lerp_factor)
-        self.lat += (self.targets['lat'] - self.lat) * self.lerp_factor
-        self.lon += (self.targets['lon'] - self.lon) * self.lerp_factor
+        # Teleport / large-fix snap (PHYSICS_AND_ASSUMPTIONS.md section 11.8):
+        # a delta > 0.01 deg (~1.1 km) in one 16 ms frame cannot be physical
+        # motion — the daemon re-anchored (teleport, post-RF-blackout fix, or
+        # a corrected stale WiFi fix). Lerp would smear the corrected position
+        # across the map for seconds, so assign directly. On snap, also flush
+        # the 30-min GPS velocity window: its samples span the old anchor and
+        # would report an absurd cross-map velocity for up to 30 minutes.
+        if (abs(self.targets['lat'] - self.lat) > 0.01
+                or abs(self.targets['lon'] - self.lon) > 0.01):
+            self.lat = self.targets['lat']
+            self.lon = self.targets['lon']
+            self._gps_samples.clear()
+            # None makes the velocity block below take its re-seed path on the
+            # next frame (prev_* re-anchored to the new position, no bogus dlat).
+            self._prev_gps_lat = None
+            self._prev_gps_lon = None
+            self._prev_gps_time = 0.0
+        else:
+            self.lat += (self.targets['lat'] - self.lat) * self.lerp_factor
+            self.lon += (self.targets['lon'] - self.lon) * self.lerp_factor
 
         # --- GPS velocity: 30-minute rolling window average ---
         # Derivation: Collect instantaneous velocity samples (dlat/dt, dlon/dt)
