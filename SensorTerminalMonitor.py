@@ -4502,7 +4502,280 @@ class PrimaryFlightDisplay:
             )
             self.canvas.create_text(50, 505, anchor="nw", text=desc, fill="white", font=("Monaco", 9))
 
+    def _draw_sense_scene(self, category: str, cond_icon: str, w: float, h: float) -> None:
+        """Draw the SENSE page background plus a themed animated sky scene.
+
+        Purpose: presentation-only renderer for the Ada daemon's weather
+        classification (category / condition_icon strings produced by
+        earu-math.adb section 4a).  This method never classifies weather.
+
+        Parameters:
+            category  - stripped ecosystem_weather.category string from the
+                        daemon (14 known values, may be empty/unknown)
+            cond_icon - stripped ecosystem_weather.condition_icon token
+                        (SHINY/CLOUDY/HAZY/FOGGY/DRIZZLE/RAINING/SNOWING)
+            w, h      - canvas size in pixels (float)
+
+        Returns: None (all effects are Tkinter canvas items on self.canvas).
+
+        AXIOMS:
+          A1 (single source of truth): classification lives in the EARU daemon
+             (WMO CIMO Guide Ch.9 dew-point spread thresholds, ICAO Annex 3
+             rules); here we only map strings to pixels.
+          A2 (totality / Murphy's Law): both theme and scene resolve through
+             the fallback chain category -> icon -> default, so empty,
+             unknown, or space-padded telemetry values can never raise and
+             never leave the page unrendered.
+          A3 (determinism): animation phases derive from time.time() only --
+             no RNG -- so consecutive ~67 ms frames cannot flicker from
+             reseeded randomness.
+          A4 (z-order): draw_metar_page calls this BEFORE any text, and
+             Tkinter Canvas stacks items in creation order, so labels and the
+             METAR report always paint above the scene.
+        [Citation: WMO CIMO Guide Ch.9 - dew-point spread vs visibility]
+        [Citation: Tkinter Canvas - creation-order z-stacking]
+        WCET: O(1) per frame (bounded to <= ~40 canvas primitives), ~0.2 ms
+        CPU/frame at the 15 Hz animate() loop; Space: O(1) - animate()
+        clears the canvas every frame (canvas.delete("all")).
+        """
+        # APPLICATION (A2): guard degenerate canvas sizes (winfo_width can
+        # briefly report tiny values mid-resize; dispatch already substitutes
+        # 1000x800 below 100, this is the second belt).  Params are declared
+        # float, so no cast is needed (pyrefly unnecessary-type-conversion).
+        w = max(w, 100.0)
+        h = max(h, 100.0)
+        t = time.time()
+
+        # APPLICATION (A1): exact stripped category strings from
+        # earu-math.adb steps 1-4 (the wind overrides arrive space-padded
+        # to 32 chars; the caller's .strip() normalises them).
+        category_themes = {
+            "Clear / Good Visibility": "#00223a",
+            "Moderate Humidity": "#12263a",
+            "Humid / Haze Visibility Reduced": "#2c2a1a",
+            "Humid / Low Visibility Risk": "#1a2e38",
+            "Moist / Fog Risk": "#243036",
+            "Foggy Conditions": "#2c2c2c",
+            "Dense Fog / High Moisture": "#3d3d3d",
+            "Stable / Dry": "#0a1a12",
+            "Unstable / Approaching Drizzle": "#0a2a2a",
+            "Unstable / Approaching Rain": "#0a1a2a",
+            "Winter / Freezing Fog Risk": "#101826",
+            "Warm / Summer Conditions": "#2a1a10",
+            "Strong Winds / High Exposure": "#1e2836",
+            "GALE WARNING / Extreme Winds": "#330a0a",
+        }
+        icon_themes = {
+            "SNOWING": "#1a1a1a",
+            "RAINING": "#0a1a2a",
+            "DRIZZLE": "#0a2a2a",
+            "FOGGY": "#2c2c2c",
+            "HAZY": "#2c2a1a",
+            "CLOUDY": "#1a3a5a",
+            "SHINY": "#001a33",
+        }
+        # APPLICATION (A2): total fallback chain -> single background rect.
+        bg = category_themes.get(category) or icon_themes.get(cond_icon) or "#001a33"
+        self.canvas.create_rectangle(0, 0, w, h, fill=bg, outline="")
+
+        # APPLICATION (A1/A2): scene resolution uses the same fallback chain.
+        category_scenes = {
+            "Clear / Good Visibility": "clear",
+            "Moderate Humidity": "humid",
+            "Humid / Haze Visibility Reduced": "haze",
+            "Humid / Low Visibility Risk": "lowcloud",
+            "Moist / Fog Risk": "fogrisk",
+            "Foggy Conditions": "fog",
+            "Dense Fog / High Moisture": "densefog",
+            "Stable / Dry": "dry",
+            "Unstable / Approaching Drizzle": "drizzle",
+            "Unstable / Approaching Rain": "rain",
+            "Winter / Freezing Fog Risk": "winter",
+            "Warm / Summer Conditions": "summer",
+            "Strong Winds / High Exposure": "wind",
+            "GALE WARNING / Extreme Winds": "gale",
+        }
+        icon_scenes = {
+            "SNOWING": "winter",
+            "RAINING": "rain",
+            "DRIZZLE": "drizzle",
+            "FOGGY": "fog",
+            "HAZY": "haze",
+            "CLOUDY": "lowcloud",
+            "SHINY": "clear",
+        }
+        scene = category_scenes.get(category) or icon_scenes.get(cond_icon) or "clear"
+
+        # ---- scene primitives (all deterministic in t, A3) ----------------
+        def draw_sun(cx: float, cy: float, r: float, disc: str, spin: float) -> None:
+            """Draw a sun disc with 8 rays rotated by `spin` radians."""
+            for i in range(8):
+                a = spin + i * (math.pi / 4.0)
+                self.canvas.create_line(
+                    cx + math.cos(a) * (r + 4.0), cy + math.sin(a) * (r + 4.0),
+                    cx + math.cos(a) * (r + 13.0), cy + math.sin(a) * (r + 13.0),
+                    fill=disc, width=2)
+            self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=disc, outline="")
+
+        def draw_bird(x: float, y: float, s: float, phase: float, color: str) -> None:
+            """Draw one 'v'-stroke bird whose wings flap with sin(t*6+phase)."""
+            flap = math.sin(t * 6.0 + phase) * 3.0 * s
+            self.canvas.create_line(
+                [x - 7.0 * s, y - flap, x, y, x + 7.0 * s, y - flap],
+                fill=color, width=2)
+
+        def draw_birds(color: str, count: int = 2) -> None:
+            """Drift `count` birds across the sky, wrapping over w+140 px."""
+            span = w + 140.0
+            for i in range(count):
+                bx = (i * (span / float(count)) * 0.6 + 40.0 + t * 18.0 + i * 90.0) % span - 70.0
+                by = h * (0.13 + 0.05 * i) + math.sin(t * 0.7 + i * 2.1) * 6.0
+                draw_bird(bx, by, 1.0 - 0.2 * i, i * 1.7, color)
+
+        def draw_cloud(x: float, y: float, s: float, color: str) -> None:
+            """Draw a 3-puff cumulus silhouette anchored at (x, y)."""
+            self.canvas.create_oval(x, y, x + 44.0 * s, y + 20.0 * s, fill=color, outline="")
+            self.canvas.create_oval(x + 14.0 * s, y - 10.0 * s, x + 52.0 * s, y + 14.0 * s,
+                                    fill=color, outline="")
+            self.canvas.create_oval(x + 34.0 * s, y, x + 74.0 * s, y + 18.0 * s,
+                                    fill=color, outline="")
+
+        def draw_cloud_row(color: str, y_frac: float, speed: float, count: int,
+                           scale: float) -> None:
+            """Drift a row of `count` clouds horizontally at y_frac*h."""
+            span = w + 240.0
+            for i in range(count):
+                cx0 = (i * (span / float(count)) + t * speed) % span - 140.0
+                draw_cloud(cx0, h * y_frac + (i % 2) * 12.0,
+                           scale * (0.8 + 0.25 * (i % 3)), color)
+
+        def draw_rain(count: int, speed: float, color: str, slant: float,
+                      length: float) -> None:
+            """Draw `count` falling rain streaks (slant = horizontal offset)."""
+            for i in range(count):
+                rx = (i * (w / float(count)) + i * 9.0) % w
+                ry = (i * 47.0 + t * speed) % h
+                self.canvas.create_line(rx, ry, rx + slant, ry + length, fill=color, width=1)
+
+        def draw_snow(count: int, color: str) -> None:
+            """Draw `count` cross-flakes falling with a sine sway."""
+            for i in range(count):
+                sx = (i * (w / float(count)) + math.sin(t * 0.9 + i) * 14.0) % w
+                sy = (i * 61.0 + t * 60.0) % h
+                self.canvas.create_line(sx - 3.0, sy, sx + 3.0, sy, fill=color, width=1)
+                self.canvas.create_line(sx, sy - 3.0, sx, sy + 3.0, fill=color, width=1)
+
+        def draw_fog(band_color: str, patch_color: str, bands: int) -> None:
+            """Draw `bands` full-width fog strata plus 3 drifting fog patches."""
+            for i in range(bands):
+                fy = h * (0.52 + 0.12 * i) + math.sin(t * 0.55 + i * 1.4) * 5.0
+                self.canvas.create_rectangle(0, fy, w, fy + h * 0.10,
+                                             fill=band_color, outline="")
+            for i in range(3):
+                px = (t * 26.0 + i * w * 0.4) % (w + 300.0) - 200.0
+                py = h * (0.5 + 0.14 * i)
+                self.canvas.create_oval(px, py, px + 220.0, py + 34.0,
+                                        fill=patch_color, outline="")
+
+        def draw_wind(count: int, speed: float, color: str, y_lo: float,
+                      y_hi: float) -> None:
+            """Draw `count` horizontal wind streaks scrolling at `speed` px/s."""
+            span = w + 160.0
+            for i in range(count):
+                frac = float((i * 7) % count) / float(max(count - 1, 1))
+                wy = h * (y_lo + (y_hi - y_lo) * frac)
+                wx = (i * 83.0 + t * speed) % span - 120.0
+                wl = 46.0 + (i % 4) * 22.0
+                self.canvas.create_line(wx, wy, wx + wl, wy, fill=color, width=2)
+
+        def draw_bolt() -> None:
+            """Draw a lightning bolt for 100 ms out of every 6 s (deterministic)."""
+            if (t % 6.0) < 0.1:
+                bx = w * 0.3
+                self.canvas.create_line(
+                    [bx, h * 0.06, bx + 14.0, h * 0.16, bx + 4.0, h * 0.18,
+                     bx + 20.0, h * 0.30, bx + 10.0, h * 0.32, bx + 26.0, h * 0.44],
+                    fill="#ffff88", width=3)
+
+        def draw_shimmer(color: str) -> None:
+            """Draw 3 heat-shimmer dashes that slide with sin(t*2.4)."""
+            for i in range(3):
+                sy = h * (0.72 + 0.05 * i)
+                sx = math.sin(t * 2.4 + i * 2.0) * 26.0
+                self.canvas.create_line(w * 0.2 + sx, sy, w * 0.5 + sx, sy,
+                                        fill=color, width=1)
+
+        # ---- scene dispatch (keys owned by the tables above, A2) ---------
+        sun_x, sun_y = w * 0.84, h * 0.17
+        sun_r = max(9.0, min(w, h) * 0.055)
+
+        if scene == "clear":
+            draw_sun(sun_x, sun_y, sun_r, "#ffd75e", t * 0.4)
+            draw_birds("#dfe9f0")
+        elif scene == "dry":
+            draw_sun(sun_x, sun_y, sun_r, "#ffd75e", t * 0.4)
+            draw_birds("#dfe9f0")
+            self.canvas.create_rectangle(0, h - 6.0, w, h, fill="#14281c", outline="")
+        elif scene == "summer":
+            draw_sun(sun_x, sun_y, sun_r * 1.25, "#ffb347", t * 0.3)
+            draw_birds("#f0e0c0")
+            draw_shimmer("#8a6a45")
+        elif scene == "humid":
+            draw_sun(sun_x, sun_y, sun_r * 0.9, "#c9d6e0", t * 0.35)
+            draw_cloud_row("#6a7a8a", 0.22, 14.0, 3, 1.0)
+        elif scene == "haze":
+            draw_sun(sun_x, sun_y, sun_r, "#b8a868", t * 0.25)
+            for i in range(4):
+                hy = h * (0.30 + 0.13 * i) + math.sin(t * 0.5 + i) * 3.0
+                self.canvas.create_line(0, hy, w, hy, fill="#454028", width=6)
+        elif scene == "lowcloud":
+            draw_sun(sun_x, sun_y, sun_r * 0.7, "#9fb2c0", t * 0.3)
+            draw_cloud_row("#4f6272", 0.18, 20.0, 4, 1.15)
+        elif scene == "fogrisk":
+            draw_cloud_row("#5a6670", 0.20, 10.0, 2, 1.0)
+            draw_fog("#35424a", "#3d4b54", 1)
+        elif scene == "fog":
+            draw_fog("#4a4a4a", "#565656", 3)
+        elif scene == "densefog":
+            # Ghost sun: outline only, no rays (visibility < 0.5 km, A1).
+            self.canvas.create_oval(sun_x - sun_r, sun_y - sun_r,
+                                    sun_x + sun_r, sun_y + sun_r,
+                                    outline="#5e5e5e", width=2)
+            draw_fog("#585858", "#646464", 4)
+        elif scene == "drizzle":
+            draw_cloud_row("#3f4f5f", 0.14, 16.0, 3, 1.2)
+            draw_rain(10, 220.0, "#4f6f8f", 1.5, 8.0)
+        elif scene == "rain":
+            draw_cloud_row("#33465a", 0.12, 22.0, 3, 1.35)
+            draw_rain(22, 430.0, "#5f83a8", 3.0, 12.0)
+            draw_bolt()
+        elif scene == "winter":
+            draw_fog("#3a4656", "#445060", 1)
+            draw_snow(14, "#dfeaf5")
+        elif scene == "wind":
+            draw_cloud_row("#4a5a6e", 0.15, 60.0, 4, 0.9)
+            draw_wind(9, 260.0, "#8fa8bf", 0.10, 0.55)
+        elif scene == "gale":
+            draw_wind(12, 520.0, "#e8b0b0", 0.08, 0.60)
+            draw_rain(16, 520.0, "#c88a8a", 40.0, 12.0)
+            draw_cloud_row("#6e3a3a", 0.10, 90.0, 3, 1.3)
+        else:
+            # APPLICATION (A2): unreachable while the tables above are in
+            # sync; kept as the defensive clear-sky terminal case.
+            draw_sun(sun_x, sun_y, sun_r, "#ffd75e", t * 0.4)
+            draw_birds("#dfe9f0")
+
     def draw_metar_page(self, w: float, h: float) -> None:
+        """Draw SENSE page 5: themed scene, daemon METAR/TAF, and basis panel.
+
+        Purpose: render the Ada-compiled METAR/TAF report plus the sensor
+        readouts it was derived from; falls back to a locally compiled
+        report if the daemon's metar_taf string is blank.
+        Parameters: w, h - canvas size in pixels (float).
+        Returns: None (canvas side effects only).
+        [Citation: ICAO Doc 8585 - METAR/TAF group format]
+        [Citation: WMO CIMO Guide Ch.9 - dew-point spread thresholds]
+        """
         weather = self.full_data.get('ecosystem_weather', {})
         smc = self.full_data.get('smc', {})
         loc = self.full_data.get('location', {})
@@ -4531,27 +4804,17 @@ class PrimaryFlightDisplay:
         except (OSError, json.JSONDecodeError, ValueError, AttributeError):
             pass
 
-        # Read condition_icon from the Ada daemon instead of duplicating
-        # the classification logic here.  The daemon uses WMO CIMO Guide
-        # thresholds (dew-point spread) and ICAO Annex 3 rules.
+        # Read category + condition_icon from the Ada daemon instead of
+        # duplicating the classification logic here.  The daemon uses WMO
+        # CIMO Guide thresholds (dew-point spread) and ICAO Annex 3 rules.
         cond_icon = str(weather.get('condition_icon', '')).strip() or 'SHINY'
+        category = str(weather.get('category', '')).strip()
 
-        # Background color mapping (visual only — logic lives in earu-math.adb)
-        # [Citation: WMO CIMO Guide Ch.9 — visibility thresholds for color coding]
-        if cond_icon == "SNOWING":
-            self.canvas.create_rectangle(0, 0, w, h, fill="#1a1a1a", outline="")
-        elif cond_icon == "RAINING":
-            self.canvas.create_rectangle(0, 0, w, h, fill="#0a1a2a", outline="")
-        elif cond_icon == "DRIZZLE":
-            self.canvas.create_rectangle(0, 0, w, h, fill="#0a2a2a", outline="")
-        elif cond_icon == "FOGGY":
-            self.canvas.create_rectangle(0, 0, w, h, fill="#2c2c2c", outline="")
-        elif cond_icon == "HAZY":
-            self.canvas.create_rectangle(0, 0, w, h, fill="#2c2a1a", outline="")
-        elif cond_icon == "CLOUDY":
-            self.canvas.create_rectangle(0, 0, w, h, fill="#1a3a5a", outline="")
-        else:
-            self.canvas.create_rectangle(0, 0, w, h, fill="#001a33", outline="")
+        # Themed background + animated sky scene (visual only - the
+        # classification lives in earu-math.adb section 4a).  Drawn FIRST so
+        # every label and the METAR text below paint on top of it.
+        # [Citation: WMO CIMO Guide Ch.9 - visibility thresholds]
+        self._draw_sense_scene(category, cond_icon, w, h)
 
         self.canvas.create_text(w/2, 40, text=f"SENSE - {cond_icon}", fill="#00ff00", font=("Monaco", 20, "bold"))
 
