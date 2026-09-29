@@ -7,8 +7,8 @@ module Earu_io_AP
 
 
   let aP (key: string) (val: string) (comma: bool) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

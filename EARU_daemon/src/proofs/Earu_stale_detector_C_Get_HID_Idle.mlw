@@ -7,6 +7,6 @@ module Earu_stale_detector_C_Get_HID_Idle
   let c_Get_HID_Idle () : int
     requires { true }
     ensures { result >= 0 }
-    = 0
+    = C_Get_HID_Idle_Impl
 
 end

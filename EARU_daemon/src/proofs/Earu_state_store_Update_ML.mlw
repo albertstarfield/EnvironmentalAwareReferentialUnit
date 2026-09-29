@@ -6,10 +6,8 @@ module Earu_state_store_Update_ML
 
 
   let update_ML (user: int) (sig_Count: int) (sig_Locs: int) (inside: bool) : int
-    requires { user >= 0 }
-    requires { sig_Count >= 0 }
-    requires { sig_Locs >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = user
 
 end

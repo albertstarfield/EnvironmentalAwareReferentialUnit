@@ -7,6 +7,6 @@ module Earu_stale_detector_C_System
   let c_System (cmd: int) : int
     requires { cmd >= 0 }
     ensures { result >= 0 }
-    = cmd
+    = C_System_Impl (cmd)
 
 end

@@ -6,8 +6,8 @@ module Earu_io_Read_Sensor_Integer
 
 
   let read_Sensor_Integer (filename: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { filename'Length > 0 }
+    ensures { true }
     = Cache_Turbo
 
 end

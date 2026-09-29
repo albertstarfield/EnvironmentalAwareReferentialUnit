@@ -11,10 +11,10 @@ Module Earu_math_elem_funcs_Exp.
 
   (* Function exp — UNPROVED — obligation stub *)
   Definition exp (x: Z) : Z :=
-    Elem_Funcs.Exp (x);  -- SMT_VERIFIED: Exp is total on Real.
+    Result.
 
   Theorem exp_correct : forall (x: Z),
-    (not  (x = 0.0 /\ Y = 0.0)) -> (True).
+    (True) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

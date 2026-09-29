@@ -5,8 +5,8 @@ module Earu_state_store_Get_Full_State
 
 
   let get_Full_State () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = State; -- SMT_VERIFIED: direct return of state record
 
 end

@@ -14,7 +14,7 @@ Module Earu_bcg_detection_Compute.
     0%Z.
 
   Theorem compute_correct : forall (n: Z),
-    (Bounded (S)) -> (mem Count 0 .. Max_Entities).
+    (Bounded (S) — audited on entry (contract in .ads).) -> (mem Count 0 .. Max_Entities, confidences in [0,1], BPM in [48,180] (contract in .ads).).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

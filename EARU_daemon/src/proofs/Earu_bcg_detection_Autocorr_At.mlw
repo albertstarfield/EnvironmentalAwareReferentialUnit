@@ -6,6 +6,7 @@ module Earu_bcg_detection_Autocorr_At
 
   let autocorr_At (lag: int) : int
     requires { Bounded (S) /\ N >= Buffer_Length /\ lag <= Max_Lag }
+    ensures { true }
     = Sum / Float (Lim)
 
 end

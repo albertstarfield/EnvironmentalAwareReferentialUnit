@@ -6,8 +6,8 @@ module Earu_shm_Create_Memory_Health_SHM
 
 
   let create_Memory_Health_SHM (name: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Result
 
 end

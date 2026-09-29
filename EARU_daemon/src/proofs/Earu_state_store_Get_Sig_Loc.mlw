@@ -5,9 +5,8 @@ module Earu_state_store_Get_Sig_Loc
 
 
   let get_Sig_Loc (index: int) (loc: int) : int
-    requires { index >= 0 }
-    requires { loc >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = index
 
 end

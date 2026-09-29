@@ -6,7 +6,7 @@ module Earu_weather_fetcher_Latest_JSON
 
   let latest_JSON () : int
     requires { true }
-    ensures { result'Length = 0 \/ }
+    ensures { result >= 0 }
     = ""
 
 end

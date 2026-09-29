@@ -11,7 +11,7 @@ Module Earu_bcg_detection_Samples_Buffered.
 
   (* Function samples_Buffered — UNPROVED — obligation stub *)
   Definition samples_Buffered (s: Z) : Z :=
-    s.Saturation_Count.
+    s.Total.
 
   Theorem samples_Buffered_correct : forall (s: Z),
     (True) -> (samples_Buffered s <= 8000).

@@ -5,8 +5,8 @@ module Test_bcg_detection_Test_BCG_Detection
 
 
   let test_BCG_Detection () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — standalone test main, no inputs. }
+    ensures { true — prints PASS/FAIL summary; raises only via Check on hard fault. }
     = 0
 
 end

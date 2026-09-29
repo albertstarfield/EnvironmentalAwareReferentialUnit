@@ -5,8 +5,7 @@ module Earu_math_gravity_nav_Expected_Gravity
 
 
   let expected_Gravity () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — latitude/longitude/altitudes accepted for any real; axisymmetric model ignores Lon }
     = Base + Bouguer_Grad * Thick
 
 end

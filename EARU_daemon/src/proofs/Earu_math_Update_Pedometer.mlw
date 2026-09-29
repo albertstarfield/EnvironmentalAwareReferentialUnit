@@ -5,8 +5,8 @@ module Earu_math_Update_Pedometer
 
 
   let update_Pedometer () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

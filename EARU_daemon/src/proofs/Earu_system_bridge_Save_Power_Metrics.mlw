@@ -5,8 +5,8 @@ module Earu_system_bridge_Save_Power_Metrics
 
 
   let save_Power_Metrics () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

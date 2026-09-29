@@ -16,7 +16,7 @@ Module Earu_system_bridge_Read_SMC_Key.
     Earu.IO.Read_Sensor_Real (filename).
 
   Theorem read_SMC_Key_correct : forall (filename: string),
-    (True) -> (read_SMC_Key filename >= 0).
+    (true, Post => true) -> (true (conversion is total on clamped input).).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

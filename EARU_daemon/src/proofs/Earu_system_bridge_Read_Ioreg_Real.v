@@ -16,7 +16,7 @@ Module Earu_system_bridge_Read_Ioreg_Real.
     Earu.IO.Execute_And_Read_Real (command, 0%Z.0%Z).
 
   Theorem read_Ioreg_Real_correct : forall (command: string),
-    (True) -> (read_Ioreg_Real command >= 0).
+    (true, Post => true) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

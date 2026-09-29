@@ -6,7 +6,7 @@ module Earu_io_Project_Root
 
   let project_Root () : int
     requires { true }
-    ensures { result >= 0 }
+    ensures { result'Length > 0 }
     = Ada.Environment_Variables.Value ("EARU_HOME")
 
 end

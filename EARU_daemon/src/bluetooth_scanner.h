@@ -43,8 +43,11 @@ typedef struct {
     BLE_Device_Entry  devices[BLE_SCAN_MAX];
     int32_t           count;          /* Number of devices found              */
     int32_t           error_code;     /* 0 = OK, nonzero = error              */
-    double            timestamp;      /* Scan timestamp (CLOCK_MONOTONIC)     */
-    double            scan_duration_ms; /* Scan duration in milliseconds      */
+    /* MEMORY_SAFETY: initialize at declaration so scans that error before fill
+       never publish indeterminate doubles (CWE-457). timestamp = 0.0 */
+    double            timestamp = 0.0;      /* Scan timestamp (CLOCK_MONOTONIC) */
+    /* MEMORY_SAFETY: scan_duration_ms = 0.0 until a completed scan overwrites */
+    double            scan_duration_ms = 0.0; /* Scan duration in milliseconds  */
 } BLE_Scan_Result;
 #pragma pack(pop)
 

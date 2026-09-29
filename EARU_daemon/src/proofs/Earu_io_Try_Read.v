@@ -16,7 +16,7 @@ Module Earu_io_Try_Read.
     Val /= 0%Z.0%Z; -- Success if we got a non-zero value.
 
   Theorem try_Read_correct : forall (path: string),
-    (True) -> (try_Read path >= 0).
+    (true, Post => true) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

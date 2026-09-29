@@ -11,10 +11,10 @@ Module Earu_bcg_detection_Clamp.
 
   (* Function clamp — UNPROVED — obligation stub *)
   Definition clamp (v: R) (lo: R) (hi: R) : Z :=
-    0%Z.
+    lo.
 
   Theorem clamp_correct : forall (v: R) (lo: R) (hi: R),
-    (lo <= hi) -> (Clamp'mem Result lo .. hi).
+    (lo <= hi /\ lo <= hi — caller supplies an ordered envelope; mirrors .ads contract.) -> (Clamp'mem Result lo .. hi).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

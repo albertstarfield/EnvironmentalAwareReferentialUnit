@@ -11,7 +11,7 @@ Module Earu_math_Calculate_RMS.
 
   (* Function calculate_RMS — UNPROVED — obligation stub *)
   Definition calculate_RMS (data: Z) : Z :=
-    Sqrt (Sum_Sq / Real (data'Length));  -- SMT_VERIFIED: data'Length > 0%Z.
+    Sqrt (Arg);  -- SMT_VERIFIED: data'Length > 0%Z.
 
   Theorem calculate_RMS_correct : forall (data: Z),
     (data'Length > 0) -> (True).

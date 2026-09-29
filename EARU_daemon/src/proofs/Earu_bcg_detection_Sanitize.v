@@ -11,10 +11,10 @@ Module Earu_bcg_detection_Sanitize.
 
   (* Function sanitize — UNPROVED — obligation stub *)
   Definition sanitize (v: R) (lo: R) (hi: R) : Z :=
-    0%Z.
+    0%Z.0%Z;            --  NaN -> missing data (A3).
 
   Theorem sanitize_correct : forall (v: R) (lo: R) (hi: R),
-    (lo <= hi) -> (sanitize v lo hi = sanitize v lo hi).
+    (lo <= hi /\ lo <= hi — ordered envelope (mirrors .ads contract).) -> (sanitize v lo hi = sanitize v lo hi /\ sanitize v lo hi is non-NaN (X = X) /\ inside the envelope — every path returns 0.0, lo, hi, \/ finite v.).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

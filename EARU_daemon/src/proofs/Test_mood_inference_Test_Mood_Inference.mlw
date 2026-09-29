@@ -5,8 +5,8 @@ module Test_mood_inference_Test_Mood_Inference
 
 
   let test_Mood_Inference () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — standalone test main, no inputs. }
+    ensures { true — prints PASS/FAIL summary; raises on recorder hard fault. }
     = 0
 
 end

@@ -5,8 +5,8 @@ module Earu_bcg_detection_Refresh_Parity
 
 
   let refresh_Parity (s: int) : int
-    requires { true }
-    ensures { Integrity_Ok (s) }
+    requires { true — total over any BCG_State (forward-declared contract above). }
+    ensures { Integrity_Ok (s) /\ control fields unchanged (forward-declared contract above). }
     = s
 
 end

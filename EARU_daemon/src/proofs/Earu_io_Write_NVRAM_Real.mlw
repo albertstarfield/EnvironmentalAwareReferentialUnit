@@ -6,8 +6,8 @@ module Earu_io_Write_NVRAM_Real
 
 
   let write_NVRAM_Real (name: string) (value: int) : int
-    requires { value >= 0 }
-    ensures { result >= 0 }
+    requires { name'Length > 0 }
+    ensures { true }
     = value
 
 end

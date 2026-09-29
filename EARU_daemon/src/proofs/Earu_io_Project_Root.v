@@ -14,7 +14,7 @@ Module Earu_io_Project_Root.
     Ada.Environment_Variables.Value ("EARU_HOME").
 
   Theorem project_Root_correct : forall (n: Z),
-    (True) -> (project_Root n >= 0).
+    (True) -> (project_Root n'Length > 0).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

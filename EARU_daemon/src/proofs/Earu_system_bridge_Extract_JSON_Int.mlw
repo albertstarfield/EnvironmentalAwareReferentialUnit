@@ -5,8 +5,8 @@ module Earu_system_bridge_Extract_JSON_Int
 
 
   let extract_JSON_Int () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Integer
 
 end

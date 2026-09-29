@@ -6,7 +6,9 @@ module Earu_mood_inference_Clamp
 
   let clamp (v: real) (lo: real) (hi: real) : int
     requires { lo <= hi }
+    requires { lo <= hi — callers pass ordered bound pairs (−1..1, 0..1). }
     ensures { Clamp'mem Result lo .. hi }
-    = 0
+    ensures { Clamp'mem Result lo .. hi — every return path yields a bound. }
+    = lo
 
 end

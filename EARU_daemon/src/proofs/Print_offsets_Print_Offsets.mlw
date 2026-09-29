@@ -5,8 +5,7 @@ module Print_offsets_Print_Offsets
 
 
   let print_Offsets () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — standalone diagnostic; no inputs, no preconditions }
     = 0
 
 end

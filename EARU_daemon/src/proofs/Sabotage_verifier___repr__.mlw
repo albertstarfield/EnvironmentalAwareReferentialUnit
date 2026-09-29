@@ -7,6 +7,6 @@ module Sabotage_verifier___repr__
   let __repr__ () : unit
     requires { true }
     ensures { true }
-    = ()
+    = base
 
 end

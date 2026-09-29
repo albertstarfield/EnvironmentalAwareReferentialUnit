@@ -5,9 +5,8 @@ module Earu_math_gravity_nav_Update
 
 
   let update (loc: int) (now_T: int) : int
-    requires { loc >= 0 }
-    requires { now_T >= 0 }
-    ensures { result >= 0 }
+    requires { true — safe for any location state; uncalibrated/first-call paths hold safe defaults }
+    ensures { true;  -- gravity flags updated; DR position fields untouched }
     = loc
 
 end

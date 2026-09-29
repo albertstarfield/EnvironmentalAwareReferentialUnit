@@ -5,8 +5,7 @@ module Test_gravity_nav_Test_Gravity_Nav
 
 
   let test_Gravity_Nav () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — standalone test main; no inputs }
     = 0
 
 end

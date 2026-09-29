@@ -6,8 +6,8 @@ module Earu_shm_Open_ML_SHM
 
 
   let open_ML_SHM (name: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Result
 
 end

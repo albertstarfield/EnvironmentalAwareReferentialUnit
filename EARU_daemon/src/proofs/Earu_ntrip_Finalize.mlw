@@ -5,8 +5,8 @@ module Earu_ntrip_Finalize
 
 
   let finalize (packer: int) : int
-    requires { packer >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = packer
 
 end

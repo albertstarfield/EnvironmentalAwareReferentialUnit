@@ -5,8 +5,8 @@ module Earu_bcg_detection_Compute
 
 
   let compute () : int
-    requires { Bounded (S) }
-    ensures { mem Count 0 .. Max_Entities }
+    requires { Bounded (S) — audited on entry (contract in .ads). }
+    ensures { mem Count 0 .. Max_Entities, confidences in [0,1], BPM in [48,180] (contract in .ads). }
     = 0
 
 end

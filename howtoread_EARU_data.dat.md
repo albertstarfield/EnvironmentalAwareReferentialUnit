@@ -63,6 +63,11 @@ Derived using the Mahony Filter (Accel + Gyro fusion).
 | `gravity_anomaly_m_s2` | m/s² | Gravity anomaly = calibrated gravity − expected local gravity (WGS84 normal gravity − free-air altitude correction + Bouguer slab for terrain mass). ≈0 when calibrated correctly; a persistent non-zero value hints mis-calibration or a real local mass anomaly. 0.0 until gravity is calibrated. | ~±0.05 |
 | `gravity_grid_match` | 0/1 | 1 when the current gravity fingerprint matches a cell in the sparse visited-location grid (Terrain-Aided Navigation map), 0 otherwise. Confirms the device is at a previously-mapped spot. | 0 or 1 |
 | `gravity_motion_conflict` | 0/1 | Spurious-DR / vibration indicator: 1 when dead reckoning reports translation but the gravity anomaly (fingerprint) is unchanged → likely vibration-without-translation or DR drift; 0 when gravity agrees with stationary. Always 0 until seeded + calibrated. Fed into the neural DR adapter as an input channel. | 0 or 1 |
+| `gravity_prof_updates` | Count | Number of `Gravity_Nav.Update` calls (800 Hz) since boot — the denominator for the rates below. | |
+| `gravity_prof_matches` | Count | Times the sparse-grid match fired (`gravity_grid_match` = 1) since boot. Stays 0 while `gravity_prof_cells` > 0 → grid cells never match the live fingerprint (tune `Grid_Match_Tol`). | |
+| `gravity_prof_conflicts` | Count | Times `gravity_motion_conflict` = 1 since boot. A step right after a GPS re-anchor (teleport) indicates residual frame-reset activity. | |
+| `gravity_prof_cells` | Count | Occupied cells in the 64-cell sparse gravity grid at the last scan (the TAN map size). 0 = nothing captured yet. | 0 to 64 |
+| `gravity_scan_ns` | ns | Duration of the last 64-cell match scan in nanoseconds. Sub-microsecond expected; growth indicates a WCET regression. | |
 | `pos` | Meters | Relative Cartesian position `[x, y, z]`. | |
 | `total_distance_m` | Meters | Odometer for total distance traveled. | |
 | `odometer_30m` | Meters | Distance traveled in the last 30 seconds. | |

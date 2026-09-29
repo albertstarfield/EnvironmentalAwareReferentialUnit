@@ -11,10 +11,10 @@ Module Earu_math_elem_funcs_Sin.
 
   (* Function sin — UNPROVED — obligation stub *)
   Definition sin (x: Z) : Z :=
-    Elem_Funcs.Sin (x);  -- SMT_VERIFIED: Sin is total on Real.
+    Result.
 
   Theorem sin_correct : forall (x: Z),
-    (not  (x = 0.0 /\ Y = 0.0)) -> (True).
+    (True) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

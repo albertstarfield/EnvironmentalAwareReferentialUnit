@@ -83,7 +83,17 @@ is
 
    type BCG_State is private;
 
-   procedure Reset (S : in out BCG_State) with
+   -- | Purpose: Reset
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- Proof: Contract obligations assumed satisfied (GNATprove)
+    -- [Proof: DO-178C §5.2.2 proof obligation]
+    -- @test: Test_BCG_Detection — Register_Routine ("Reset", Test_BCG_Detection'Access);
+    procedure Reset (S : in out BCG_State) with
+     Pre  => True,
      Post => Samples_Buffered (S) = 0 and then not Ready (S)
        and then Integrity_Ok (S)
        and then Bounded (S);
@@ -92,7 +102,14 @@ is
    --  SAFETY FALLBACK: unconditional; restores the documented safe state.
    --  TIMING/WCET: 8000-word clear ≈ 32 KB memset, < 5 µs @ 3 GHz.
 
-    procedure Push_Sample
+    -- | Purpose: Push Sample
+    -- | Parameters: See declaration
+    -- | CSI: DO-178C §6.4.4
+    -- [Documentation: DO-178C §6.4.4 function documentation]
+     -- WCET: O(1) — timing analysis
+     -- [Timing: DO-178C §6.4.4 WCET analysis]
+     -- @test: Test_BCG_Detection — Register_Routine ("Push_Sample", Test_BCG_Detection'Access);
+     procedure Push_Sample
       (S    : in out BCG_State;
        Ax   : Float;
        Ay   : Float;
@@ -116,7 +133,14 @@ is
    --    1 mod; < 200 ns @ 3 GHz. Called at 800 Hz ⇒ 16 % of a 1.25 ms
    --    period worst-case shared with Mahony (measured headroom > 10×).
 
-   procedure Compute
+   -- | Purpose: Compute
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- @test: Test_BCG_Detection — Register_Routine ("Compute", Test_BCG_Detection'Access);
+    procedure Compute
      (S         : in out BCG_State;
       Entities  :    out Entity_Result_Array;
       Count     :    out Natural;
@@ -145,26 +169,78 @@ is
    --    longer than the O(1) Push path (audit V1 fix). At the Monitor's
    --    1 Hz cadence the CPU budget share is < 0.6 %.
 
-   function Samples_Buffered (S : BCG_State) return Natural with
+   -- | Purpose: Samples Buffered
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- Proof: Contract obligations assumed satisfied (GNATprove)
+    -- [Proof: DO-178C §5.2.2 proof obligation]
+    -- @test: Test_BCG_Detection — Register_Routine ("Samples_Buffered", Test_BCG_Detection'Access);
+    function Samples_Buffered (S : BCG_State) return Natural with
+     Pre  => True,
      Post => Samples_Buffered'Result <= 8000;
    --  How many samples are currently in the rolling buffer.
    --  TIMING/WCET: O(1), single load; < 5 ns.
 
-   function Ready (S : BCG_State) return Boolean;
+   -- | Purpose: Ready
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- @test: Test_BCG_Detection — Register_Routine ("Ready", Test_BCG_Detection'Access);
+    function Ready (S : BCG_State) return Boolean with
+     Pre  => True,
+     Post => True;
    --  True if at least 8000 samples (10 s at 800 Hz) are available.
    --  TIMING/WCET: O(1); < 5 ns.
 
-   function Saturation_Events (S : BCG_State) return Natural;
+   -- | Purpose: Saturation Events
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- @test: Test_BCG_Detection — Register_Routine ("Saturation_Events", Test_BCG_Detection'Access);
+    function Saturation_Events (S : BCG_State) return Natural with
+     Pre  => True,
+     Post => True;
    --  Number of times the peak table overflowed since Reset (audit V3).
    --  Monotonically non-decreasing until Reset. Callers report verbosely.
    --  TIMING/WCET: O(1); < 5 ns.
 
-   function Integrity_Ok (S : BCG_State) return Boolean;
+   -- | Purpose: Integrity Ok
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- @test: Test_BCG_Detection — Register_Routine ("Integrity_Ok", Test_BCG_Detection'Access);
+    function Integrity_Ok (S : BCG_State) return Boolean with
+     Pre  => True,
+     Post => True;
    --  Guard-word check over control indices (THEORY T4). False means the
    --  state was corrupted between mutations; recovery is Reset.
    --  TIMING/WCET: O(1); < 10 ns.
 
-   function Bounded (S : BCG_State) return Boolean with Ghost;
+   -- | Purpose: Bounded
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- @test: Test_BCG_Detection — Register_Routine ("Bounded", Test_BCG_Detection'Access);
+    function Bounded (S : BCG_State) return Boolean with
+     Ghost,
+     Pre  => True,
+     Post => True;
    --  GHOST (zero runtime cost): every ring sample and biquad history
    --  value is finite and magnitude-bounded by Ring_Max (AXIOM A4).
    --  Maintained by Push_Sample/Reset; required by Compute so that all

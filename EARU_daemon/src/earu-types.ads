@@ -136,10 +136,32 @@ package Earu.Types is
       Gyro_Bias     : aliased Vector3 := (others => <>);
       Accel_Bias    : aliased Vector3 := (others => <>);
       
-      -- Covariance Tracking
-      Cov_Trace     : aliased Real := 0.0;  -- Sum of diagonal covariance elements
+      -- Stationarity state (the "Covariance Tracking" Cov_Trace field was
+      -- removed by the E3 audit F4c fix: it was written every 800 Hz sample
+      -- but never read anywhere in the system — dead state. The authoritative
+      -- covariance now flows from the neural DR adapter SHM (DR_SHM.Cov_Lat,
+      -- written by python/earu_neural_dr.py) into Dead_Reckon_Update's
+      -- ZUPT_Cov_Lat parameter and shapes the ZUPT kill rate.)
       Is_Stationary : aliased Boolean := True;
       Stationary_Cnt: aliased Integer := 0;
+
+      -- GPS-confirmed ground-speed guard for ZUPT (E3 audit F3b fix).
+      -- AXIOM: an IMU alone cannot distinguish rest from constant velocity
+      --   (equivalence principle) — a smooth vehicle cruise (gyro < 0.5 rad/s,
+      --   A_Dyn_Mag <= 0.5 m/s^2) is telemetry-indistinguishable from parking,
+      --   so STAGE D's ZUPT would zero genuine velocity within ~14 ms.
+      --   GPS fixes are the only available discriminator: when the newest
+      --   anchor measured ground speed above ZUPT_GPS_Speed_Guard_M within
+      --   ZUPT_GPS_Speed_TTL_S, ZUPT is suppressed (same shape as the
+      --   existing stowed-while-moving suppression).
+      -- Last_CL_Speed : ground speed (m/s) of the newest GPS anchor;
+      --   0.0 = no fresh measurement -> ZUPT allowed.
+      -- CL_Speed_Age  : seconds since that anchor; initialized far above
+      --   the TTL so ZUPT is allowed before the first fix ever arrives.
+      -- [Reference: equivalence principle — uniformly-moving and resting
+      --  inertial frames are physically indistinguishable locally]
+      Last_CL_Speed : aliased Real := 0.0;
+      CL_Speed_Age  : aliased Real := 1.0E9;
 
       -- Gravity-anomaly / TAN cross-check fields (see earu-math-gravity_nav).
       -- Anomaly (m/s^2): calibrated gravity - expected (WGS84 + free-air + Bouguer).
@@ -148,6 +170,16 @@ package Earu.Types is
       Gravity_Grid_Match : aliased Boolean := False;
       -- Spurious-DR-motion indicator (0.0 = consistent, 1.0 = conflict).
       Gravity_Motion_Conflict : aliased Real := 0.0;
+      -- Gravity_Nav.Update profiling counters (plan: explain a persistently
+      -- 0.0 gravity_grid_match — empty grid vs no-match vs conflicts vs
+      -- scan cost). Float64 so 800 Hz increments never overflow (Natural
+      -- would wrap after ~31 days). Flows through State_Buffer like the
+      -- gravity flags above; exported in the EARU_data.dat JSON.
+      Gravity_Prof_Updates   : aliased Real := 0.0;  -- Update calls since boot
+      Gravity_Prof_Matches   : aliased Real := 0.0;  -- grid-match True count
+      Gravity_Prof_Conflicts : aliased Real := 0.0;  -- conflict = 1.0 count
+      Gravity_Prof_Cells     : aliased Real := 0.0;  -- occupied cells, last scan
+      Gravity_Scan_Ns        : aliased Real := 0.0;  -- last match-scan time (ns)
    end record;
 
    type Weather_Type is record

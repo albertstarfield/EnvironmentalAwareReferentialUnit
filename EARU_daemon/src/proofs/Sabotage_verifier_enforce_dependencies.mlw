@@ -5,9 +5,9 @@ module Sabotage_verifier_enforce_dependencies
   use bool.Bool
 
 
-  let enforce_dependencies () : bool
+  let enforce_dependencies (target: any) : bool
     requires { true }
-    ensures { result = true \/ result = false }
-    = true
+    ensures { result = true }
+    = false
 
 end

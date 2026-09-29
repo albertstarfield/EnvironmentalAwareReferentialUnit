@@ -5,8 +5,7 @@ module Earu_math_bluemarble_Calculate_Time_Anchors
 
 
   let calculate_Time_Anchors () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true,  -- any epoch/coordinates; body guards handle singular cases }
     = 0
 
 end

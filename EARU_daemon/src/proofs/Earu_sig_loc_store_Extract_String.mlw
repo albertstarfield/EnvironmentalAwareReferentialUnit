@@ -5,8 +5,7 @@ module Earu_sig_loc_store_Extract_String
 
 
   let extract_String () : int
-    requires { true }
-    ensures { result >= 0 }
-    = String
+    requires { true — any slice accepted; misses degrade to Default. }
+    = String is
 
 end

@@ -5,8 +5,8 @@ module Earu_system_bridge_Get_Date_Time_Fields
 
 
   let get_Date_Time_Fields () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

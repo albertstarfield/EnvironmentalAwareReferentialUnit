@@ -5,8 +5,8 @@ module Earu_math_Update_Bucket
 
 
   let update_Bucket () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — alpha in [0,1] by construction (EMA factors above) }
+    ensures { true — Bkt.Val EMA-smoothed; State/Dir/Drift refreshed }
     = 0
 
 end

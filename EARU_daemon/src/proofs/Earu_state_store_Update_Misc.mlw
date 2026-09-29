@@ -5,10 +5,8 @@ module Earu_state_store_Update_Misc
 
 
   let update_Misc (lid_Angle: int) (lid_Speed: int) (aLS: int) : int
-    requires { lid_Angle >= 0 }
-    requires { lid_Speed >= 0 }
-    requires { aLS >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = lid_Angle
 
 end

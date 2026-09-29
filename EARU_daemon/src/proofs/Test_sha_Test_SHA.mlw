@@ -5,8 +5,7 @@ module Test_sha_Test_SHA
 
 
   let test_SHA () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — standalone test main; no inputs }
     = 0
 
 end

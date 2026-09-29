@@ -5,8 +5,8 @@ module Earu_state_store_Update_Ecosystem
 
 
   let update_Ecosystem (e: int) : int
-    requires { e >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = e
 
 end

@@ -14,7 +14,7 @@ Module Earu_bcg_detection_Reset.
     s.
 
   Theorem reset_correct : forall (s: Z),
-    (True) -> (Samples_Buffered (s) = 0 /\ then not  Ready (s)).
+    (true — total: accepts any BCG_State (contract in .ads).) -> (Samples_Buffered (s) = 0 /\ not  Ready (s) /\ Integrity_Ok (s) /\ Bounded (s) — contract in .ads.).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

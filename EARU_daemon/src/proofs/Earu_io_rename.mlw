@@ -5,9 +5,8 @@ module Earu_io_rename
 
 
   let rename (old_path: int) (new_path: int) : int
-    requires { old_path >= 0 }
-    requires { new_path >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = old_path
 
 end

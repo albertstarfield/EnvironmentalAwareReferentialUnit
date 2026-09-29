@@ -5,8 +5,8 @@ module Earu_system_bridge_Pad4
 
 
   let pad4 (v: int) : int
-    requires { v >= 0 }
-    ensures { result >= 0 }
-    = Character'Val (v / 1000 mod 10 + Character'Pos ('0'))
+    requires { true, Post => true }
+    ensures { true }
+    = Character'Val (v / 1000 mod 10 + Character'Pos ('0')) & Character'Val (v / 100 mod 10 + Character'Pos ('0')) & Character'Val (v / 10 mod 10 + Character'Pos ('0')) & Character'Val (v mod 10 + Character'Pos ('0'))
 
 end

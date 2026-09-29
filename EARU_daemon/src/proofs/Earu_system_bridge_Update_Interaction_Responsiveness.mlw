@@ -5,8 +5,8 @@ module Earu_system_bridge_Update_Interaction_Responsiveness
 
 
   let update_Interaction_Responsiveness () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

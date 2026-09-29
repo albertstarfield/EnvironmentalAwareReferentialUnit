@@ -14,7 +14,7 @@ Module Earu_bcg_detection_Refresh_Parity.
     s.
 
   Theorem refresh_Parity_correct : forall (s: Z),
-    (True) -> (Integrity_Ok (s)).
+    (true — total over any BCG_State (forward-declared contract above).) -> (Integrity_Ok (s) /\ control fields unchanged (forward-declared contract above).).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

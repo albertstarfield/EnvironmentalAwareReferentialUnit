@@ -7,8 +7,8 @@ module Test_mood_inference_Run_Test
 
 
   let run_Test (name: string) (cond: bool) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — any label/condition pair accepted. }
+    ensures { true — Passed+Failed incremented exactly once. }
     = 0
 
 end

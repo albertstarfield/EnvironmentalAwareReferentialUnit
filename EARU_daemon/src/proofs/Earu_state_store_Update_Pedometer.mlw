@@ -5,8 +5,8 @@ module Earu_state_store_Update_Pedometer
 
 
   let update_Pedometer (p: int) : int
-    requires { p >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = p
 
 end

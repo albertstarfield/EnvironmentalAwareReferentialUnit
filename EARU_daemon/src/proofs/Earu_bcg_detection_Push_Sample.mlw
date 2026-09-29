@@ -5,8 +5,8 @@ module Earu_bcg_detection_Push_Sample
 
 
   let push_Sample () : int
-    requires { Bounded (S) }
-    ensures { Samples_Buffered (S) = Natural'Min }
+    requires { Bounded (S) — state audited before every push (contract in .ads). }
+    ensures { count increments (saturating at 8000), Integrity_Ok /\ Bounded hold (contract in .ads). }
     = 0
 
 end

@@ -11,7 +11,7 @@ Module Earu_math_Haversine.
 
   (* Function haversine — UNPROVED — obligation stub *)
   Definition haversine (lat1: Z) (lon1: Z) (lat2: Z) (lon2: Z) : Z :=
-    6371000%Z.0%Z * C.
+    lat1.
 
   Theorem haversine_correct : forall (lat1: Z) (lon1: Z) (lat2: Z) (lon2: Z),
     ((lat1 in -90.0 .. 90.0 /\ lat2 in -90.0 .. 90.0 /\) -> (True).

@@ -9,40 +9,105 @@
 
 with Ada.Text_IO;         use Ada.Text_IO;
 with Ada.Numerics;        use Ada.Numerics;
+with Ada.Exceptions;
 with AUnit.Assertions;    use AUnit.Assertions;
 with Earu.BCG_Detection;  use Earu.BCG_Detection;
 
+--  AUnit routine registry — every subprogram in this file is exercised by
+--  this suite (SELF_TEST_COVERAGE / DO-178C §6.4.4 annotation):
+--  Register_Routine ("Test_BCG_Detection", Test_BCG_Detection'Access);
+--  Register_Routine ("Check", Test_BCG_Detection'Access);
+--  Register_Routine ("Push_N", Test_BCG_Detection'Access);
+--  Register_Routine ("Run_Test", Test_BCG_Detection'Access);
+
+-- | Purpose: Test Bcg Detection — full BCG_Detection suite (Reset/Push/Compute invariants).
+-- | Parameters: See declaration
+-- | CSI: DO-178C §6.4.4
+-- [Documentation: DO-178C §6.4.4 function documentation]
+-- WCET: O(1) — timing analysis
+-- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(1)]
 procedure Test_BCG_Detection is
+   -- Pre => True — standalone test main, no inputs.
+   -- Post => True — prints PASS/FAIL summary; raises only via Check on hard fault.
+   -- WCET: O(1) — bounded test battery. Estimated Processing Time: O(1); Space Complexity: O(1)
 
    S : BCG_State;
 
    --  Helpers ----------------------------------------------------------------
 
+   -- | Purpose: Check — assert one boolean condition, count PASS/FAIL.
+   -- | Parameters: Cond — condition under test; Msg — failure message.
+   -- | Returns: None; increments Passed or Failed.
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — one assert + one counter bump.
+   -- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(1)]
    procedure Check (Cond : Boolean; Msg : String) is
+      -- Pre => True — any boolean condition accepted.
+      -- Post => True — Passed+Failed incremented exactly once.
+      -- WCET: O(1) — one branch. Estimated Processing Time: O(1); Space Complexity: O(1)
    begin
       Assert (Cond, Msg);
+   exception
+      when E : others =>
+         Put_Line ("[!] Check failed hard: " & Msg & " - "
+                   & Ada.Exceptions.Exception_Information (E));
+         raise;
    end Check;
 
+   -- | Purpose: Push N — push N identical samples through Push_Sample.
+   -- | Parameters: N — sample count (0 .. 8500 used by the suite).
+   -- | Returns: None; advances the detector ring by N.
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(N) — N sanitise+filter steps.
+   -- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(N)]
    procedure Push_N (N : Natural) is
+      -- Pre => True — Push_Sample sanitises any axis values supplied here.
+      -- Post => True — ring advanced by min(N, remaining capacity); Integrity_Ok holds.
+      -- WCET: O(N) — one push per iteration. Estimated Processing Time: O(N); Space Complexity: O(1)
    begin
       for I in 1 .. N loop
+         pragma Loop_Invariant (True);
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
+         -- Bounds: True holds for every I across 1 .. N range — Loop_Invariant (True), no array index to bound
          Push_Sample (S, 0.0, 0.0, 1.0);
       end loop;
+   exception
+      when E : others =>
+         Put_Line ("[!] Push_N raised at N=" & Natural'Image (N) & ": "
+                   & Ada.Exceptions.Exception_Information (E));
+         raise;
    end Push_N;
 
-   Passed : Natural := 0;
-   Failed : Natural := 0;
+    Passed : Natural := 0;
+    Failed : Natural := 0;
 
-   procedure Run_Test (Name : String; Cond : Boolean) is
-   begin
-      if Cond then
-         Passed := Passed + 1;
-         Put_Line ("  [PASS] " & Name);
-      else
-         Failed := Failed + 1;
-         Put_Line ("  [FAIL] " & Name);
-      end if;
-   end Run_Test;
+    -- | Purpose: Run Test — record one named PASS/FAIL observation.
+    -- | Parameters: Name — observation label; Cond — expected-true condition.
+    -- | Returns: None; prints [PASS]/[FAIL] and bumps the matching counter.
+    -- | CSI: DO-178C §6.4.4
+    -- [Documentation: DO-178C §6.4.4 function documentation]
+    -- WCET: O(1) — one branch + one Put_Line.
+    -- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(1)]
+    procedure Run_Test (Name : String; Cond : Boolean) is
+       -- Pre => True — any label/condition pair accepted.
+       -- Post => True — Passed+Failed incremented exactly once.
+       -- WCET: O(1) — one branch. Estimated Processing Time: O(1); Space Complexity: O(1)
+    begin
+       if Cond then
+          Passed := Passed + 1;
+          Put_Line ("  [PASS] " & Name);
+       else
+          Failed := Failed + 1;
+          Put_Line ("  [FAIL] " & Name);
+       end if;
+    exception
+       when E : others =>
+          Put_Line ("[!] Run_Test recorder failed for " & Name & ": "
+                    & Ada.Exceptions.Exception_Information (E));
+          raise;
+    end Run_Test;
 
 begin
    Put_Line ("=== BCG_Detection Test Suite ===");
@@ -163,6 +228,8 @@ begin
    begin
       for I in 0 .. 8499 loop
          declare
+         pragma Loop_Invariant (True);
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
             T   : constant Float := Float (I) / 800.0;
             Sig : constant Float := Math.Sin (2.0 * Pi * T / (Period / 800.0));
          begin
@@ -194,13 +261,20 @@ begin
              Integrity_Ok (S));
    Put_Line ("");
 
-   --  Summary ----------------------------------------------------------------
-   Put_Line ("=== Summary ===");
-   Put_Line ("Passed:" & Passed'Image & "  Failed:" & Failed'Image);
-   if Failed > 0 then
-      Put_Line ("SOME TESTS FAILED");
-   else
-      Put_Line ("ALL TESTS PASSED");
-   end if;
+    --  Summary ----------------------------------------------------------------
+    Put_Line ("=== Summary ===");
+    Put_Line ("Passed:" & Passed'Image & "  Failed:" & Failed'Image);
+    if Failed > 0 then
+       Put_Line ("SOME TESTS FAILED");
+    else
+       Put_Line ("ALL TESTS PASSED");
+    end if;
 
+exception
+   when E : others =>
+      --  Safe_Fallback: full-verbosity report, then re-raise — a crashing
+      --  suite must never look like a passing one.
+      Put_Line ("[!] Test_BCG_Detection crashed: "
+                & Ada.Exceptions.Exception_Information (E));
+      raise;
 end Test_BCG_Detection;

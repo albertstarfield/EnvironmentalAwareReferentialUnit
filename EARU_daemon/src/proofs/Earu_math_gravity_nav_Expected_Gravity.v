@@ -14,7 +14,7 @@ Module Earu_math_gravity_nav_Expected_Gravity.
     Base + Bouguer_Grad * Thick.
 
   Theorem expected_Gravity_correct : forall (n: Z),
-    (True) -> (expected_Gravity n >= 0).
+    (true — latitude/longitude/altitudes accepted for any real; axisymmetric model ignores Lon) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

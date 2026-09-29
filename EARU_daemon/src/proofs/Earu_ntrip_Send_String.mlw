@@ -6,8 +6,8 @@ module Earu_ntrip_Send_String
 
 
   let send_String (s: int) (str: string) : int
-    requires { s >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = s
 
 end

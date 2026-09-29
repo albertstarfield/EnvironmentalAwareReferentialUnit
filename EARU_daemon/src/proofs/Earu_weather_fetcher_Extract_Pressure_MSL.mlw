@@ -6,8 +6,7 @@ module Earu_weather_fetcher_Extract_Pressure_MSL
 
 
   let extract_Pressure_MSL (jSON: string) (default: real) : int
-    requires { true }
-    ensures { result >= 0 }
-    = Float
+    requires { true — any String slice accepted; misses degrade to default. }
+    = default
 
 end

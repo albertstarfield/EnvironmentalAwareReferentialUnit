@@ -16,7 +16,7 @@ Module Earu_io_Wrap_Background.
     To_String (Result).
 
   Theorem wrap_Background_correct : forall (command: string),
-    (True) -> (wrap_Background command >= 0).
+    (True) -> (wrap_Background command'Length > 0).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

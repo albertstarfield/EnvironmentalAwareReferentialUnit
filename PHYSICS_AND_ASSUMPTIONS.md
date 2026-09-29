@@ -583,6 +583,33 @@ To avoid breaking representation clauses, structural paddings, or binary seriali
 
 This enables deterministic, unified category status display across downstream visualization HUDs without requiring any changes to the binary layout of the shared memory pipeline!
 
+### 11.8 Positioning Availability Constraint (Deep Sleep & RF-Denied Environments)
+
+**AXIOM (Environmental Constraint):** The device can enter deep sleep (system hibernation / battery survival pulsing), and the field deployment includes *blank zones* — areas with no Wi-Fi access points and no Bluetooth beacons within radio range. In such zones, wireless RSSI triangulation is **physically impossible**, so no external position fix exists and the system cannot re-anchor for blackouts lasting **minutes up to approximately half an hour** ($T_{blackout} \lesssim 1800\,\text{s}$).
+
+Consequences that every positioning component must tolerate:
+
+1. **Open-loop dead reckoning is the normal regime, not an edge case.**
+   During a blackout the pipeline receives no `Corr_Velocity` nudge (§11.3), no heading alignment (§11.4), and no Cartesian reset (§11.5). DR integration runs open-loop for the full blackout duration; accumulated error must be tracked through growing covariance (`Cov_Trace`) rather than assumed bounded.
+
+   $$\text{Fix}_{external} = \varnothing \quad \forall \, t \in [t_0,\, t_0 + T_{blackout}], \qquad T_{blackout} \le 1800\,\text{s}$$
+
+2. **Re-anchoring after a blackout must accept large position jumps.**
+   When triangulation becomes available again, the first fix may be up to tens of kilometers from the dead-reckoned position (drift accumulated over the whole blackout, plus movement during it). The re-anchor path must treat a large $\Delta$ position as a legitimate **teleport re-anchor**, not as an outlier to be rejected or smoothed:
+
+   $$\text{if } D_{CL} \ge D_{teleport} \implies \text{flush history, zero velocity, accept coordinates immediately}$$
+
+3. **Deep sleep invalidates all time-local sensor state.**
+   While the device sleeps, the IMU produces no samples and wall-clock time advances across the gap. On wake, the CL history window (§11.2), `Raw_Vel`, `Pos` seed, and any velocity/heading gains derived from pre-sleep data are **stale** and must be reset or re-derived before being trusted — otherwise $D_{CL} / \Delta t$ divides a large distance by a sleep-spanning $\Delta t$ (or vice versa) and produces a nonsense reference velocity.
+
+4. **`locationd` cached coordinates after wake are suspect.**
+   Immediately after waking in a blank zone, CoreLocation may return the last crowd-sourced cached fix rather than a fresh scan. A fix that arrives with no accompanying beacons in view must be treated as low-confidence until corroborated — it can silently pin the device to a location it has already left (the stale-fix failure mode).
+
+5. **No Wi-Fi/Bluetooth ≠ no positioning need.**
+   The transportation categorizer (§11.7) loses both $N_{ble}$ and $N_{wifi}$ inputs in a blank zone; category gates must degrade gracefully (fall back to `UnknownMoving_*` on velocity alone) rather than freeze the last known category indefinitely.
+
+**Design requirement derived from this constraint:** dead reckoning, gravity matching, and the monitor visualization must all remain correct and bounded with *zero* external updates for at least $T_{blackout} = 1800\,\text{s}$, and the first fix after such a gap must be applied as an instantaneous re-anchor, never as a gradual correction.
+
 ---
 
 ## 12. Energy, Power, and Battery Survivability Mechanics

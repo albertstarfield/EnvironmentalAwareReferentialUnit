@@ -5,8 +5,8 @@ module Earu_bcg_shared_Buffered
 
 
   let buffered () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — total read over the private State. }
+    ensures { Samples_Buffered-style bound: result <= 8000 (delegated contract). }
     = Earu.BCG_Detection.Samples_Buffered (State);  -- SMT_VERIFIED
 
 end

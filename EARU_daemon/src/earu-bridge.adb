@@ -5,6 +5,12 @@ package body Earu.Bridge is
 
    package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions (Real);  -- static: generic instantiation, no heap allocation
 
+   -- | Purpose: Update Structural Fatigue
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure Update_Structural_Fatigue (State : in out Earu_State) is
 
       -- --- Structural Health Monitoring (SHM) Pipeline ---

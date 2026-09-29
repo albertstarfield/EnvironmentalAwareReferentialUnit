@@ -5,8 +5,8 @@ module Earu_network_status_Get_All
 
 
   let get_All () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — total snapshot of the fixed 13-slot array. }
+    ensures { true — result is a valid Status_Array (all enum values). }
     = Current_Statuses
 
 end

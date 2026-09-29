@@ -405,61 +405,118 @@ package Earu.Shm is
    -- Purpose: Open an existing IMU shared memory segment for reading.
    -- Parameters: Name : String -- POSIX shared memory name.
    -- Returns: IMU_SHM_Ptr access to the mapped segment, or null on failure.
-   function Open_IMU_SHM (Name : String) return IMU_SHM_Ptr;
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   function Open_IMU_SHM (Name : String) return IMU_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Open an existing Stats shared memory segment for reading.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: Stats_SHM_Ptr access to the mapped segment, or null on failure.
-   function Open_Stats_SHM (Name : String) return Stats_SHM_Ptr;
+    -- Purpose: Open an existing Stats shared memory segment for reading.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: Stats_SHM_Ptr access to the mapped segment, or null on failure.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Open_Stats_SHM (Name : String) return Stats_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Open an existing Weather shared memory segment for reading.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: Weather_SHM_Ptr access to the mapped segment, or null on failure.
-   function Open_Weather_SHM (Name : String) return Weather_SHM_Ptr;
+    -- Purpose: Open an existing Weather shared memory segment for reading.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: Weather_SHM_Ptr access to the mapped segment, or null on failure.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Open_Weather_SHM (Name : String) return Weather_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Open an existing ML shared memory segment for reading.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: ML_SHM_Ptr access to the mapped segment, or null on failure.
-   function Open_ML_SHM (Name : String) return ML_SHM_Ptr;
+    -- Segment size chosen to match the Python sidecar's ftruncate exactly
+    -- (earu_ml_bridge.py shm.create: ftruncate to 273408 = 34192 payload
+    -- bytes rounded up by the original author's bits-as-bytes slip; the
+    -- value is preserved byte-for-byte for segment-size parity). The
+    -- Weather_SHM record itself occupies the first 34192 bytes.
+    -- [Citation: python/earu_ml_bridge.py weather_worker SHM create]
+    Weather_SHM_Segment_Size : constant := 273408;
 
-   -- Purpose: Open an existing Lid shared memory segment for reading.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: Lid_SHM_Ptr access to the mapped segment, or null on failure.
-   function Open_Lid_SHM (Name : String) return Lid_SHM_Ptr;
+    -- Purpose: Create (or open) the Weather shared memory segment for writing.
+    --          Mirrors Python's os.open(O_CREAT|O_RDWR) + ftruncate(273408)
+    --          + mmap(MAP_SHARED) so a sidecar-created segment is reused
+    --          unchanged and a missing segment is created with Python's size.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: Weather_SHM_Ptr access to the mapped segment, or null on
+    --          failure (Safe_Fallback: null + no raise, caller logs).
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- [Citation: python/earu_ml_bridge.py:545-589 — payload pack reference]
+    function Create_Weather_SHM (Name : String) return Weather_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Open an existing ALS shared memory segment for reading.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: ALS_SHM_Record_Ptr access to the mapped segment, or null on failure.
-   function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
+    -- Purpose: Open an existing ML shared memory segment for reading.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: ML_SHM_Ptr access to the mapped segment, or null on failure.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Open_ML_SHM (Name : String) return ML_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Create (or open) an IMU shared memory segment for writing.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: IMU_SHM_Ptr access to the mapped segment.
-   function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr;
+    -- Purpose: Open an existing Lid shared memory segment for reading.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: Lid_SHM_Ptr access to the mapped segment, or null on failure.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Open_Lid_SHM (Name : String) return Lid_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Create (or open) a Lid shared memory segment for writing.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: Lid_SHM_Ptr access to the mapped segment.
-   function Create_Lid_SHM (Name : String) return Lid_SHM_Ptr;
+    -- Purpose: Open an existing ALS shared memory segment for reading.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: ALS_SHM_Record_Ptr access to the mapped segment, or null on failure.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Open_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Create (or open) an ALS shared memory segment for writing.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: ALS_SHM_Record_Ptr access to the mapped segment.
-   function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr;
+    -- Purpose: Create (or open) an IMU shared memory segment for writing.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: IMU_SHM_Ptr access to the mapped segment.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Create_IMU_SHM (Name : String) return IMU_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Create (or open) a Dead Reckoning shared memory segment.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: DR_SHM_Ptr access to the mapped segment.
-   function Create_DR_SHM (Name : String) return DR_SHM_Ptr;
+    -- Purpose: Create (or open) a Lid shared memory segment for writing.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: Lid_SHM_Ptr access to the mapped segment.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Create_Lid_SHM (Name : String) return Lid_SHM_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Open an existing Memory Health shared memory segment.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: Memory_Health_SHM_Ptr access to the mapped segment.
-   function Open_Memory_Health_SHM (Name : String) return Memory_Health_SHM_Ptr;
+    -- Purpose: Create (or open) an ALS shared memory segment for writing.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: ALS_SHM_Record_Ptr access to the mapped segment.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Create_ALS_SHM (Name : String) return ALS_SHM_Record_Ptr
+      with Pre => True, Post => True;
 
-   -- Purpose: Create (or open) a Memory Health shared memory segment.
-   -- Parameters: Name : String -- POSIX shared memory name.
-   -- Returns: Memory_Health_SHM_Ptr access to the mapped segment.
-   function Create_Memory_Health_SHM (Name : String) return Memory_Health_SHM_Ptr;
+    -- Purpose: Create (or open) a Dead Reckoning shared memory segment.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: DR_SHM_Ptr access to the mapped segment.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Create_DR_SHM (Name : String) return DR_SHM_Ptr
+      with Pre => True, Post => True;
+
+    -- Purpose: Open an existing Memory Health shared memory segment.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: Memory_Health_SHM_Ptr access to the mapped segment.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Open_Memory_Health_SHM (Name : String) return Memory_Health_SHM_Ptr
+      with Pre => True, Post => True;
+
+    -- Purpose: Create (or open) a Memory Health shared memory segment.
+    -- Parameters: Name : String -- POSIX shared memory name.
+    -- Returns: Memory_Health_SHM_Ptr access to the mapped segment.
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    function Create_Memory_Health_SHM (Name : String) return Memory_Health_SHM_Ptr
+      with Pre => True, Post => True;
 
 end Earu.Shm;

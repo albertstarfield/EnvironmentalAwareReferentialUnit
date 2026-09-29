@@ -6,8 +6,8 @@ module Earu_weather_fetcher_Store
 
 
   let store (jSON: string) : int
-    requires { jSON'Length >= 0 }
-    ensures { Len <= Data'Length }
+    requires { true }
+    ensures { result >= 0 }
     = 0
 
 end

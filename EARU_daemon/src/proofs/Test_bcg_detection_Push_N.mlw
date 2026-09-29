@@ -5,8 +5,8 @@ module Test_bcg_detection_Push_N
 
 
   let push_N (n: int) : int
-    requires { n >= 0 }
-    ensures { result >= 0 }
+    requires { true — Push_Sample sanitises any axis values supplied here. }
+    ensures { true — ring advanced by min(n, remaining capacity); Integrity_Ok holds. }
     = n
 
 end

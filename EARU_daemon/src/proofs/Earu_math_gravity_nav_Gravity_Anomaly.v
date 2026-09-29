@@ -14,7 +14,7 @@ Module Earu_math_gravity_nav_Gravity_Anomaly.
     0%Z.0%Z;  -- safe default until calibrated.
 
   Theorem gravity_Anomaly_correct : forall (loc: Z),
-    (loc >= 0) -> (gravity_Anomaly loc >= 0).
+    (true — uncalibrated locations are handled by the safe default below) -> (true — 0.0 when uncalibrated, else calibrated gravity minus model (m/s^2)).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

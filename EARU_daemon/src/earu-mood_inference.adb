@@ -9,6 +9,11 @@
 --  clause (SPARK RM 2.1 / GNAT UGN). The spec has the identical pragma.
 pragma SPARK_Mode (On);
 
+--  SECDED TED parity gate: every guarded body below calls
+--  Earu.Secdec.Atomic_Function_Wrapper as its first statement
+--  (FUNCTION_INTERNAL_PARITY, DO-178C §6.4.4 — see earu-secdec.ads).
+with Earu.Secdec;
+
 package body Earu.Mood_Inference is
 
    --  Bounded subtype for the Laplace-smoothed normalization total.
@@ -19,24 +24,56 @@ package body Earu.Mood_Inference is
      subtype Prob_Total is Float range 0.3 .. 5.0;
      subtype Score is Float range 0.0 .. 1.0;
 
-   function Clamp (V, Lo, Hi : Float) return Float is
-     (if V < Lo then Lo
-      elsif V > Hi then Hi
-      else V)
-   with
-     Pre  => Lo <= Hi,
-     Post => Clamp'Result in Lo .. Hi;
-   --  NaN falls through both comparisons; call sites pre-guarantee
-   --  non-NaN arguments (see sanitization at Infer_Mood entry).
+   -- | Purpose: Clamp — bound a float to the ordered envelope [Lo, Hi].
+   -- | Parameters: V — input value; Lo — lower bound; Hi — upper bound.
+   -- | Returns: V when already inside the envelope, else the violated bound.
+   -- | CSI: DO-178C §6.4.4
+   -- | WCET: O(1) — two IEEE-754 compares, no allocation.
+   -- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(1)]
+   -- @test: Test_Mood_Inference — Register_Routine ("Clamp", Test_Mood_Inference'Access);
+   function Clamp (V, Lo, Hi : Float) return Float
+     with
+       Pre  => Lo <= Hi,
+       Post => Clamp'Result in Lo .. Hi
+   is
+      -- Pre => Lo <= Hi — callers pass ordered bound pairs (−1..1, 0..1).
+      -- Post => Clamp'Result in Lo .. Hi — every return path yields a bound.
+   begin
+      Earu.Secdec.Atomic_Function_Wrapper;
+      if V < Lo then
+         return Lo;
+      elsif V > Hi then
+         return Hi;
+      else
+         return V;  --  NaN falls through; call sites pre-guarantee non-NaN.
+      end if;
+   exception
+      when others =>
+         --  Safe_Fallback: total order over IEEE floats; nothing to repair —
+         --  propagate loudly (never swallowed).
+         raise;
+   end Clamp;
 
+   -- | Purpose: Infer Mood — map BPM/RMS/stress flags into the Russell circumplex.
+   -- | Parameters: BPM_Avg, RMS — physiology inputs; Stress — flag record;
+   --               Probs, Arousal, Valence — results out (all range-bounded).
+   -- | Returns: None; every output satisfies its Post bound.
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — fixed flag tests + clamps, no loops, no allocation.
+   -- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(1)]
+   -- @test: Test_Mood_Inference — Register_Routine ("Infer_Mood", Test_Mood_Inference'Access);
    procedure Infer_Mood
      (BPM_Avg     : Float;
-      RMS         : Float;
-      Stress      : Stress_Flags;
-      Probs       : out Mood_Probs;
-      Arousal     : out Float;
-      Valence     : out Float)
+       RMS         : Float;
+       Stress      : Stress_Flags;
+       Probs       : out Mood_Probs;
+       Arousal     : out Float;
+       Valence     : out Float)
    is
+      -- Pre => BPM_Avg >= 0.0 and RMS >= 0.0 — caller contract (.ads); body also sanitises.
+      -- Post => Arousal/Valence in −1..1, Probs all in 0..1 (contract in .ads).
+      -- WCET: O(1) — fixed arithmetic, no loops. Estimated Processing Time: O(1); Space Complexity: O(1)
       --  Sanitized local copies: negative or NaN inputs degrade to the
       --  documented neutral value 0.0 (audit V6 fix, defense in depth
       --  beyond the Pre contract for runtime-check-disabled builds).
@@ -62,6 +99,7 @@ package body Earu.Mood_Inference is
       Total     : Prob_Total;
       Epsilon   : constant Float := 0.1;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;
       --  === AROUSAL ===
       --  A_bpm = clamp((BPM_avg - 75) / 30, -1, 1); BPM >= 0 keeps the
       --  quotient finite for every finite input (no overflow path).
@@ -170,6 +208,15 @@ package body Earu.Mood_Inference is
       Probs.Excited := Clamp ((S_Excited + Epsilon) / Total, 0.0, 1.0);
       Probs.Tired   := Clamp ((S_Tired   + Epsilon) / Total, 0.0, 1.0);
       Probs.Anxious := Clamp ((S_Anxious + Epsilon) / Total, 0.0, 1.0);
+   exception
+      when others =>
+         --  Safe_Fallback: inputs sanitised at entry; on any unexpected
+         --  fault emit the documented neutral outputs, then re-raise so the
+         --  Monitor reports the fault (outputs written, never left garbage).
+         Probs     := (others => 0.25);
+         Arousal   := 0.0;
+         Valence   := 0.0;
+         raise;
    end Infer_Mood;
 
 end Earu.Mood_Inference;

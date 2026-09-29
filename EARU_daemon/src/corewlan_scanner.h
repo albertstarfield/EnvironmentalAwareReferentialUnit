@@ -64,8 +64,11 @@ typedef struct {
 typedef struct {
     int32_t             count;
     int32_t             error_code;
-    double              timestamp;
-    double              scan_duration_ms;
+    /* MEMORY_SAFETY: initialize at declaration — error paths leave 0.0 not garbage.
+       timestamp = 0.0 until scan completion overwrites (CWE-457) */
+    double              timestamp = 0.0;
+    /* MEMORY_SAFETY: scan_duration_ms = 0.0 until measured (CWE-457) */
+    double              scan_duration_ms = 0.0;
     WiFi_Network_Entry  networks[WIFI_SCAN_MAX];
 } WiFi_Scan_Result;
 

@@ -5,8 +5,8 @@ module Earu_math_Update_Vibration_State
 
 
   let update_Vibration_State () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

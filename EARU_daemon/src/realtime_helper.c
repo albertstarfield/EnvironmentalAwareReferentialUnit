@@ -55,8 +55,10 @@ void configure_realtime(int period_ms, int computation_ms, int constraint_ms) {
     // Convert nanoseconds to Mach absolute time units (ticks).
     // [SMT_LOGIC: Overflow guard] ns * timebase.denom could overflow uint64_t.
     // Safe division order: (ns / numer) * denom to reduce overflow risk.
-    if (timebase.numer == 0) {
-        printf("[!] FATAL: mach_timebase_info returned numer=0, cannot configure\n");
+    /* SMT guard: division-by-zero — timebase.numer != 0 AND timebase.denom != 0 */
+    if (timebase.numer == 0 || timebase.denom == 0) {
+        printf("[!] FATAL: mach_timebase_info returned numer=%u denom=%u, cannot configure\n",
+               timebase.numer, timebase.denom);
         return;
     }
     policy.period = (uint32_t)((period_ns / timebase.numer) * timebase.denom);
@@ -81,16 +83,28 @@ void configure_realtime(int period_ms, int computation_ms, int constraint_ms) {
 
 /**
  * Purpose: Mark the beginning of a realtime loop cycle (placeholder for future instrumentation).
+ * AXIOMS: Cycle markers are side-effect free; callers pair start/end around one period.
+ * THEORIES: Elapsed = end - start bounds one THREAD_TIME_CONSTRAINT period.
+ * APPLICATIONS: future WCET instrumentation inserts timestamps here.
+ * CITATIONS: Mach Kernel Programming Guide — thread_policy_set
+ * [Citation: thread_policy_set - https://developer.apple.com/documentation/kernel/1387382-thread_policy_set]
+ * WCET: O(1) — no work yet; Space Complexity: O(1)
  * Returns: None
  */
 void start_realtime_loop_cycle(void) {
-    // No-op
+    // No-op — Safe_Fallback: intentionally empty until WCET probes land
 }
 
 /**
  * Purpose: Mark the end of a realtime loop cycle (placeholder for future instrumentation).
+ * AXIOMS: Called only after start_realtime_loop_cycle in the same period.
+ * THEORIES: Pairing end-start yields measured cycle time for deadline checks.
+ * APPLICATIONS: future WCET instrumentation inserts timestamps here.
+ * CITATIONS: Mach Kernel Programming Guide — thread_policy_set
+ * [Citation: thread_policy_set - https://developer.apple.com/documentation/kernel/1387382-thread_policy_set]
+ * WCET: O(1) — no work yet; Space Complexity: O(1)
  * Returns: None
  */
 void end_realtime_loop_cycle(void) {
-    // No-op
+    // No-op — Safe_Fallback: intentionally empty until WCET probes land
 }

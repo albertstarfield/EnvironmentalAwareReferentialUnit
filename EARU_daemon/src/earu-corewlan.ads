@@ -41,24 +41,58 @@ package Earu.CoreWLAN is
 
    --  Initialize the CoreWLAN scanner (must be called once before scanning).
    --  Returns 0 on success, negative on error.
+   -- | Purpose: Corewlan Scan Init
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    function CoreWLAN_Scan_Init return Interfaces.Integer_32;
    pragma Import (C, CoreWLAN_Scan_Init, "corewlan_scan_init");
 
    --  Perform an open WiFi scan (all networks).
    --  Result is written to the provided pointer.
    --  Returns 0 on success, negative on error.
+   -- | Purpose: Corewlan Scan Wifi
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure CoreWLAN_Scan_WiFi (Result : access WiFi_Scan_Result);
    pragma Import (C, CoreWLAN_Scan_WiFi, "corewlan_scan_wifi");
 
    --  Get the number of networks found in the last scan.
+   -- | Purpose: Corewlan Get Scan Count
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    function CoreWLAN_Get_Scan_Count return Interfaces.Integer_32;
    pragma Import (C, CoreWLAN_Get_Scan_Count, "corewlan_get_scan_count");
 
    --  Get the error code from the last scan.
+   -- | Purpose: Corewlan Get Scan Error
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    function CoreWLAN_Get_Scan_Error return Interfaces.Integer_32;
    pragma Import (C, CoreWLAN_Get_Scan_Error, "corewlan_get_scan_error");
 
    --  Check if CoreWLAN is available on this system.
+   -- | Purpose: Corewlan Is Available
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    function CoreWLAN_Is_Available return Interfaces.Integer_32;
    pragma Import (C, CoreWLAN_Is_Available, "corewlan_is_available");
 

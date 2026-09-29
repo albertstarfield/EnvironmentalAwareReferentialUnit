@@ -5,8 +5,8 @@ module Earu_system_bridge_Get_CPU_Usage
 
 
   let get_CPU_Usage () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

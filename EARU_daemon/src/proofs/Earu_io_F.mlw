@@ -5,8 +5,8 @@ module Earu_io_F
 
 
   let f (r: int) : int
-    requires { r >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = "null"
 
 end

@@ -10,6 +10,8 @@ package Earu.Bridge is
    -- Parameters:
    --   State : in out Earu_State -- The shared telemetry state to update.
    -- Returns: None (procedure)
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure Update_Structural_Fatigue (State : in out Earu_State);
 
 end Earu.Bridge;

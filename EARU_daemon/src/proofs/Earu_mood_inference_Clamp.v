@@ -11,10 +11,10 @@ Module Earu_mood_inference_Clamp.
 
   (* Function clamp — UNPROVED — obligation stub *)
   Definition clamp (v: R) (lo: R) (hi: R) : Z :=
-    0%Z.
+    lo.
 
   Theorem clamp_correct : forall (v: R) (lo: R) (hi: R),
-    (lo <= hi) -> (Clamp'mem Result lo .. hi).
+    (lo <= hi /\ lo <= hi — callers pass ordered bound pairs (−1..1, 0..1).) -> (Clamp'mem Result lo .. hi /\ Clamp'mem Result lo .. hi — every return path yields a bound.).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

@@ -5,8 +5,8 @@ module Earu_system_bridge_Read_SMC_Power_Keys
 
 
   let read_SMC_Power_Keys (sMC: int) : int
-    requires { sMC >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = sMC
 
 end

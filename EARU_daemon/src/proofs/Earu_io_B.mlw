@@ -6,8 +6,8 @@ module Earu_io_B
 
 
   let b (val: bool) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = (if val then "true" else "false")
 
 end

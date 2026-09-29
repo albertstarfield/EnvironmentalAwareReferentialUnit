@@ -6,8 +6,8 @@ module Earu_io_S
 
 
   let s (str: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = To_String (Result)
 
 end

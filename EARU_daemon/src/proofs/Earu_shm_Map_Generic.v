@@ -16,7 +16,7 @@ Module Earu_shm_Map_Generic.
     System.Null_Address.
 
   Theorem map_Generic_correct : forall (name: string) (size: Z),
-    (size >= 0) -> (map_Generic name size >= 0).
+    (true, Post => true is) -> (true is).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

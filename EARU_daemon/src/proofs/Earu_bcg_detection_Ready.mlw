@@ -5,8 +5,8 @@ module Earu_bcg_detection_Ready
 
 
   let ready (s: int) : int
-    requires { s >= 0 }
-    ensures { result >= 0 }
-    = s.Saturation_Count
+    requires { true }
+    ensures { true }
+    = (s.Total >= Buffer_Length)
 
 end

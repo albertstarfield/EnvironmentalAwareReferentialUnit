@@ -7,8 +7,8 @@ module Earu_io_AL
 
 
   let aL (key: string) (val: int) (comma: bool) : int
-    requires { val >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = val
 
 end

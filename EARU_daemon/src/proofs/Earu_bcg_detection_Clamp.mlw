@@ -6,7 +6,8 @@ module Earu_bcg_detection_Clamp
 
   let clamp (v: real) (lo: real) (hi: real) : int
     requires { lo <= hi }
+    requires { lo <= hi — caller supplies an ordered envelope; mirrors .ads contract. }
     ensures { Clamp'mem Result lo .. hi }
-    = 0
+    = lo
 
 end

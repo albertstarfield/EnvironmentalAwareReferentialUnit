@@ -7,7 +7,7 @@ module Sabotage_verifier_detect_language
 
   let detect_language (filepath: string) : string
     requires { true }
-    ensures { result = "python" \/ result = "ada" \/ result = "c" }
+    ensures { result = "" }
     = lang_map.get(ext, "python")
 
 end

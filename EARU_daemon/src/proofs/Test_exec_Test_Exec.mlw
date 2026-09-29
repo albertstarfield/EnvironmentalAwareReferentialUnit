@@ -5,8 +5,7 @@ module Test_exec_Test_Exec
 
 
   let test_Exec () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — standalone test main; SHM create failure prints FAIL (null), not  a crash. }
     = 0
 
 end

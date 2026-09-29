@@ -6,8 +6,8 @@ module Earu_io_Hash
 
 
   let hash (input: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = GNAT.SHA256.Digest (input)
 
 end

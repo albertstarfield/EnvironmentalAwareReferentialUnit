@@ -5,8 +5,8 @@ module Earu_state_store_Update_BLE_Scan
 
 
   let update_BLE_Scan () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

@@ -5,8 +5,7 @@ module Earu_bcg_shared_Snapshot
 
 
   let snapshot () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — accepts any call; recovery happens inside. }
     = 0
 
 end

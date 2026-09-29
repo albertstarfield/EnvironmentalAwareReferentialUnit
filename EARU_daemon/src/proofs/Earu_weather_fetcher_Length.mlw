@@ -6,7 +6,7 @@ module Earu_weather_fetcher_Length
 
   let length () : int
     requires { true }
-    ensures { result <= Data'Length }
+    ensures { result >= 0 }
     = Len
 
 end

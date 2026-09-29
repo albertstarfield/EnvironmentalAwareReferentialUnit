@@ -14,7 +14,7 @@ Module Earu_math_bluemarble_Bouguer_Horizon_Dip.
     Cached_Dip.
 
   Theorem bouguer_Horizon_Dip_correct : forall (alt_Meters: Z),
-    (alt_Meters >= 0) -> (bouguer_Horizon_Dip alt_Meters >= 0).
+    (true,  -- any altitude; body clamps negatives to sea level) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

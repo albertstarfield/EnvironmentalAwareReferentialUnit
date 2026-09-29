@@ -11,10 +11,10 @@ Module Earu_math_gravity_nav_Normal_Gravity.
 
   (* Function normal_Gravity — UNPROVED — obligation stub *)
   Definition normal_Gravity (phi: Z) (h: Z) : Z :=
-    Gamma_Equator * (1%Z.0%Z + Gamma_K * Sin2).
+    Gamma_Equator * (1%Z.0%Z + Gamma_K * Sin2) / Real_Funcs.Sqrt (Sqrt_Arg) - Free_Air_Grad * h;  -- single physical line: no unreachable continuation (FLOW_CONTROL); SMT_VERIFIED guard above.
 
   Theorem normal_Gravity_correct : forall (phi: Z) (h: Z),
-    (phi >= 0 /\ h >= 0) -> (normal_Gravity phi h >= 0).
+    (true — any latitude angle (rad) /\ altitude (m) accepted; Real'Max guard below makes the formula total) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

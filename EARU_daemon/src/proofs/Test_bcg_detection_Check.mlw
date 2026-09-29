@@ -7,8 +7,8 @@ module Test_bcg_detection_Check
 
 
   let check (cond: bool) (msg: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — any boolean condition accepted. }
+    ensures { true — Passed+Failed incremented exactly once. }
     = 0
 
 end

@@ -5,8 +5,8 @@ module Earu_state_store_Update_SMC
 
 
   let update_SMC (sMC: int) : int
-    requires { sMC >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = sMC
 
 end

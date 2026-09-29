@@ -7,7 +7,7 @@ module Earu_io_Wrap_Background
 
   let wrap_Background (command: string) : int
     requires { true }
-    ensures { result >= 0 }
+    ensures { result'Length > 0 }
     = To_String (Result)
 
 end

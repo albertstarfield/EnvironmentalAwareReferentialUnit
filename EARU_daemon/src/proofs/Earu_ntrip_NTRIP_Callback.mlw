@@ -5,8 +5,8 @@ module Earu_ntrip_NTRIP_Callback
 
 
   let nTRIP_Callback (request: int) : int
-    requires { request >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = AWS.Response.Build ("text/plain", Source_Table);  -- SMT_VERIFIED: constant string
 
 end

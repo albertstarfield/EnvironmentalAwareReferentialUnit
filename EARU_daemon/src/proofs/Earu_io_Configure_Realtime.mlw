@@ -5,10 +5,8 @@ module Earu_io_Configure_Realtime
 
 
   let configure_Realtime (period_Ms: int) (computation_Ms: int) (constraint_Ms: int) : int
-    requires { period_Ms >= 0 }
-    requires { computation_Ms >= 0 }
-    requires { constraint_Ms >= 0 }
-    ensures { result >= 0 }
+    requires { period_Ms > 0 /\ then computation_Ms > 0 /\ then constraint_Ms > 0 }
+    ensures { true }
     = period_Ms
 
 end

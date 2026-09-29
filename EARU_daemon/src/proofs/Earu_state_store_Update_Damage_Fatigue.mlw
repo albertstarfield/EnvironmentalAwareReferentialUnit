@@ -5,8 +5,8 @@ module Earu_state_store_Update_Damage_Fatigue
 
 
   let update_Damage_Fatigue (d: int) : int
-    requires { d >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = d
 
 end

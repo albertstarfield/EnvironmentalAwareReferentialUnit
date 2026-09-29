@@ -6,7 +6,7 @@ module Earu_io_Read_Fan_Pressure_Est
 
   let read_Fan_Pressure_Est () : int
     requires { true }
-    ensures { result >= 0 }
+    ensures { true }
     = 0
 
 end

@@ -5,8 +5,8 @@ module Earu_bcg_detection_Reset
 
 
   let reset (s: int) : int
-    requires { true }
-    ensures { Samples_Buffered (s) = 0 /\ then not  Ready (s) }
+    requires { true — total: accepts any BCG_State (contract in .ads). }
+    ensures { Samples_Buffered (s) = 0 /\ not  Ready (s) /\ Integrity_Ok (s) /\ Bounded (s) — contract in .ads. }
     = s
 
 end

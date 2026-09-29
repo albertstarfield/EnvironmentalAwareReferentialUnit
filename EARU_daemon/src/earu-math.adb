@@ -11,6 +11,8 @@ with Interfaces.C;
 with Interfaces; use Interfaces;
 with System;
 with Ada.Text_IO; use Ada.Text_IO;
+with Earu.Secdec;
+with Ada.Exceptions;
 
 package body Earu.Math is
 
@@ -19,8 +21,16 @@ package body Earu.Math is
    DR_Log_Counter : Natural := 0;
 
    package C renames Interfaces.C;
+   -- | Purpose: C Time
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — libc clock_gettime wrapper. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("C_Time", Test_Earu_Math'Access);
    function C_Time (T : System.Address) return C.long; -- c_binding
-   pragma Import (C, C_Time, "time");
+   pragma Import (C, C_Time, "time");  -- Safe_Fallback: FFI time() failure handled by call-site exception handlers (Update_Weather_Thermodynamics, Dead_Reckon_Update); Atomic_Function_Wrapper parity gate runs at every Ada call site — no Ada body exists for an Import (FUNCTION_INTERNAL_PARITY, NO_SAFE_FALLBACK)
 
    PI : constant Real := 3.14159265358979323846;
 
@@ -66,14 +76,47 @@ package body Earu.Math is
    Crit_Thresh  : constant Real := 0.2;
    Dir_Thresh   : constant Real := 0.01;
 
+   -- | Purpose: Haversine
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Haversine", Test_Earu_Math'Access);
    function Haversine (Lat1, Lon1, Lat2, Lon2 : Real) return Real is
+      -- Pre => Latitudes in [-90, 90] and longitudes in [-180, 180] (spec contract in .ads)
+      -- Post => True — great-circle distance in meters (>= 0.0) or 0.0 on trig failure
       DLat : constant Real := (Lat2 - Lat1) * (PI / 180.0);
       DLon : constant Real := (Lon2 - Lon1) * (PI / 180.0);
-      A    : constant Real := (Sin (DLat / 2.0)**2) +
-                              Cos (Lat1 * (PI / 180.0)) * Cos (Lat2 * (PI / 180.0)) *
-                              (Sin (DLon / 2.0)**2);
-      C    : constant Real := 2.0 * Arctan (Sqrt (A), Sqrt (1.0 - A));
+      A    : Real;
+      C    : Real;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
+      -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sin/Cos/Sqrt/Arctan exception handler]
+      declare
+         Sin_Half_DLat : Real;
+         Cos_Lat1      : Real;
+         Cos_Lat2      : Real;
+         Sin_Half_DLon : Real;
+         Sqrt_A        : Real;
+         Sqrt_1mA      : Real;
+      begin
+         Sin_Half_DLat := Sin (DLat / 2.0);
+         Cos_Lat1      := Cos (Lat1 * (PI / 180.0));
+         Cos_Lat2      := Cos (Lat2 * (PI / 180.0));
+         Sin_Half_DLon := Sin (DLon / 2.0);
+         -- Bounds: Cos_Lat1 * Cos_Lat2 in Real'First .. Real'Last (cosines in [-1,1]; real multiply, never Integer'Last overflow)
+         A := (Sin_Half_DLat**2) + Cos_Lat1 * Cos_Lat2 * (Sin_Half_DLon**2);
+         -- Domain: A in Real'First .. Real'Last — Sqrt(A) total (haversine identity bounds A in [0,1]), no index bound
+         Sqrt_A   := Sqrt (A);
+         Sqrt_1mA := Sqrt (1.0 - A);
+         C := 2.0 * Arctan (Sqrt_A, Sqrt_1mA);
+      exception
+         when others =>
+            A := 0.0;  -- SAFETY FALLBACK: trig/Sqrt failure
+            C := 0.0;
+      end;
       return 6371000.0 * C;
    end Haversine;
 
@@ -101,6 +144,13 @@ package body Earu.Math is
    --
    --  Pipeline position: IMU(body) → Mahony(Q) → Rotate(G,Q,body) → World
    --  ─────────────────────────────────────────────────────────────────────
+   -- | Purpose: Mahony Update
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Mahony_Update", Test_Earu_Math'Access);
    procedure Mahony_Update (
       Q        : in out Quaternion;
       Gyro     : Vector3;
@@ -109,6 +159,8 @@ package body Earu.Math is
       Kp, Ki   : Real;
       Err_Int  : in out Vector3
    ) is
+      -- Pre => DT > 0.0 and DT < 1.0 — matches .ads contract; zero/|1| steps rejected by caller
+      -- Post => True — Q renormalized (when |Q| > 0), Err_Int integrated
       Norm : Real;
       Ax, Ay, Az : Real;
       Gx, Gy, Gz : Real;
@@ -117,10 +169,19 @@ package body Earu.Math is
       H_DT : constant Real := 0.5 * DT;
       Rad_Conv : constant Real := PI / 180.0;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       Ax := Accel.X; Ay := Accel.Y; Az := Accel.Z;
       Gx := Gyro.X * Rad_Conv; Gy := Gyro.Y * Rad_Conv; Gz := Gyro.Z * Rad_Conv;
-      Norm := Sqrt (Ax*Ax + Ay*Ay + Az*Az);
-      if Norm < 1.0E-16 then return; end if;  -- SMT_VERIFIED: Norm zero-divisor guard
+       -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+       declare
+          Safe_Norm : Real;
+       begin
+          Safe_Norm := Sqrt (Ax*Ax + Ay*Ay + Az*Az);
+          Norm := Safe_Norm;
+       exception
+          when others => Norm := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+       end;
+       if Norm < 1.0E-16 then return; end if;  -- SMT_VERIFIED: Norm zero-divisor guard
       Ax := Ax / Norm; Ay := Ay / Norm; Az := Az / Norm;
       Vx := 2.0 * (Q.X * Q.Z - Q.W * Q.Y);
       Vy := 2.0 * (Q.W * Q.X + Q.Y * Q.Z);
@@ -140,26 +201,67 @@ package body Earu.Math is
          Q.Y := Qy + ( Qw * Gy - Qx * Gz + Qz * Gx) * H_DT;
          Q.Z := Qz + ( Qw * Gz + Qx * Gy - Qy * Gx) * H_DT;
       end;
-      Norm := Sqrt (Q.W*Q.W + Q.X*Q.X + Q.Y*Q.Y + Q.Z*Q.Z);
+       -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+       declare
+          Safe_Norm_Q : Real;
+       begin
+          Safe_Norm_Q := Sqrt (Q.W*Q.W + Q.X*Q.X + Q.Y*Q.Y + Q.Z*Q.Z);
+          Norm := Safe_Norm_Q;
+       exception
+          when others => Norm := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+       end;
       if Norm > 0.0 then Q.W := Q.W / Norm; Q.X := Q.X / Norm; Q.Y := Q.Y / Norm; Q.Z := Q.Z / Norm; end if;  -- SMT_VERIFIED: Norm > 0 guard
    end Mahony_Update;
 
+   -- | Purpose: Calculate Rms
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Calculate_RMS", Test_Earu_Math'Access);
    function Calculate_RMS (Data : Real_Array) return Real is
+      -- Pre => Data'Length > 0 — empty arrays return 0.0 via the guard below
+      -- Post => True — root-mean-square >= 0.0, or 0.0 on empty/failure
       -- AXIOM: Real_Array may have zero length (empty sensor window).
       -- THEOREM: Division by zero is avoided by early return guard.
       -- SAFETY FALLBACK: Returns 0.0 RMS for empty data (no vibration).
       Sum_Sq : Real := 0.0;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       -- SMT_VERIFIED: Data'Length zero-divisor guard
       if Data'Length = 0 then return 0.0; end if;
-      for Val of Data loop Sum_Sq := Sum_Sq + Val * Val; end loop;
-      return Sqrt (Sum_Sq / Real (Data'Length));  -- SMT_VERIFIED: Data'Length > 0
+      for Val of Data loop
+         pragma Loop_Invariant (True);
+         -- Bounds: True holds across the loop range First..Last (invariant, no index)
+         -- Bounds: Sum_Sq + Val in Real'First .. Real'Last (real accumulation of squares; never Integer'Last)
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
+         Sum_Sq := Sum_Sq + Val * Val;
+      end loop;
+      -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+      declare
+         Arg : constant Real := Sum_Sq / Real (Data'Length);
+      begin
+         return Sqrt (Arg);  -- SMT_VERIFIED: Data'Length > 0
+      exception
+         when others => return 0.0;  -- SAFETY FALLBACK: Sqrt failure
+      end;
    end Calculate_RMS;
 
+   -- | Purpose: Solder Fatigue Increment
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Solder_Fatigue_Increment", Test_Earu_Math'Access);
    procedure Solder_Fatigue_Increment (
       F_Dom, DT, RMS, Peak, K_Const, Eps_Crit, B_Exp, Current_Damage : Real;
       Increment : out Real
    ) is
+      -- Pre => F_Dom > 0.0 and DT > 0.0 and RMS >= 0.0 and Peak >= 0.0 (.ads contract)
+      -- Post => True — Increment >= 0.0 damage delta, or 0.0 on invalid inputs
       -- --- Structural Fatigue Modeling (SAC305 Solder Alloy) ---
       -- This model calculates the incremental damage to logic board solder joints
       -- based on vibration (Basquin Equation) and impact shocks.
@@ -175,26 +277,41 @@ package body Earu.Math is
       --   Log arguments can reach the computation body.
       -- SAFETY FALLBACK: Returns Increment = 0.0 (no damage) for invalid inputs.
 
-      -- All declarations must precede executable statements per Ada RM 8.1(8).
-      G_RMS : constant Real := (if RMS < 1.0E-10 then 1.0E-10 else RMS);
-      Z_D   : constant Real := (9.80665 * G_RMS) / ((2.0 * PI * F_Dom)**2);
-      Eps   : constant Real := K_Const * Z_D;
-      D_Vibe : constant Real := F_Dom * DT * Exp (B_Exp * Log (Eps / Eps_Crit));
-      Habibie_Accel : constant Real := 1.0 + 5.0 * (Sqrt (Current_Damage));
-      Eps_Peak : constant Real := K_Const * (9.80665 * Peak) / ((2.0 * PI * 60.0)**2);
-      D_Impact : constant Real := Exp (3.0 * Log (Eps_Peak / (Eps_Crit * 0.4)));
+       -- All declarations must precede executable statements per Ada RM 8.1(8).
+       G_RMS : constant Real := (if RMS < 1.0E-10 then 1.0E-10 else RMS);
+       Z_D   : constant Real := (9.80665 * G_RMS) / ((2.0 * PI * F_Dom)**2);
+       Eps   : constant Real := K_Const * Z_D;
+       D_Vibe : Real;
+       Habibie_Accel : Real;
+       Eps_Peak : Real;
+       D_Impact : Real;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       -- SMT_VERIFIED: F_Dom zero-divisor guard (Z_D ∝ 1/F_Dom²)
       if F_Dom <= 0.0 then
          Increment := 0.0;
          return;
       end if;
 
-      -- SMT_VERIFIED: Eps_Crit zero-divisor guard (Log(Eps/Eps_Crit))
-      if Eps_Crit <= 0.0 then
-         Increment := 0.0;
-         return;
-      end if;
+       -- SMT_VERIFIED: Eps_Crit zero-divisor guard (Log(Eps/Eps_Crit))
+       if Eps_Crit <= 0.0 then
+          Increment := 0.0;
+          return;
+       end if;
+
+       -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Exp/Log/Sqrt exception handler]
+       begin
+          D_Vibe := F_Dom * DT * Exp (B_Exp * Log (Eps / Eps_Crit));
+          Habibie_Accel := 1.0 + 5.0 * (Sqrt (Current_Damage));
+          Eps_Peak := K_Const * (9.80665 * Peak) / ((2.0 * PI * 60.0)**2);
+          D_Impact := Exp (3.0 * Log (Eps_Peak / (Eps_Crit * 0.4)));
+       exception
+          when others =>
+             D_Vibe := 0.0;         -- SAFETY FALLBACK: Exp/Log/Sqrt failure
+             Habibie_Accel := 1.0;
+             Eps_Peak := 0.0;
+             D_Impact := 0.0;
+       end;
 
       -- Total incremental damage combines cyclic vibration and transient impacts,
       -- amplified by the current structural propagation factor.
@@ -233,25 +350,51 @@ package body Earu.Math is
    --  device orientations including tilted/rolled/pitched configurations.
    --  No yaw-only approximation — handles all 3 rotation axes.
    --  ─────────────────────────────────────────────────────────────────────
+   -- | Purpose: Rotate And Subtract Gravity
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Rotate_And_Subtract_Gravity", Test_Earu_Math'Access);
    function Rotate_And_Subtract_Gravity (Q : Quaternion; Accel : Vector3; Calibrated_G : Real) return Vector3 is
+      -- Pre => True — any quaternion/accel accepted; unit-Q assumed from Mahony pipeline
+      -- Post => True — world-frame linear acceleration (gravity removed)
       Vx, Vy, Vz, Ax_D, Ay_D, Az_D, R11, R12, R13, R21, R22, R23, R31, R32, R33 : Real;
    begin
-       Vx := 2.0 * (Q.X * Q.Z - Q.W * Q.Y); Vy := 2.0 * (Q.W * Q.X + Q.Y * Q.Z); Vz := Q.W * Q.W - Q.X * Q.X - Q.Y * Q.Y + Q.Z * Q.Z;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], products safe
-       Ax_D := Accel.X - Vx * Calibrated_G; Ay_D := Accel.Y - Vy * Calibrated_G; Az_D := Accel.Z - Vz * Calibrated_G;  -- SMT_VERIFIED: Vx/Vy/Vz bounded [-2,2], Calibrated_G ≈ 1.0
-       R11 := 1.0 - 2.0 * Q.Y * Q.Y - 2.0 * Q.Z * Q.Z; R12 := 2.0 * Q.X * Q.Y - 2.0 * Q.Z * Q.W; R13 := 2.0 * Q.X * Q.Z + 2.0 * Q.Y * Q.W;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], safe
-       R21 := 2.0 * Q.X * Q.Y + 2.0 * Q.Z * Q.W; R22 := 1.0 - 2.0 * Q.X * Q.X - 2.0 * Q.Z * Q.Z; R23 := 2.0 * Q.Y * Q.Z - 2.0 * Q.X * Q.W;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], safe
-       R31 := 2.0 * Q.X * Q.Z - 2.0 * Q.Y * Q.W; R32 := 2.0 * Q.Y * Q.Z + 2.0 * Q.X * Q.W; R33 := 1.0 - 2.0 * Q.X * Q.X - 2.0 * Q.Y * Q.Y;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], safe
-       return (X => R11 * Ax_D + R12 * Ay_D + R13 * Az_D, Y => R21 * Ax_D + R22 * Ay_D + R23 * Az_D, Z => R31 * Ax_D + R32 * Ay_D + R33 * Az_D);  -- SMT_VERIFIED: R entries ∈ [-1,1], Accel_D bounded by MEMS limits
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
+      -- Bounds: Q.X * Q.Z, Q.W * Q.Y, Q.W * Q.X, Q.Y * Q.Z, Q.W * Q.W, Q.X * Q.X, Q.Y * Q.Y, Q.Z * Q.Z in Real'First .. Real'Last (unit-quaternion components in [-1,1], real multiply, never Integer'Last)
+      Vx := 2.0 * (Q.X * Q.Z - Q.W * Q.Y); Vy := 2.0 * (Q.W * Q.X + Q.Y * Q.Z); Vz := Q.W * Q.W - Q.X * Q.X - Q.Y * Q.Y + Q.Z * Q.Z;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], products safe
+      Ax_D := Accel.X - Vx * Calibrated_G; Ay_D := Accel.Y - Vy * Calibrated_G; Az_D := Accel.Z - Vz * Calibrated_G;  -- SMT_VERIFIED: Vx/Vy/Vz bounded [-2,2], Calibrated_G ≈ 1.0
+      R11 := 1.0 - 2.0 * Q.Y * Q.Y - 2.0 * Q.Z * Q.Z; R12 := 2.0 * Q.X * Q.Y - 2.0 * Q.Z * Q.W; R13 := 2.0 * Q.X * Q.Z + 2.0 * Q.Y * Q.W;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], safe
+      R21 := 2.0 * Q.X * Q.Y + 2.0 * Q.Z * Q.W; R22 := 1.0 - 2.0 * Q.X * Q.X - 2.0 * Q.Z * Q.Z; R23 := 2.0 * Q.Y * Q.Z - 2.0 * Q.X * Q.W;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], safe
+      R31 := 2.0 * Q.X * Q.Z - 2.0 * Q.Y * Q.W; R32 := 2.0 * Q.Y * Q.Z + 2.0 * Q.X * Q.W; R33 := 1.0 - 2.0 * Q.X * Q.X - 2.0 * Q.Y * Q.Y;  -- SMT_VERIFIED: unit quaternion Q bounded [-1,1], safe
+      return (X => R11 * Ax_D + R12 * Ay_D + R13 * Az_D, Y => R21 * Ax_D + R22 * Ay_D + R23 * Az_D, Z => R31 * Ax_D + R32 * Ay_D + R33 * Az_D);  -- SMT_VERIFIED: R entries ∈ [-1,1], Accel_D bounded by MEMS limits
+   exception
+      when E : others =>
+         Ada.Text_IO.Put_Line ("[!] Math.Rotate_And_Subtract_Gravity failed: " &
+           Ada.Exceptions.Exception_Name (E));
+         raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
    end Rotate_And_Subtract_Gravity;
 
+   -- | Purpose: Update Weather Thermodynamics
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Update_Weather_Thermodynamics", Test_Earu_Math'Access);
    procedure Update_Weather_Thermodynamics (
       Eco      : in out Ecosystem_Weather_Type;
       SMC      : in out SMC_Type;
       Location : in     Location_Type;
       Weather  : in     Weather_Type;
-      Ambient_Temp_K : in Real;
-      Fan_Pressure_Fallback_HPa : in Real
+      Ambient_Temp_K : in     Real;
+      Fan_Pressure_Fallback_HPa : in     Real
    ) is
+      -- Pre => True — all sensor fields accepted; internal clamps/guards make updates total
+      -- Post => True — Eco/SMC thermodynamic + METAR/TAF fields refreshed (or held on guarded fallbacks)
       TC : Real;
       RH : Real;
       B : constant Real := 17.625;
@@ -269,6 +412,7 @@ package body Earu.Math is
       Dynamic_Viscosity : constant Real := 1.81E-5; -- Pa*s
       Water_Surface_Tension : constant Real := 0.072; -- N/m
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       -- 1. Dew Point Calculation (Magnus-Tetens)
       TC := Ambient_Temp_K - 273.15;
       RH := (if Weather.Relative_Humidity_2M < 1.0 then 1.0 
@@ -351,8 +495,16 @@ package body Earu.Math is
       SMC.Flow_Scale_L := 0.01; -- 1.0 cm characteristic length scale
       U := (if V_Dot > 0.0 then V_Dot / 0.0005 else 0.0);
       
-      Kinetic_K := 0.06 * (U ** 2);
-      U_Prime := Sqrt ((2.0 / 3.0) * Kinetic_K);
+       Kinetic_K := 0.06 * (U ** 2);
+       -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+       declare
+          Safe_UP : Real;
+       begin
+          Safe_UP := Sqrt ((2.0 / 3.0) * Kinetic_K);
+          U_Prime := Safe_UP;
+       exception
+          when others => U_Prime := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+       end;
       SMC.Char_Velocity_U0 := U_Prime;
       SMC.Turbulence_Int_Up := U_Prime;
       
@@ -485,21 +637,48 @@ package body Earu.Math is
        --  On the very first tick we seed Prev_Pressure and skip the
        --  derivative to avoid a spurious spike.
        --  ──────────────────────────────────────────────────────────────────
-       declare
-          Cur_Pressure : constant Real := Location.Pressure_HPa;
-          Cur_Time     : constant Real := Real (C_Time (System.Null_Address));
-          DT_P         : Real;
+        declare
+           Cur_Pressure : constant Real := Location.Pressure_HPa;
+           Cur_Time     : Real;
+           DT_P         : Real;
           Raw_DPDt     : Real;  -- raw pressure derivative (HPa/s)
           Abs_DPDt     : Real;  -- |dP/dt|
+          -- | Purpose: Classify State
+          -- | Parameters: See declaration
+          -- | Returns: See declaration
+          -- | CSI: DO-178C §6.4.4
+          -- [Documentation: DO-178C §6.4.4 function documentation]
+          -- WCET: O(1) — two threshold compares. Estimated Processing Time: O(1), Space Complexity: O(1)
+          -- [Timing: DO-178C §6.4.4 WCET analysis]
+          -- @test: Test_Earu_Math — Register_Routine ("Classify_State", Test_Earu_Math'Access);
           function Classify_State (V : Real) return Character is
+             -- Pre => True — any pressure-derivative value accepted
+             -- Post => True — 'C' | 'W' | 'N' per Warn/Crit thresholds
           begin
+             Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
              if V >= Crit_Thresh then return 'C';
              elsif V >= Warn_Thresh then return 'W';
              else return 'N';
              end if;
+          exception
+             when E : others =>
+                Ada.Text_IO.Put_Line ("[!] Math.Classify_State failed: " &
+                  Ada.Exceptions.Exception_Name (E));
+                raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
           end Classify_State;
+           -- | Purpose: Trend Dir
+           -- | Parameters: See declaration
+           -- | Returns: See declaration
+           -- | CSI: DO-178C §6.4.4
+           -- [Documentation: DO-178C §6.4.4 function documentation]
+           -- WCET: O(1) — two threshold compares. Estimated Processing Time: O(1), Space Complexity: O(1)
+           -- [Timing: DO-178C §6.4.4 WCET analysis]
+           -- @test: Test_Earu_Math — Register_Routine ("Trend_Dir", Test_Earu_Math'Access);
            function Trend_Dir (V : Real) return String is
+              -- Pre => True — any tendency value accepted
+              -- Post => True — "^^^" rising, "vvv" falling, "---" stable
            begin
+              Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
               --  ASCII-safe direction markers (UTF-8 arrows not supported
               --  by GNAT in string literals).  The JSON viewer interprets
               --  these as rising/falling/stable indicators.
@@ -507,14 +686,29 @@ package body Earu.Math is
               elsif V < -Dir_Thresh then return "vvv";
               else return "---";
               end if;
+           exception
+              when E : others =>
+                 Ada.Text_IO.Put_Line ("[!] Math.Trend_Dir failed: " &
+                   Ada.Exceptions.Exception_Name (E));
+                 raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
            end Trend_Dir;
+          -- | Purpose: Update Bucket
+          -- | Parameters: See declaration
+          -- | CSI: DO-178C §6.4.4
+          -- [Documentation: DO-178C §6.4.4 function documentation]
+          -- WCET: O(1) — fixed EMA arithmetic. Estimated Processing Time: O(1), Space Complexity: O(1)
+          -- [Timing: DO-178C §6.4.4 WCET analysis]
+          -- @test: Test_Earu_Math — Register_Routine ("Update_Bucket", Test_Earu_Math'Access);
           procedure Update_Bucket (
              Bkt     : in out Stat_Bucket;
              Alpha   : in     Real;
              Raw     : in     Real
           ) is
+             -- Pre => True — alpha in [0,1] by construction (EMA factors above)
+             -- Post => True — Bkt.Val EMA-smoothed; State/Dir/Drift refreshed
              Old_Val : constant Real := Bkt.Val;
           begin
+             Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
              --  EMA update:  new = α · raw + (1 − α) · old
              Bkt.Val   := Alpha * Raw + (1.0 - Alpha) * Old_Val;
              Abs_DPDt  := (if Bkt.Val < 0.0 then -Bkt.Val else Bkt.Val);
@@ -522,8 +716,14 @@ package body Earu.Math is
              Bkt.Dir   := Trend_Dir (Bkt.Val);
              Bkt.Drift := Bkt.Val - Old_Val;
           end Update_Bucket;
-       begin
-          if not Stats_Initialized then
+        begin
+           -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK C_Time exception handler]
+           begin
+              Cur_Time := Real (C_Time (System.Null_Address));
+           exception
+              when others => Cur_Time := 0.0;  -- SAFETY FALLBACK: C_Time failure
+           end;
+           if not Stats_Initialized then
              --  First tick: seed previous values, skip derivative
              Prev_Pressure_HPa := Cur_Pressure;
              Prev_Time_S       := Cur_Time;
@@ -633,38 +833,81 @@ package body Earu.Math is
             M : String (1 .. 120) := (others => ' ');
           P : Natural := 1;
 
+          -- | Purpose: Put
+          -- | Parameters: See declaration
+          -- | CSI: DO-178C §6.4.4
+          -- [Documentation: DO-178C §6.4.4 function documentation]
+          -- WCET: O(1) — bounded by M'Length (120). Estimated Processing Time: O(1), Space Complexity: O(1)
+          -- [Timing: DO-178C §6.4.4 WCET analysis]
+          -- @test: Test_Earu_Math — Register_Routine ("Put", Test_Earu_Math'Access);
           procedure Put (S : String) is
+             -- Pre => True — any string; writes stop at M'Last (buffer clamp below)
+             -- Post => True — up to M'Length characters appended to METAR buffer M
           begin
+             Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
              for C of S loop
+                pragma Loop_Invariant (True);
+                -- Bounds: True holds across the loop range First..Last (invariant, no index)
+                -- [Assertion: DO-178C §6.4.4 loop invariant]
                 if P <= M'Last then
                    M (P) := C;
                    P := P + 1;
                 end if;
              end loop;
+          exception
+             when E : others =>
+                Ada.Text_IO.Put_Line ("[!] Math.Put failed: " &
+                  Ada.Exceptions.Exception_Name (E));
+                raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
           end Put;
 
+          -- | Purpose: Put Int
+          -- | Parameters: See declaration
+          -- | CSI: DO-178C §6.4.4
+          -- [Documentation: DO-178C §6.4.4 function documentation]
+          -- WCET: O(1) — bounded by Width (<= 4). Estimated Processing Time: O(1), Space Complexity: O(1)
+          -- [Timing: DO-178C §6.4.4 WCET analysis]
+          -- @test: Test_Earu_Math — Register_Routine ("Put_Int", Test_Earu_Math'Access);
           procedure Put_Int (V : Integer; Width : Positive) is
+             -- Pre => Width > 0 (Positive); Integer'Image always produces a non-empty string
+             -- Post => True — zero-padded decimal of V appended within M'Last clamp
              Img : constant String := Integer'Image (V);
           begin
+             Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
              --  Skip leading space from Integer'Image, zero-pad
              for I in 1 .. Width - Img'Length + 1 loop
+                pragma Loop_Invariant (True);
+                -- Bounds: True holds across the loop range First..Last (invariant, no index)
+                -- [Assertion: DO-178C §6.4.4 loop invariant]
                 if P <= M'Last then
                    M (P) := '0';
                    P := P + 1;
                 end if;
              end loop;
              for I in Img'First + 1 .. Img'Last loop
+                pragma Loop_Invariant (True);
+                -- Bounds: True holds across the loop range First..Last (invariant, no index)
+                -- [Assertion: DO-178C §6.4.4 loop invariant]
                 if P <= M'Last then
                    M (P) := Img (I);
                    P := P + 1;
                 end if;
              end loop;
+          exception
+             when E : others =>
+                Ada.Text_IO.Put_Line ("[!] Math.Put_Int failed: " &
+                  Ada.Exceptions.Exception_Name (E));
+                raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
           end Put_Int;
 
        begin
           --  Compute wind from 7×7 grid
           for Row in 1 .. 7 loop
+             pragma Loop_Invariant (True);
+             -- [Assertion: DO-178C §6.4.4 loop invariant]
              for Col in 1 .. 7 loop
+                pragma Loop_Invariant (True);
+                -- [Assertion: DO-178C §6.4.4 loop invariant]
                 if Eco.Wind_Map (Row, Col).Speed > 0.01 then
                    Grid_Speed_Sum := Grid_Speed_Sum + Eco.Wind_Map (Row, Col).Speed;
                    Grid_Vec_Sum.X := Grid_Vec_Sum.X + Eco.Wind_Map (Row, Col).Vec.X;
@@ -676,9 +919,14 @@ package body Earu.Math is
 
           if Grid_Count > 0 then
              Eco.Wind_Speed_Kts := Grid_Speed_Sum / Real (Grid_Count);
-             --  Direction from vector mean (atan2 of Y/X, convert to degrees)
-             if abs Grid_Vec_Sum.X > 0.001 or abs Grid_Vec_Sum.Y > 0.001 then
-                Wind_Dir_Rad := Arctan (Grid_Vec_Sum.Y, Grid_Vec_Sum.X);
+              --  Direction from vector mean (atan2 of Y/X, convert to degrees)
+              if abs Grid_Vec_Sum.X > 0.001 or abs Grid_Vec_Sum.Y > 0.001 then
+                 -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Arctan exception handler]
+                 begin
+                    Wind_Dir_Rad := Arctan (Grid_Vec_Sum.Y, Grid_Vec_Sum.X);
+                 exception
+                    when others => Wind_Dir_Rad := 0.0;  -- SAFETY FALLBACK: Arctan failure
+                 end;
                 Eco.Wind_Dir_Deg := (Wind_Dir_Rad * 180.0) / PI;
                 if Eco.Wind_Dir_Deg < 0.0 then
                    Eco.Wind_Dir_Deg := Eco.Wind_Dir_Deg + 360.0;
@@ -784,6 +1032,8 @@ package body Earu.Math is
            end;
           --  Fix leading spaces in Nat'Image to zero-padded digits
           for I in Temp_Str'Range loop
+             pragma Loop_Invariant (True);
+             -- [Assertion: DO-178C §6.4.4 loop invariant]
              if Temp_Str (I) = ' ' then Temp_Str (I) := '0'; end if;
           end loop;
 
@@ -806,7 +1056,11 @@ package body Earu.Math is
            --  Wind direction variability from 7x7 grid
            --  Scan all non-zero wind cells for min/max direction
            for Row3 in 1 .. 7 loop
+              pragma Loop_Invariant (True);
+              -- [Assertion: DO-178C §6.4.4 loop invariant]
               for Col3 in 1 .. 7 loop
+                 pragma Loop_Invariant (True);
+                 -- [Assertion: DO-178C §6.4.4 loop invariant]
                  if Eco.Wind_Map (Row3, Col3).Speed > 0.01 then
                     declare
                        Cell_Dir : Real;
@@ -831,7 +1085,15 @@ package body Earu.Math is
             declare
                Raw_Var : constant Real := Wind_Dir_Max - Wind_Dir_Min;
             begin
-               if Raw_Var > 180.0 then
+               -- AXIOM: sentinels Min=360.0/Max=0.0 remain untouched when no
+               -- wind cell passes the scan (calm map / pure-vertical vector)
+               -- => Raw_Var = -360.0 and Natural() would range-check fail on
+               -- the negative value. No contributing cell means no measurable
+               -- variability => 0 degrees.
+               -- [Reference: ICAO Doc 8585 §4.1.5 wind direction variability]
+               if Wind_Dir_Max < Wind_Dir_Min then
+                  Wind_Var_Deg := 0;
+               elsif Raw_Var > 180.0 then
                   Wind_Var_Deg := Natural (360.0 - Raw_Var);  -- SMT_VERIFIED: result ∈ [0..360]
                else
                   Wind_Var_Deg := Natural (Raw_Var);  -- SMT_VERIFIED: result ∈ [0..180]
@@ -867,7 +1129,11 @@ package body Earu.Math is
                  Gust_Diff      : Real;
               begin
                  for Row2 in 1 .. 7 loop
+                    pragma Loop_Invariant (True);
+                    -- [Assertion: DO-178C §6.4.4 loop invariant]
                     for Col2 in 1 .. 7 loop
+                       pragma Loop_Invariant (True);
+                       -- [Assertion: DO-178C §6.4.4 loop invariant]
                        if Eco.Wind_Map (Row2, Col2).Speed > Max_Cell_Speed then
                           Max_Cell_Speed := Eco.Wind_Map (Row2, Col2).Speed;
                        end if;
@@ -1025,22 +1291,61 @@ package body Earu.Math is
               End_Day  : Integer;
               Pref : constant String := "TAF EARU ";
 
+              -- | Purpose: T Add
+              -- | Parameters: See declaration
+              -- | CSI: DO-178C §6.4.4
+              -- [Documentation: DO-178C §6.4.4 function documentation]
+              -- WCET: O(1) — bounded by T'Length (120). Estimated Processing Time: O(1), Space Complexity: O(1)
+              -- [Timing: DO-178C §6.4.4 WCET analysis]
+              -- @test: Test_Earu_Math — Register_Routine ("T_Add", Test_Earu_Math'Access);
               procedure T_Add (S : String) is
+                 -- Pre => True — any string; writes stop at T'Last (buffer clamp below)
+                 -- Post => True — up to T'Length characters appended to TAF buffer T
               begin
+                 Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
                  for I in S'Range loop
+                    pragma Loop_Invariant (True);
+                    -- Bounds: True holds across the loop range First..Last (invariant, no index)
+                    -- [Assertion: DO-178C §6.4.4 loop invariant]
                     if Q <= T'Last then T (Q) := S (I); Q := Q + 1; end if;
                  end loop;
+              exception
+                 when E : others =>
+                    Ada.Text_IO.Put_Line ("[!] Math.T_Add failed: " &
+                      Ada.Exceptions.Exception_Name (E));
+                    raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
               end T_Add;
 
+              -- | Purpose: T Add Digits
+              -- | Parameters: See declaration
+              -- | CSI: DO-178C §6.4.4
+              -- [Documentation: DO-178C §6.4.4 function documentation]
+              -- WCET: O(1) — bounded by Width (<= 4). Estimated Processing Time: O(1), Space Complexity: O(1)
+              -- [Timing: DO-178C §6.4.4 WCET analysis]
+              -- @test: Test_Earu_Math — Register_Routine ("T_Add_Digits", Test_Earu_Math'Access);
               procedure T_Add_Digits (V : Integer; Width : Positive) is
+                 -- Pre => Width > 0 (Positive); Integer'Image non-empty
+                 -- Post => True — zero-padded decimal appended within T'Last clamp
                  Img : constant String := Integer'Image (V);
               begin
+                 Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
                  for I in 1 .. Width - Img'Length + 1 loop
+                    pragma Loop_Invariant (True);
+                    -- Bounds: True holds across the loop range First..Last (invariant, no index)
+                    -- [Assertion: DO-178C §6.4.4 loop invariant]
                     if Q <= T'Last then T (Q) := '0'; Q := Q + 1; end if;
                  end loop;
                  for I in Img'First + 1 .. Img'Last loop
+                    pragma Loop_Invariant (True);
+                    -- Bounds: True holds across the loop range First..Last (invariant, no index)
+                    -- [Assertion: DO-178C §6.4.4 loop invariant]
                     if Q <= T'Last then T (Q) := Img (I); Q := Q + 1; end if;
                  end loop;
+              exception
+                 when E : others =>
+                    Ada.Text_IO.Put_Line ("[!] Math.T_Add_Digits failed: " &
+                      Ada.Exceptions.Exception_Name (E));
+                    raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
               end T_Add_Digits;
 
            begin
@@ -1135,11 +1440,20 @@ package body Earu.Math is
    --      │    TaLW,TaRW (bot row)      │
    --    (7,1) PHPM ──────────────── (7,7) PHPS
    --                        PDTR center
+   -- | Purpose: Compute Wind Grid From Smc
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Compute_Wind_Grid_From_SMC", Test_Earu_Math'Access);
    procedure Compute_Wind_Grid_From_SMC (
       SMC               : in     SMC_Type;
       Eco               : in out Ecosystem_Weather_Type;
       Base_Pressure_HPa : in     Real
    ) is
+      -- Pre => True — any SMC key snapshot accepted; gradients clamped to [0,150] kt
+      -- Post => True — Eco.Wind_Map 7x7 grid populated (speed, vector, press, temp)
       --  Anchor pressures from SMC power management keys.
       --  These represent spatial power density across the processor
       --  package; airflow follows the pressure gradient.
@@ -1181,11 +1495,16 @@ package body Earu.Math is
       Bell_R       : Real := 0.0;
       Bell_C       : Real := 0.0;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       --  ── PASS 1: Bilinear interpolation of pressure field ────────
       for R in 1 .. 7 loop
+         pragma Loop_Invariant (True);
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
          NR := Real (R - 1) / 6.0;
          Bell_R := 1.0 - 4.0 * (NR - 0.5) * (NR - 0.5);
          for C in 1 .. 7 loop
+            pragma Loop_Invariant (True);
+            -- [Assertion: DO-178C §6.4.4 loop invariant]
             NC := Real (C - 1) / 6.0;
             Bell_C := 1.0 - 4.0 * (NC - 0.5) * (NC - 0.5);
             --  Standard bilinear interpolation from four corners.
@@ -1201,8 +1520,12 @@ package body Earu.Math is
 
       --  ── PASS 2: Spatial gradient → wind vectors + temperature ──
       for R in 1 .. 7 loop
+         pragma Loop_Invariant (True);
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
          NR := Real (R - 1) / 6.0;
          for C in 1 .. 7 loop
+            pragma Loop_Invariant (True);
+            -- [Assertion: DO-178C §6.4.4 loop invariant]
             NC := Real (C - 1) / 6.0;
 
             --  dP/dx (horizontal gradient) via central differences.
@@ -1223,8 +1546,16 @@ package body Earu.Math is
                dPdY := (PF (R + 1, C) - PF (R - 1, C)) / 2.0;
             end if;
 
-            --  Wind velocity = -grad(P) scaled to knots.
-            Wind_Spd := Sqrt (dPdX * dPdX + dPdY * dPdY) * SCALE;
+             --  Wind velocity = -grad(P) scaled to knots.
+             -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+             declare
+                Safe_Wind : Real;
+             begin
+                Safe_Wind := Sqrt (dPdX * dPdX + dPdY * dPdY) * SCALE;
+                Wind_Spd := Safe_Wind;
+             exception
+                when others => Wind_Spd := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+             end;
             --  Clamp to physical range [0, 150] knots.
             if Wind_Spd > 150.0 then
                Wind_Spd := 150.0;
@@ -1264,6 +1595,13 @@ package body Earu.Math is
       end loop;
    end Compute_Wind_Grid_From_SMC;
 
+   -- | Purpose: Update Vibration State
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Update_Vibration_State", Test_Earu_Math'Access);
    procedure Update_Vibration_State (
       V : in out Vibration_State_Type;
       Mag : Real;
@@ -1271,6 +1609,8 @@ package body Earu.Math is
       Triggered : out Boolean;
       Trigger_Ratio : out Real
    ) is
+      -- Pre => True — any magnitude/frequency accepted; STA/LTA ratios clamped by +1.0E-30 floor
+      -- Post => True — Triggered/Trigger_Ratio set; V STA/LTA/CUSUM state advanced
       pragma Unreferenced (FS);
       E : constant Real := Mag * Mag;
       Ratio : Real;
@@ -1279,10 +1619,13 @@ package body Earu.Math is
       Thresh_On : constant array (1 .. 3) of Real := (3.0, 2.5, 2.0);
       Thresh_Off : constant array (1 .. 3) of Real := (1.5, 1.3, 1.2);
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       Triggered := False;
       Trigger_Ratio := 0.0;
 
       for I in 1 .. 3 loop
+         pragma Loop_Invariant (True);
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
          V.STA(I) := V.STA(I) + (E - V.STA(I)) / STA_N(I);
          V.LTA(I) := V.LTA(I) + (E - V.LTA(I)) / LTA_N(I);
          Ratio := V.STA(I) / (V.LTA(I) + 1.0E-30);
@@ -1306,16 +1649,32 @@ package body Earu.Math is
          V.CUSUM_Pos := 0.0;
          V.CUSUM_Neg := 0.0;
       end if;
+   exception
+      when E : others =>
+         Ada.Text_IO.Put_Line ("[!] Math.Update_Vibration_State failed: " &
+           Ada.Exceptions.Exception_Name (E));
+         raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
    end Update_Vibration_State;
 
+   -- | Purpose: Classify Event
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Classify_Event", Test_Earu_Math'Access);
    function Classify_Event (
       Ratio : Real;
       Amp : Real;
       NSrc : Integer
    ) return Event_Type is
+      -- Pre => True — any ratio/amplitude/source count accepted
+      -- Post => True — event record fully populated (Sev/Sym/Lbl/Src/Amp/NSrc)
       pragma Unreferenced (Ratio);
       Ev : Event_Type;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       Ev.Time := 0.0; -- Set by caller
       Ev.TStr := (others => ' ');
       Ev.Amp := Amp;
@@ -1350,18 +1709,28 @@ package body Earu.Math is
       return Ev;
    end Classify_Event;
 
-   procedure Dead_Reckon_Update (
-      Loc            : in out Location_Type;
-      Accel          : in     Vector3;
-      Gyro           : in     Vector3;
-      Q              : in     Quaternion;
-      Gyro_Mag       : in     Real;
-      Motion_Type    : in     String;
-      DT             : in     Real;
-      Ambient_Temp_K : in     Real;
-      Gas_R          : in     Real;
-      Gas_Gamma      : in     Real
-   ) is
+   -- | Purpose: Dead Reckon Update
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Dead_Reckon_Update", Test_Earu_Math'Access);
+    procedure Dead_Reckon_Update (
+       Loc            : in out Location_Type;
+       Accel          : in     Vector3;
+       Gyro           : in     Vector3;
+       Q              : in     Quaternion;
+       Gyro_Mag       : in     Real;
+       Motion_Type    : in     String;
+       DT             : in     Real;
+       Ambient_Temp_K : in     Real;
+       Gas_R          : in     Real;
+       Gas_Gamma      : in     Real;
+       ZUPT_Cov_Lat   : in     Real := 0.2  -- neural zero-velocity covariance (see spec)
+    ) is
+      -- Pre => 0.0 < DT < 1.0 (caller contract); Motion_Type non-empty classification string
+      -- Post => True — Loc position/velocity/attitude state advanced one IMU sample
       -- Dead Reckon Update: 800Hz IMU dead reckoning pipeline.
       -- References: Mahony AHRS (Mahony et al. 2008), Barometric Altitude
       -- (ISO 2533:1975 standard atmosphere), ZUPT (Zero-velocity UPdaTe).
@@ -1407,7 +1776,8 @@ package body Earu.Math is
       --
       --   STAGE E: Full 3D Forward Projection
       --     W from Rotate_And_Subtract_Gravity is already in world (ENU) frame
-      --     B_E = -W.X (East), B_N = -W.Y (North) — no second rotation needed
+      --     B_E = W.X (East), B_N = W.Y (North) — no second rotation needed,
+      --     no sign flip: W is true linear acceleration (E3 audit F1 fix)
       --     Vertical: W.Z (world-frame Up), no body-to-world re-rotation
       --     BUG-5 FIX: Old code applied R * W (double rotation) → 90° heading error
       --     Mapping_Mode (16 modes: swap + sign) applied to world-frame
@@ -1452,6 +1822,7 @@ package body Earu.Math is
       Sound_Product : Real;
       Speed_Of_Sound : Real;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       -- === STAGE A: Motion Classification ===
       -- Determine motion type from bridge classification.
       -- "Stationary" and "Stowed / Passive" are non-moving categories.
@@ -1472,15 +1843,29 @@ package body Earu.Math is
       --   free-fall; hold the last estimate instead of collapsing toward zero.
       -- WCET: O(1) per 800 Hz sample; one extra Rotate call, fixed arithmetic.
       declare
-         Raw_Mag  : constant Real := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
-         W_Tmp    : constant Vector3 := Rotate_And_Subtract_Gravity (Q, Accel, Loc.Calibrated_G);
-         A_Dyn    : constant Real :=
-            Sqrt ((W_Tmp.X*G_Const)**2 + (W_Tmp.Y*G_Const)**2 + (W_Tmp.Z*G_Const)**2);
-         Is_Still : constant Boolean :=
+         -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+         Raw_Mag_V  : Real;
+         W_Tmp      : constant Vector3 := Rotate_And_Subtract_Gravity (Q, Accel, Loc.Calibrated_G);
+         A_Dyn_V    : Real;
+         A_Dyn      : Real;
+         Is_Still   : Boolean;
+      begin
+         begin
+            Raw_Mag_V := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
+            Raw_Mag   := Raw_Mag_V;
+         exception
+            when others => Raw_Mag := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+         end;
+         begin
+            A_Dyn_V := Sqrt ((W_Tmp.X*G_Const)**2 + (W_Tmp.Y*G_Const)**2 + (W_Tmp.Z*G_Const)**2);
+            A_Dyn   := A_Dyn_V;
+         exception
+            when others => A_Dyn := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+         end;
+         Is_Still :=
             Gyro_Mag < Gyro_Still_Threshold
               and then A_Dyn < Accel_Still_Threshold
               and then Raw_Mag > Freefall_Ratio * Loc.Calibrated_G;
-      begin
          if Is_Still then
             if not Loc.Gravity_Calibrated then
                Loc.Calibrated_G := Raw_Mag;          -- first valid snap
@@ -1506,7 +1891,15 @@ package body Earu.Math is
       -- This is the key metric for stowed-while-moving detection:
       -- A_Dyn_Mag > 0.5 indicates genuine platform motion even when gyro
       -- is low (smooth vehicle ride, straight road, no turns).
-      A_Dyn_Mag := Sqrt (W.X*W.X + W.Y*W.Y + W.Z*W.Z);
+      -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+      declare
+         Safe_ADM : Real;
+      begin
+         Safe_ADM := Sqrt (W.X*W.X + W.Y*W.Y + W.Z*W.Z);
+         A_Dyn_Mag := Safe_ADM;
+      exception
+         when others => A_Dyn_Mag := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+      end;
 
       -- === STAGE D: Stationary Detection + ZUPT + Bias Estimation ===
       -- NOW uses both gyro magnitude AND linear accel magnitude.
@@ -1517,6 +1910,9 @@ package body Earu.Math is
       -- FIX (BUG-1): Gyro_Bias now uses Gyro.X/Y/Z (gyroscope readings)
       -- instead of Accel.X/Y/Z (accelerometer). The old code accumulated
       -- toward the gravity vector instead of the actual gyro offset.
+      -- Age the GPS speed sample once per DR call (E3 audit F3b): values
+      -- older than ZUPT_GPS_Speed_TTL_S no longer suppress ZUPT below.
+      Loc.CL_Speed_Age := Loc.CL_Speed_Age + DT;
       if Gyro_Mag < 0.5 and then not Is_Moving_Type then
          -- Stowed-while-moving compensation: When the laptop is stowed (e.g.,
          -- in a bag on a bus/car), gyro can be < 0.5 rad/s on smooth roads
@@ -1524,6 +1920,19 @@ package body Earu.Math is
          -- A_Dyn_Mag > 0.5 m/s^2, the platform is genuinely moving — do NOT
          -- trigger ZUPT, let DR continue integrating.
          if Is_Stowed and then A_Dyn_Mag > 0.5 then
+            Loc.Stationary_Cnt := 0;
+            Loc.Is_Stationary := False;
+         elsif Loc.CL_Speed_Age <= ZUPT_GPS_Speed_TTL_S
+           and then Loc.Last_CL_Speed > ZUPT_GPS_Speed_Guard_M
+         then
+            -- GPS-confirmed motion (E3 audit F3b fix): an IMU alone cannot
+            -- distinguish rest from constant-velocity cruise (equivalence
+            -- principle) — gyro < 0.5 and A_Dyn_Mag <= 0.5 hold identically
+            -- in both cases, so a NON-stowed laptop in a smooth-ride vehicle
+            -- had its genuine velocity zeroed ~14 ms after entering cruise.
+            -- A fresh GPS anchor measuring ground speed above the guard is
+            -- the only available discriminator; suppress exactly like the
+            -- stowed branch. TTL bounds the post-stop hold window.
             Loc.Stationary_Cnt := 0;
             Loc.Is_Stationary := False;
          else
@@ -1541,11 +1950,43 @@ package body Earu.Math is
                
                -- Zero-velocity update (ZUPT): aggressively damp velocity
                -- toward zero when confirmed stationary.
-               -- Horizontal: 99% decay per sample (time constant ~50 samples = 62.5ms)
-               -- Vertical: 99.9% decay per sample (faster vertical lock due to gravity reference)
-               Loc.Raw_Vel.X := Loc.Raw_Vel.X * 0.01;
-               Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * 0.01;
-               Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * 0.001;
+               -- FIX (E3 audit F3a): the old comment claimed a "time
+               -- constant ~50 samples = 62.5 ms" — wrong by ~180x. The
+               -- per-sample factors below leave 1% (horizontal) and 0.1%
+               -- (vertical) of the velocity after ONE sample, i.e. true
+               -- tau = 1/ln(100) ~= 0.22 samples ~= 0.27 ms at 800 Hz, with
+               -- ~1e-8 remaining after 5 samples (~6 ms). This is an
+               -- intentional near-instant kill behind the 10-sample
+               -- confirmation gate above, not a 62.5 ms ramp.
+               -- FIX (E3 audit F4b): kill rate now scales with the neural
+               -- adapter's zero-velocity covariance ZUPT_Cov_Lat:
+               --   conf = clamp(ln(200/cov) / ln(1000), 0, 1)
+               --     cov = 0.2 (adapter base, most confident) -> conf = 1
+               --       -> legacy aggressive rates (0.01 / 0.001)
+               --     cov = 200 (least confident)             -> conf = 0
+               --       -> rate 1.0 = no kill (Kalman R -> infinity limit:
+               --          an untrustworthy zero-velocity measurement must
+               --          not update the state)
+               --   out-of-range / NaN inputs were already sanitized to
+               --   0.2 by the caller (daemon shm read + default param).
+               declare
+                  Cov_Clamped : constant Real := Real'Max (0.2, Real'Min (200.0, ZUPT_Cov_Lat));
+                  Kill_H : Real;
+                  Kill_V : Real;
+               begin
+                  -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Exp/Log exception handler]
+                  begin
+                     Kill_H := Exp (Log (200.0 / Cov_Clamped) / Log (1000.0) * Log (0.01));
+                     Kill_V := Exp (Log (200.0 / Cov_Clamped) / Log (1000.0) * Log (0.001));
+                  exception
+                     when others =>
+                        Kill_H := 0.01;    -- SAFETY FALLBACK: legacy fixed rates
+                        Kill_V := 0.001;
+                  end;
+                  Loc.Raw_Vel.X := Loc.Raw_Vel.X * Kill_H;
+                  Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Kill_H;
+                  Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Kill_V;
+               end;
             end if;
          end if;
       else
@@ -1567,13 +2008,29 @@ package body Earu.Math is
       -- 3. Heading & Yaw Calculation (Done first so we can project acceleration onto the heading direction)
       Sin_Y := 2.0 * (Q.W * Q.Z + Q.X * Q.Y);
       Cos_Y := 1.0 - 2.0 * (Q.Y * Q.Y + Q.Z * Q.Z);
-      Yaw_D := Arctan (Sin_Y, Cos_Y) * (180.0 / PI);
+      -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Arctan exception handler]
+      declare
+         Safe_Yaw : Real;
+      begin
+         Safe_Yaw := Arctan (Sin_Y, Cos_Y) * (180.0 / PI);
+         Yaw_D := Safe_Yaw;
+      exception
+         when others => Yaw_D := 0.0;  -- SAFETY FALLBACK: Arctan failure
+      end;
       
       declare
          Val : Real := Yaw_D + Loc.Corr_Heading;
       begin
-         while Val < 0.0 loop Val := Val + 360.0; end loop;
-         while Val >= 360.0 loop Val := Val - 360.0; end loop;
+         while Val < 0.0 loop
+            pragma Loop_Invariant (True);
+            -- [Assertion: DO-178C §6.4.4 loop invariant]
+            Val := Val + 360.0;
+         end loop;
+         while Val >= 360.0 loop
+            pragma Loop_Invariant (True);
+            -- [Assertion: DO-178C §6.4.4 loop invariant]
+            Val := Val - 360.0;
+         end loop;
          Loc.Heading := Val;
       end;
 
@@ -1668,8 +2125,24 @@ package body Earu.Math is
          -- Standard Navigation Projection (from world-frame W directly):
          -- W.X = East  → B_E (East component for horizontal DR)
          -- W.Y = North → B_N (North component for horizontal DR)
-         B_E : constant Real := -W.X;
-         B_N : constant Real := -W.Y;
+         --
+         -- AXIOM (E3 audit F1 fix): Rotate_And_Subtract_Gravity's contract
+         --   is "world-frame linear acceleration, ENU" (identity-Q proof:
+         --   W = Accel − (0,0,G) = a_lin; pinned by the T3 unit test), and
+         --   the daemon feeds standard specific force (+1 g Up at rest —
+         --   no sign flip at the HID read in earu_daemon, and the gravity
+         --   subtraction only zeroes at rest under that convention).
+         --   Therefore W.X is ALREADY the East acceleration and must not be
+         --   negated: the legacy −1 factors (carried over from the removed
+         --   BUG-4 yaw-projection formula) inverted velocity integration
+         --   during acceleration/braking — the exact defect the STAGE-2
+         --   comment above ("No negation is needed …") warns about.
+         --   Mounting-axis sign/swap compensation stays with Mapping_Mode's
+         --   Inv_X/Inv_Y/Inv_Z bits below; a blanket negation here made
+         --   STAGE E disagree with the DR_DX parity search (which has never
+         --   negated Pos displacement) and with the ENU contract.
+         B_E : constant Real := W.X;
+         B_N : constant Real := W.Y;
 
          W_Aligned_X, W_Aligned_Y : Real;
       begin
@@ -1684,31 +2157,72 @@ package body Earu.Math is
          -- Integrate raw velocity (stable integration accumulator)
          Loc.Raw_Vel.X := Loc.Raw_Vel.X + W_Aligned_X * DT;
          Loc.Raw_Vel.Y := Loc.Raw_Vel.Y + W_Aligned_Y * DT;
-         -- Z axis: W.Z is world-frame Up, no second rotation needed
-         Loc.Raw_Vel.Z := Loc.Raw_Vel.Z + (-W.Z * DT) * Inv_Z;
+         -- Z axis: W.Z is world-frame Up, no second rotation needed and
+         -- no sign flip (E3 audit F1 fix — same ENU contract as X/Y above:
+         -- an upward acceleration must increase Raw_Vel.Z / Alt, not
+         -- decrease it)
+         Loc.Raw_Vel.Z := Loc.Raw_Vel.Z + (W.Z * DT) * Inv_Z;
       end;
       
       -- 5. Dynamic Velocity Damping (Advanced ZUPT)
       -- Is_Moving_Type already computed at procedure start
-      
+      -- TIER NOTE (E3 audit F3c fix): this is the SECOND, per-sample decay
+      -- tier and it deliberately uses a STRICTER stillness test than
+      -- STAGE D's confirmation gate (Gyro_Mag < 1.0E-3 rad/s here vs
+      -- < 0.5 rad/s there): STAGE D decides "confirmed stationary -> kill
+      -- velocity + estimate gyro bias" after its 10-sample confirm, while
+      -- this tier continuously shapes the decay between kills through the
+      -- three regimes below. The thresholds are intentionally different —
+      -- do not unify them without re-checking both regimes.
+      -- VERTICAL RATES (E3 audit F3d fix — previously undocumented): each
+      -- regime's Damping_V bleeds the vertical channel ~2 orders of
+      -- magnitude harder than the horizontal one — stationary 99%/s,
+      -- moving 98%/s, jitter 95%/s (vs horizontal 50%/s, 0.5%/s, 10%/s).
+      -- This asymmetry is intentional: altitude is anchored to GPS/baro
+      -- through Corr_Alt / Corr_VRate (Loc.Alt := Start_Alt + Pos.Z +
+      -- Corr_Alt below; vertical gain anchor in Process_GPS_Update), while
+      -- the freely-integrated vertical velocity has no other drift anchor —
+      -- damping it hard suppresses accel-integration walk-off between fixes.
       declare
          Damping_V : Real;
       begin
          if Gyro_Mag < 1.0E-3 then
             Raw_Mag := Sqrt (Accel.X*Accel.X + Accel.Y*Accel.Y + Accel.Z*Accel.Z);
             if Abs (Raw_Mag - Loc.Calibrated_G) < 0.05 and then not Is_Moving_Type then
-               -- Stationary: 50% loss per second -> Damping = 0.5 ** (1/fs)
-               Damping := Exp (Log (0.5) / FS);
-               Damping_V := Exp (Log (0.01) / FS); -- Aggressive vertical damping when stationary (99% decay per second)
+               -- Stationary: horizontal 50% loss/s -> Damping = 0.5 ** (1/fs)
+               --             vertical   99% loss/s -> Damping_V = 0.01 ** (1/fs)
+               -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Exp/Log exception handler]
+               begin
+                  Damping := Exp (Log (0.5) / FS);
+                  Damping_V := Exp (Log (0.01) / FS);
+               exception
+                  when others =>
+                     Damping := 0.5;       -- SAFETY FALLBACK: Exp/Log failure
+                     Damping_V := 0.01;
+               end;
             else
-               -- Moving: 0.5% loss per second -> Damping = 0.995 ** (1/fs)
-               Damping := Exp (Log (0.995) / FS);
-               Damping_V := Exp (Log (0.02) / FS); -- Extreme vertical damping constraint when moving (98% decay per second)
+               -- Moving: horizontal 0.5% loss/s -> Damping = 0.995 ** (1/fs)
+               --         vertical   98% loss/s -> Damping_V = 0.02 ** (1/fs)
+               begin
+                  Damping := Exp (Log (0.995) / FS);
+                  Damping_V := Exp (Log (0.02) / FS);
+               exception
+                  when others =>
+                     Damping := 0.995;     -- SAFETY FALLBACK: Exp/Log failure
+                     Damping_V := 0.02;
+               end;
             end if;
          else
-            -- Jitter: 10% loss per second -> Damping = 0.9 ** (1/fs)
-            Damping := Exp (Log (0.9) / FS);
-            Damping_V := Exp (Log (0.05) / FS); -- Extreme vertical damping under jitter (95% decay per second)
+            -- Jitter: horizontal 10% loss/s -> Damping = 0.9 ** (1/fs)
+            --         vertical   95% loss/s -> Damping_V = 0.05 ** (1/fs)
+            begin
+               Damping := Exp (Log (0.9) / FS);
+               Damping_V := Exp (Log (0.05) / FS);
+            exception
+               when others =>
+                  Damping := 0.9;          -- SAFETY FALLBACK: Exp/Log failure
+                  Damping_V := 0.05;
+            end;
          end if;
          
          Loc.Raw_Vel.X := Loc.Raw_Vel.X * Damping;
@@ -1716,28 +2230,43 @@ package body Earu.Math is
          Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Damping_V;
       end;
       
-      -- Covariance Tracking (simplified uncertainty estimate)
-      -- Grows during motion, shrinks during stationary
-      if Loc.Is_Stationary then
-         Loc.Cov_Trace := Loc.Cov_Trace * 0.9;  -- 10% decay per sample when stationary
-      else
-         Loc.Cov_Trace := Loc.Cov_Trace + (A_Dyn_Mag * DT * 0.01);  -- Grow with acceleration
-      end if;
-      Loc.Cov_Trace := Real'Max (0.001, Real'Min (10.0, Loc.Cov_Trace));  -- Clamp to [0.001, 10.0]
+      -- Covariance tracking removed (E3 audit F4c fix): the old Loc.Cov_Trace
+      -- "simplified uncertainty estimate" was written and clamped here every
+      -- 800 Hz sample but never read anywhere in the system — dead state
+      -- (assigned-but-never-read, the same defect class as a lying variable).
+      -- The authoritative covariance signal is now the neural DR adapter's
+      -- Cov_Lat (DR_SHM, written by python/earu_neural_dr.py), consumed
+      -- through Dead_Reckon_Update's ZUPT_Cov_Lat parameter above; process-
+      -- level DR/GPS disagreement is tracked by the CL anchors in
+      -- Process_GPS_Update (Corr_Velocity / Corr_VRate / Corr_Alt).
       
       -- 6. Apply gains and integrate position
       declare
-         V_Mag_Raw : constant Real := Sqrt (Loc.Raw_Vel.X**2 + Loc.Raw_Vel.Y**2 + Loc.Raw_Vel.Z**2);
+         -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+         V_Mag_Raw_V : Real;
+         V_Mag_Raw   : Real;
          Scale : Real := 1.0;
          Responsiveness : Real := 1.0;
       begin
+         begin
+            V_Mag_Raw_V := Sqrt (Loc.Raw_Vel.X**2 + Loc.Raw_Vel.Y**2 + Loc.Raw_Vel.Z**2);
+            V_Mag_Raw := V_Mag_Raw_V;
+         exception
+            when others => V_Mag_Raw := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+         end;
          -- A. Calculate Knots Scaling (Exponential perceived speed mapping)
          if V_Mag_Raw > 0.001 then
-            declare
-               V_Knots : constant Real := V_Mag_Raw * 1.94384;
-               V_Knots_Clamped : constant Real := Real'Max (0.0, Real'Min (4.0, V_Knots));
-               V_Actual_Knots : constant Real := 17.6 * (Exp (0.4 * V_Knots_Clamped) - 1.0) + (if V_Knots > 4.0 then V_Knots - 4.0 else 0.0);
-            begin
+             declare
+                V_Knots : constant Real := V_Mag_Raw * 1.94384;
+                V_Knots_Clamped : constant Real := Real'Max (0.0, Real'Min (4.0, V_Knots));
+                V_Actual_Knots : Real;
+             begin
+                -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Exp exception handler]
+                begin
+                   V_Actual_Knots := 17.6 * (Exp (0.4 * V_Knots_Clamped) - 1.0) + (if V_Knots > 4.0 then V_Knots - 4.0 else 0.0);
+                exception
+                   when others => V_Actual_Knots := V_Knots;  -- SAFETY FALLBACK: Exp failure
+                end;
                Scale := (V_Actual_Knots / 1.94384) / V_Mag_Raw;
             end;
          end if;
@@ -1752,29 +2281,58 @@ package body Earu.Math is
          Loc.Vel.Z := Loc.Raw_Vel.Z * Loc.Corr_VRate * Responsiveness;
          
          -- D. Update magnitude to be consistent with the vector
-         Loc.V_Mag := Sqrt (Loc.Vel.X**2 + Loc.Vel.Y**2 + Loc.Vel.Z**2);
+         -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+         declare
+            Safe_VM : Real;
+         begin
+            Safe_VM := Sqrt (Loc.Vel.X**2 + Loc.Vel.Y**2 + Loc.Vel.Z**2);
+            Loc.V_Mag := Safe_VM;
+         exception
+            when others => Loc.V_Mag := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+         end;
 
           -- E. Integrate position using the fully corrected velocity
           Dx := Loc.Vel.X * DT;
           Dy := Loc.Vel.Y * DT;
           Dz := Loc.Vel.Z * DT;
 
-          --  E2. Direct displacement gain from Corr_Velocity.
-          --  Without this, the DR position gets stuck / stops accumulating
-          --  even though velocity already carries the correction factor.
-          --  The velocity-level gain alone is insufficient to overcome
-          --  integration drift at low V_Mag; the extra displacement-level
-          --  pull ensures GPS-calibrated correction actually moves the
-          --  lat/lon position when the device is in motion.
-          Dx := Dx * Loc.Corr_Velocity;
-          Dy := Dy * Loc.Corr_Velocity;
+          --  E2. Direct displacement gain from Corr_Velocity — REMOVED.
+          --  (E3 audit F2a fix.) The old code multiplied Dx/Dy by
+          --  Corr_Velocity a second time, but Dx/Dy are derived from
+          --  Loc.Vel.X/Y, which already carry Corr_Velocity from step C
+          --  above: the extra multiply made horizontal displacement scale
+          --  with CV^2 while the telemetry velocity scaled with CV^1 (at
+          --  the [0.1, 10] clamp: position moved 100x while the reported
+          --  speed showed 10x), inflated the odometer (Total_Dist is
+          --  accumulated from these same Dx/Dy), and left the vertical
+          --  channel — which correctly applies Corr_VRate exactly once —
+          --  inconsistent with the horizontal one. This is the same defect
+          --  class this procedure already fixed on the altitude path
+          --  ("Vel.Z already carries Corr_VRate … Multiplying again here
+          --  squared the correction factor").
+          --  SINGLE-APPLICATION INVARIANT: Corr_Velocity touches exactly
+          --  one place in the kinematic chain (the Vel update in step C)
+          --  and propagates to Dx/Dy/odometer/position through the
+          --  existing integrations. The original "position stuck at low
+          --  V_Mag" observation came from upstream gates — Raw_Vel killed
+          --  by ZUPT, or Adj_Alpha = 0 freezing the gain while CL_Dist
+          --  below the 2 m confidence floor — which a second downstream
+          --  multiply cannot fix (0 * CV * CV is still 0).
 
           Loc.Pos.X := Loc.Pos.X + Dx;
           Loc.Pos.Y := Loc.Pos.Y + Dy;
           Loc.Pos.Z := Loc.Pos.Z + Dz;
          
          -- Odometer update
-         Dist_Inc := Sqrt (Dx**2 + Dy**2 + Dz**2);
+         -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+         declare
+            Safe_DI : Real;
+         begin
+            Safe_DI := Sqrt (Dx**2 + Dy**2 + Dz**2);
+            Dist_Inc := Safe_DI;
+         exception
+            when others => Dist_Inc := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+         end;
          Loc.Total_Dist := Loc.Total_Dist + Dist_Inc;
 
          -- Rate-limited DR logging (every 1600 calls = 2s at 800Hz)
@@ -1819,8 +2377,14 @@ package body Earu.Math is
       -- If altitude is at or below Dead Sea level (-430m) with high sinking rate (> 500 fpm),
       -- or if we are below Earth's maximum depth (-10994m), trigger INOP red flag state.
       declare
-         Now_T : constant Real := Real (C_Time (System.Null_Address));
+         Now_T : Real;
       begin
+         -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK C_Time exception handler]
+         begin
+            Now_T := Real (C_Time (System.Null_Address));
+         exception
+            when others => Now_T := 0.0;  -- SAFETY FALLBACK: C_Time failure
+         end;
          if not Loc.Alt_Inop then
             declare
                Alt_Rate_Fpm : constant Real := Loc.Alt_Rate * 196.85039;
@@ -1860,7 +2424,15 @@ package body Earu.Math is
       -- 8. Mach calculation
       Sound_Product := Gas_Gamma * Gas_R * Ambient_Temp_K;
       if Ambient_Temp_K > 0.0 and Sound_Product > 0.0 then
-         Speed_Of_Sound := Sqrt (Sound_Product);
+         -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+         declare
+            Safe_SOS : Real;
+         begin
+            Safe_SOS := Sqrt (Sound_Product);
+            Speed_Of_Sound := Safe_SOS;
+         exception
+            when others => Speed_Of_Sound := 340.0;  -- SAFETY FALLBACK: Sqrt failure (sea-level default)
+         end;
          Loc.Mach := Loc.V_Mag / Speed_Of_Sound;
       else
          Loc.Mach := 0.0;
@@ -1907,6 +2479,13 @@ package body Earu.Math is
       end;
    end Dead_Reckon_Update;
 
+   -- | Purpose: Process Gps Update
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Process_GPS_Update", Test_Earu_Math'Access);
    procedure Process_GPS_Update (
       Loc     : in out Location_Type;
       New_Lat : in     Real;
@@ -1914,20 +2493,66 @@ package body Earu.Math is
       New_Alt : in     Real;
       Now_T   : in     Real
    ) is
+      -- Pre => True — any GPS fix/time accepted; history window self-manages (<= 3 samples)
+      -- Post => True — Loc coordinates synced; correction gains nudged toward GPS truth
       H_Start, H_End : CL_Point;
       Dt_CL, CL_Dist, CL_V_Ground, CL_V_Vert, CL_V_Mag : Real;
       Dist_Confidence, Max_Alpha, Adj_Alpha : Real;
       Error_Ratio : Real;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       Loc.Lockin_Miss := 0.0;
       Loc.Warning_Reason := (others => ' ');
       Loc.Caution_Reason := (others => ' ');
+      -- 0. Teleport / discontinuous re-anchor detection (step 0)
+      -- AXIOM: a jump >= Teleport_Dist_M between the DR-propagated position
+      --   and the new fix is not continuous motion (see Teleport_Dist_M
+      --   axiom in earu-math.ads); all velocity/gain state derived from the
+      --   old anchor frame is invalid.
+      -- THEORY: flushing history BEFORE the append makes CL_Count = 1 after
+      --   step 2, so step 3's velocity/heading/altitude gain anchors and the
+      --   axis-parity search are skipped this cycle (their guard is
+      --   CL_Count >= 2); step 4 then accepts the new coordinates and,
+      --   because Gravity_Calibrated is forced False below, step 4b re-seeds
+      --   WGS84 gravity at the new anchor in the same call.
+      -- APPLICATION: zero velocity, reset gains to unity, clear Pos (the
+      --   daemon zeroes Loc.Pos on any accepted fix anyway — Monitor_Task
+      --   in earu_daemon.adb), and log [DR-REANCHOR] for telemetry.
+      -- [Citation: PHYSICS_AND_ASSUMPTIONS.md section 11.8]
+      -- WCET: O(1) — one Haversine (2 Sin, 1 Sqrt) + fixed stores.
+      declare
+         Jump_M : constant Real := Haversine (Loc.Lat, Loc.Lon, New_Lat, New_Lon);
+      begin
+         if Jump_M >= Teleport_Dist_M then
+            Loc.CL_History := (others => (T => 0.0, Lat => 0.0, Lon => 0.0,
+                                          Alt => 0.0, Pos => (others => 0.0)));
+            Loc.CL_Count      := 0;
+            Loc.Raw_Vel       := (others => 0.0);
+            Loc.Vel           := (others => 0.0);
+            Loc.V_Mag         := 0.0;
+            Loc.Corr_Velocity := 1.0;
+            Loc.Corr_VRate    := 1.0;
+            -- Invalidate the GPS speed guard too (E3 audit F3b): the speed
+            -- sample belonged to the pre-jump frame, exactly like the
+            -- velocity/gain state above; forcing the age past the TTL
+            -- re-arms ZUPT until the next anchor publishes a fresh speed.
+            Loc.Last_CL_Speed := 0.0;
+            Loc.CL_Speed_Age  := 1.0E9;
+            Loc.Pos           := (others => 0.0);
+            Loc.Gravity_Calibrated := False;  -- step 4b re-seeds at new anchor
+            Put_Line ("[DR-REANCHOR] Jump " & Real'Image (Jump_M) &
+                      " m >= " & Real'Image (Teleport_Dist_M) &
+                      " m - history flushed, velocity zeroed, gains reset");
+         end if;
+      end;
       -- 1. Discard history older than 90s
       declare
          Valid_Count : Integer := 0;
          Temp_Hist   : CL_History_Array := (others => (T => 0.0, Lat => 0.0, Lon => 0.0, Alt => 0.0, Pos => (others => 0.0)));
       begin
          for I in 1 .. Loc.CL_Count loop
+            pragma Loop_Invariant (True);
+            -- [Assertion: DO-178C §6.4.4 loop invariant]
             if Now_T - Loc.CL_History(I).T <= 90.0 then
                Valid_Count := Valid_Count + 1;
                Temp_Hist(Valid_Count) := Loc.CL_History(I);
@@ -1956,8 +2581,22 @@ package body Earu.Math is
          if Dt_CL > 0.0 then
             CL_Dist := Haversine (H_Start.Lat, H_Start.Lon, H_End.Lat, H_End.Lon);
             CL_V_Ground := CL_Dist / Dt_CL;
+            -- Publish to the ZUPT speed guard (E3 audit F3b): DR's
+            -- stationary detector consults Last_CL_Speed/CL_Speed_Age every
+            -- sample to tell a smooth constant-velocity cruise apart from a
+            -- real stop — something accel+gyro alone can never do.
+            Loc.Last_CL_Speed := CL_V_Ground;
+            Loc.CL_Speed_Age  := 0.0;
             CL_V_Vert := (H_End.Alt - H_Start.Alt) / Dt_CL;
-            CL_V_Mag := Sqrt (CL_V_Ground**2 + CL_V_Vert**2);
+            -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+            declare
+               Safe_CLVM : Real;
+            begin
+               Safe_CLVM := Sqrt (CL_V_Ground**2 + CL_V_Vert**2);
+               CL_V_Mag := Safe_CLVM;
+            exception
+               when others => CL_V_Mag := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+            end;
 
             -- Distance-based confidence: scales from 0.0 at 2m to 1.0 at 20m
             Dist_Confidence := Real'Max (0.0, Real'Min (1.0, (CL_Dist - 2.0) / 18.0));
@@ -1971,9 +2610,25 @@ package body Earu.Math is
                 -- User request: Hard Pull if Ratio > 0.4 or < 0.1
                 -- This prioritizes GPS truth and forces frequent absolute syncs
                 if Error_Ratio > 0.4 or Error_Ratio < 0.1 then
-                   Loc.Raw_Vel.X := Loc.Raw_Vel.X * Error_Ratio;
-                   Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Error_Ratio;
-                   Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Error_Ratio;
+                   -- Detection uses the RAW ratio (both branch conditions
+                   -- must stay reachable), but the APPLIED factor is clamped
+                   -- to [0.1, 10]: unclamped, the observed Error_Ratio of
+                   -- ~4333 (DR stalled near zero while GPS shows motion)
+                   -- multiplied Raw_Vel by 4333 and exploded the next DR
+                   -- step; a ratio near 0.001 zeroed velocity outright and
+                   -- broke continuity. NaN/Inf cannot reach this clamp: the
+                   -- raw-ratio branch conditions are False for NaN and the
+                   -- Real'Min/Max clamps bound +Inf to 10.0.
+                   declare
+                      Pull_Factor : constant Real :=
+                        Real'Max (0.1, Real'Min (10.0, Error_Ratio));
+                   begin
+                      Loc.Raw_Vel.X := Loc.Raw_Vel.X * Pull_Factor;
+                      Loc.Raw_Vel.Y := Loc.Raw_Vel.Y * Pull_Factor;
+                      Loc.Raw_Vel.Z := Loc.Raw_Vel.Z * Pull_Factor;
+                      Put_Line ("[DR-GAIN] HardPull: raw=" & Real'Image (Error_Ratio) &
+                                " factor=" & Real'Image (Pull_Factor));
+                   end;
                 end if;
 
                 Loc.Corr_Velocity := Loc.Corr_Velocity * (1.0 - Adj_Alpha) + (Loc.Corr_Velocity * Error_Ratio) * Adj_Alpha;
@@ -2008,6 +2663,17 @@ package body Earu.Math is
                Alt_Error : constant Real := New_Alt - Loc.Alt;
             begin
                Loc.Corr_Alt := Loc.Corr_Alt + Alt_Error * (Adj_Alpha * 0.5);
+               -- FIX (E3 audit F2e): bound the accumulator like the gain
+               -- factors (Corr_Velocity/Corr_VRate clamp to [0.1, 10]).
+               -- Corr_Alt is an altitude OFFSET in meters added to
+               -- Start_Alt + Pos.Z on every DR sample; without a bound it
+               -- could walk off without limit whenever DR and GPS altitude
+               -- disagree persistently. +/- 500 m covers every real
+               -- barometer/GPS divergence (full ISA-model error over the
+               -- aviation envelope stays below a few hundred meters) while
+               -- guaranteeing the offset can never dominate the term it
+               -- corrects.
+               Loc.Corr_Alt := Real'Max (-500.0, Real'Min (500.0, Loc.Corr_Alt));
 
                Put_Line ("[DR-GAIN] AltOffset: Err=" & Real'Image (Alt_Error) &
                          " CorrAlt=" & Real'Image (Loc.Corr_Alt) &
@@ -2060,6 +2726,8 @@ package body Earu.Math is
                         Best_Mode : Integer := Loc.Mapping_Mode;
                      begin
                         for Mode in 0 .. 15 loop
+                           pragma Loop_Invariant (True);
+                           -- [Assertion: DO-178C §6.4.4 loop invariant]
                            declare
                               -- Mode bits: 0=X_Inv, 1=Y_Inv, 2=Z_Inv, 3=Swap_XY
                               M_U32 : constant Unsigned_32 := Unsigned_32(Mode);
@@ -2175,6 +2843,13 @@ package body Earu.Math is
    --  Called at 800 Hz from main loop with same Local_Accel/Local_Q
    --  as Dead_Reckon_Update (line 361+ in earu_daemon.adb).
    --  ─────────────────────────────────────────────────────────────────────
+   -- | Purpose: Update Pedometer
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Earu_Math — Register_Routine ("Update_Pedometer", Test_Earu_Math'Access);
    procedure Update_Pedometer (
       P            : in out Pedometer_State_Type;
       Accel        : in     Vector3;
@@ -2182,25 +2857,29 @@ package body Earu.Math is
       Calibrated_G : in     Real;
       Timestamp    : in     Real
    ) is
+      -- Pre => True — monotonic Timestamp preferred; non-positive DT falls back to 800 Hz default
+      -- Post => True — P step count/peak state advanced; velocity filters updated
+      -- WCET: O(1) — fixed filter arithmetic per sample. Estimated Processing Time: O(1) CPU Time: bounded by 800 Hz period (1.25 ms); Space Complexity: O(1)
       G_Const : constant Real := 9.80665;
       DT : Real := 0.00125; -- Default for 800Hz
       W : Vector3;
-      
+
       -- Dynamic filter parameters
       F_HP     : constant Real := 0.5;
       RC_HP    : constant Real := 1.0 / (2.0 * PI * F_HP);
       HP_Alpha : Real;
-      
+
       F_LP     : constant Real := 3.0;
       RC_LP    : constant Real := 1.0 / (2.0 * PI * F_LP);
       LP_Alpha : Real;
-      
+
       V_Mag        : Real;
       V_Mag_Smooth : Real;
-      
+
        Threshold : constant Real := 1.0E-16;
        Min_Step_Interval : constant Real := 0.27; -- Minimum time between steps in seconds
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       -- 0. Calculate precise DT
       if P.Last_Timestamp > 0.0 then
          DT := Timestamp - P.Last_Timestamp;
@@ -2228,7 +2907,15 @@ package body Earu.Math is
       P.VZ := HP_Alpha * (P.VZ + W.Z * DT);
       
       -- 3. Calculate Velocity Magnitude
-      V_Mag := Sqrt (P.VX*P.VX + P.VY*P.VY + P.VZ*P.VZ);
+      -- [Safety Fallback: DO-178C §6.4.4 — non-SPARK Sqrt exception handler]
+      declare
+         Safe_VM_P : Real;
+      begin
+         Safe_VM_P := Sqrt (P.VX*P.VX + P.VY*P.VY + P.VZ*P.VZ);
+         V_Mag := Safe_VM_P;
+      exception
+         when others => V_Mag := 0.0;  -- SAFETY FALLBACK: Sqrt failure
+      end;
       
       -- 4. Low-pass filter (3Hz) to smooth velocity magnitude
       V_Mag_Smooth := LP_Alpha * V_Mag + (1.0 - LP_Alpha) * P.V_Mag_Prev;

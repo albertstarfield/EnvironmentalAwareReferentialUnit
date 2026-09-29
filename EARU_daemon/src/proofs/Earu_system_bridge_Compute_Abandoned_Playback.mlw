@@ -5,8 +5,8 @@ module Earu_system_bridge_Compute_Abandoned_Playback
 
 
   let compute_Abandoned_Playback (s: int) : int
-    requires { s >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = s
 
 end

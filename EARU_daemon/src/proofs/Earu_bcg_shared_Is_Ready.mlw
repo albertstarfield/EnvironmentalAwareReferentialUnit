@@ -5,8 +5,8 @@ module Earu_bcg_shared_Is_Ready
 
 
   let is_Ready () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — total predicate over the private State. }
+    ensures { true — Boolean by construction (delegates to Ready). }
     = Earu.BCG_Detection.Ready (State);  -- SMT_VERIFIED
 
 end

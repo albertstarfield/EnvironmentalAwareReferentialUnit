@@ -5,8 +5,8 @@ module Earu_io_Python3_Exec
 
 
   let python3_Exec () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Ada.Environment_Variables.Value ("EARU_PYTHON3")
 
 end

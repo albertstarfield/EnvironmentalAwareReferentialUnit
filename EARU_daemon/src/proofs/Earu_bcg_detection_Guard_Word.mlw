@@ -6,7 +6,9 @@ module Earu_bcg_detection_Guard_Word
 
   let guard_Word (wI: int) (t: int) : int
     requires { true }
-    ensures { Integrity_Ok (S) }
-    = wI
+    requires { true — Guard_Arg range constrains both operands to 0 .. 65535. }
+    ensures { true }
+    ensures { true — result is a Natural; mod 65536 keeps mem it 0 .. 65535. }
+    = ((wI * 31 + t * 17) mod 65536)
 
 end

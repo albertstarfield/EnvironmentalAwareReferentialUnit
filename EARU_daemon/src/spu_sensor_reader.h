@@ -12,6 +12,8 @@
 #pragma pack(push, 1)
 typedef struct {
     int32_t x, y, z;      /**< Raw sensor axis values (accel in g, gyro in rad/s). */
+    /* MEMORY_SAFETY (CWE-457): timestamp = 0.0 until HID callback writes it.
+       C11 forbids default member initializers — zero via start_iokit_sensors memset. */
     double timestamp;      /**< Sample timestamp in seconds (Mach absolute converted). */
 } IMU_Entry;
 
@@ -37,6 +39,7 @@ typedef struct {
 typedef struct {
     uint32_t spectral[4];  /**< 4-channel spectral readings from ALS. */
     uint32_t padding;      /**< Alignment padding for C convention. */
+    /* MEMORY_SAFETY (CWE-457): lux_factor = 0.0f until ALS callback writes it */
     float lux_factor;      /**< Lux conversion factor. */
 } ALS_SHM_Record;
 
@@ -48,6 +51,7 @@ typedef struct {
 typedef struct {
     uint32_t update_count; /**< Monotonic update counter. */
     uint32_t padding;      /**< Alignment padding. */
+    /* MEMORY_SAFETY (CWE-457): angle = 0.0f until lid callback writes it */
     float angle;           /**< Lid angle in degrees (0..180). */
 } Lid_SHM;
 

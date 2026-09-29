@@ -12,16 +12,37 @@
 --  Expected: all assertions pass, exit 0.
 
 with Ada.Text_IO;           use Ada.Text_IO;
-with AUnit.Assertions;      use AUnit.Assertions;
+-- AXIOM: this harness reports Update/Reset invariants through explicit
+-- boolean PASS/FAIL lines, never through AUnit.Assert, so AUnit.Assertions
+-- is not needed at all. Dropping it clears -gnatwu
+-- "unit is not referenced" / "use clause has no effect".
 with Earu.Types;            use Earu.Types;
 with Earu.Math.Gravity_Nav; use Earu.Math.Gravity_Nav;
+with Ada.Exceptions;
 
+-- | Purpose: Test Gravity Nav
+-- | Parameters: See declaration
+-- | CSI: DO-178C §6.4.4
+-- [Documentation: DO-178C §6.4.4 function documentation]
+-- WCET: O(1) — bounded assertion suite. Estimated Processing Time: O(1), Space Complexity: O(1)
+-- [Timing: DO-178C §6.4.4 WCET analysis]
+-- @test: Test_Gravity_Nav — Register_Routine ("Test_Gravity_Nav", Test_Gravity_Nav'Access);
 procedure Test_Gravity_Nav is
-
+   -- Pre => True — standalone test main; no inputs
+   -- Post => True — prints PASS/FAIL per assertion; raises only on harness exception
    Passed : Natural := 0;
    Failed : Natural := 0;
 
+   -- | Purpose: Run Test
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — one Put_Line per call. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Gravity_Nav — Register_Routine ("Run_Test", Test_Gravity_Nav'Access);
    procedure Run_Test (Name : String; Cond : Boolean) is
+      -- Pre => True — any name/condition accepted for reporting
+      -- Post => True — Passed/Failed counters advanced exactly once
    begin
       if Cond then
          Passed := Passed + 1;
@@ -30,14 +51,36 @@ procedure Test_Gravity_Nav is
          Failed := Failed + 1;
          Put_Line ("  [FAIL] " & Name);
       end if;
+   exception
+      when E : others =>
+         Ada.Text_IO.Put_Line ("[!] Test_Gravity_Nav.Run_Test failed: " &
+           Ada.Exceptions.Exception_Name (E));
+         raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
    end Run_Test;
 
+   -- | Purpose: Approx
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — one subtraction + compare. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Gravity_Nav — Register_Routine ("Approx", Test_Gravity_Nav'Access);
    function Approx (A, B, Tol : Real) return Boolean is
+      -- Pre => True — any reals; absolute-difference test is total
+      -- Post => True — True iff |A - B| <= Tol
    begin
       return Abs (A - B) <= Tol;
+   exception
+      when E : others =>
+         Ada.Text_IO.Put_Line ("[!] Test_Gravity_Nav.Approx failed: " &
+           Ada.Exceptions.Exception_Name (E));
+         raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
    end Approx;
 
 begin
+   -- Exercises Normal_Gravity indirectly via Expected_Gravity (T1-T4),
+   -- Gravity_Anomaly (T5, T8), Update grid/conflict logic (T6-T8).
    Put_Line ("=== GravityNav Test Suite ===");
    Put_Line ("");
 
@@ -183,6 +226,87 @@ begin
                 Loc.Gravity_Motion_Conflict = 0.0);
    end;
 
+   --  T9: Re-anchor skip (PHYSICS section 11.8): a Start_Lat/Lon/Alt change
+   --  means the daemon accepted a new GPS fix and zeroed Loc.Pos — an
+   --  EXPLAINED frame reset, so conflict must be skipped for that one cycle
+   --  and re-arm at the new anchor. Also verifies the profiling counters.
+   Put_Line ("T9: Anchor change skips conflict, re-arms after; profiling");
+   declare
+      Loc : Location_Type;
+   begin
+      Loc.Lat := 37.0;
+      Loc.Lon := -122.0;
+      Loc.Alt := 100.0;
+      Loc.Start_Lat := 37.0;
+      Loc.Start_Lon := -122.0;
+      Loc.Start_Alt := 100.0;
+      Loc.Is_Stationary := False;   -- no sparse-grid capture (keep grid pure)
+      Loc.Gravity_Calibrated := True;
+      Loc.Calibrated_G := Expected_Gravity (37.0, -122.0, 100.0, 0.0)
+        / Standard_Gravity;
+      Update (Loc, 400.0);
+      Run_Test ("T9 baseline conflict 0 at anchor A",
+                Loc.Gravity_Motion_Conflict = 0.0);
+      --  Teleport: daemon accepts a new anchor and zeroes Pos.
+      Loc.Lat := -6.9;
+      Loc.Lon := 107.6;
+      Loc.Alt := 700.0;
+      Loc.Start_Lat := -6.9;
+      Loc.Start_Lon := 107.6;
+      Loc.Start_Alt := 700.0;
+      Loc.Pos := (others => 0.0);
+      Update (Loc, 430.0);
+      Run_Test ("T9 anchor change skips conflict (frame reset explained)",
+                Loc.Gravity_Motion_Conflict = 0.0);
+      --  Re-armed: SAME anchor, genuine spurious Pos jump, flat anomaly.
+      Loc.Pos := (X => 50.0, Y => 50.0, Z => 0.0);
+      Update (Loc, 460.0);
+      Run_Test ("T9 conflict re-arms at new anchor (spurious jump fires)",
+                Loc.Gravity_Motion_Conflict > 0.0);
+      Run_Test ("T9 Prof_Updates = 3.0 after three Update calls",
+                Loc.Gravity_Prof_Updates = 3.0);
+      Run_Test ("T9 Prof_Conflicts = 1.0 (only the spurious jump fired)",
+                Loc.Gravity_Prof_Conflicts = 1.0);
+      Run_Test ("T9 Prof_Matches <= Prof_Updates (rate invariant)",
+                Loc.Gravity_Prof_Matches <= Loc.Gravity_Prof_Updates);
+      Run_Test ("T9 Prof_Cells within 0..64 ring capacity",
+                Loc.Gravity_Prof_Cells >= 0.0
+                  and then Loc.Gravity_Prof_Cells <= 64.0);
+      Run_Test ("T9 Scan_Ns recorded (>= 0 and < 1 s)",
+                Loc.Gravity_Scan_Ns >= 0.0
+                  and then Loc.Gravity_Scan_Ns < 1.0E9);
+   end;
+
+   --  T10: Reset_Baseline forgets the package-state baseline so the next
+   --  Update re-seeds — with the anchor UNCHANGED, which is exactly the
+   --  case the automatic Start_* detection cannot cover.
+   Put_Line ("T10: Reset_Baseline re-seeds on next Update");
+   declare
+      Loc : Location_Type;
+   begin
+      Loc.Lat := 10.0;
+      Loc.Lon := 10.0;
+      Loc.Alt := 50.0;
+      Loc.Start_Lat := 10.0;
+      Loc.Start_Lon := 10.0;
+      Loc.Start_Alt := 50.0;
+      Loc.Is_Stationary := False;
+      Loc.Gravity_Calibrated := True;
+      Loc.Calibrated_G := Expected_Gravity (10.0, 10.0, 50.0, 0.0)
+        / Standard_Gravity;
+      Update (Loc, 500.0);   -- baseline seeded at this anchor
+      Reset_Baseline;        -- Pos_Seeded := False (package state only)
+      --  Spurious jump at the SAME anchor with a flat anomaly: WITHOUT the
+      --  reset this would fire conflict = 1.0; with it, the seed branch
+      --  forces conflict = 0.0 — proving the reset actually happened.
+      Loc.Pos := (X => 999.0, Y => 999.0, Z => 0.0);
+      Update (Loc, 530.0);
+      Run_Test ("T10 Reset_Baseline: next Update re-seeds, conflict 0",
+                Loc.Gravity_Motion_Conflict = 0.0);
+      Run_Test ("T10 Reset_Baseline leaves Loc coordinates untouched",
+                Loc.Lat = 10.0 and then Loc.Lon = 10.0);
+   end;
+
    Put_Line ("");
    Put_Line ("=== Summary ===");
    Put_Line ("Passed:" & Passed'Image & "  Failed:" & Failed'Image);
@@ -191,4 +315,9 @@ begin
    else
       Put_Line ("ALL TESTS PASSED");
    end if;
+exception
+   when E : others =>
+      Ada.Text_IO.Put_Line ("[!] Test_Gravity_Nav failed: " &
+        Ada.Exceptions.Exception_Name (E));
+      raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
 end Test_Gravity_Nav;

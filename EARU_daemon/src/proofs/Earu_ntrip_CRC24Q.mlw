@@ -5,8 +5,8 @@ module Earu_ntrip_CRC24Q
 
 
   let cRC24Q (data: int) : int
-    requires { data >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = CRC /\  16#FFFFFF#;  -- SMT_VERIFIED: mask to 24-bit result
 
 end

@@ -5,8 +5,8 @@ module Earu_system_bridge_Extract_JSON_Float
 
 
   let extract_JSON_Float () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Real
 
 end

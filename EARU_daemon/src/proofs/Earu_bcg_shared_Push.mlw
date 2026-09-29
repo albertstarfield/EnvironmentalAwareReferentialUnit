@@ -5,8 +5,8 @@ module Earu_bcg_shared_Push
 
 
   let push (ax: real) (ay: real) (az: real) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — axes sanitised by Push_Sample itself (see .ads notes). }
+    ensures { true — runtime guarantee enforced inside Push_Sample (see .ads notes). }
     = 0
 
 end

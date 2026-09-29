@@ -5,8 +5,11 @@ module Earu_daemon_Get_Battery_State
 
 
   let get_Battery_State (percent: int) (state: int) (buf: int) (max_Len: int) : int
-    requires { true }
-    ensures { true  -- always completes; errors are logged, not  raised }
+    requires { percent >= 0 }
+    requires { state >= 0 }
+    requires { buf >= 0 }
+    requires { max_Len >= 0 }
+    ensures { result >= 0 }
     = percent
 
 end

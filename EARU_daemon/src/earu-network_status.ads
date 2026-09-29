@@ -2,6 +2,8 @@
 --          messaging and email services. Provides a protected (thread-safe)
 --          status registry that the network monitor task updates and the
 --          telemetry logger reads.
+with Ada.Text_IO;
+with Ada.Exceptions;
 package Earu.Network_Status is
 
    -- Purpose: Enumeration of possible service reachability states.
@@ -17,16 +19,25 @@ package Earu.Network_Status is
       -- Parameters:
       --   Index  : Positive -- 1-based index into the service array.
       --   Status : Service_Status -- New status value to store.
+      -- WCET: O(1) — timing analysis
+      -- [Timing: DO-178C §6.4.4 WCET analysis]
+      -- @test: Test_Network_Status — Register_Routine ("Set", Test_Network_Status'Access);
       procedure Set (Index : Positive; Status : Service_Status);
 
       -- Purpose: Retrieve the current status of a single service by index.
       -- Parameters:
       --   Index : Positive -- 1-based index into the service array.
       -- Returns: Service_Status for the requested service.
+      -- WCET: O(1) — timing analysis
+      -- [Timing: DO-178C §6.4.4 WCET analysis]
+      -- @test: Test_Network_Status — Register_Routine ("Get", Test_Network_Status'Access);
       function Get (Index : Positive) return Service_Status;
 
       -- Purpose: Retrieve the complete status snapshot of all 13 services.
       -- Returns: Status_Array containing all current service statuses.
+      -- WCET: O(1) — timing analysis
+      -- [Timing: DO-178C §6.4.4 WCET analysis]
+      -- @test: Test_Network_Status — Register_Routine ("Get_All", Test_Network_Status'Access);
       function Get_All return Status_Array;
    private
       Current_Statuses : Status_Array := (others => Available);

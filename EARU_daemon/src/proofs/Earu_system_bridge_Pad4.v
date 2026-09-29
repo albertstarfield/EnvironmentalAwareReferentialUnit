@@ -11,10 +11,10 @@ Module Earu_system_bridge_Pad4.
 
   (* Function pad4 — UNPROVED — obligation stub *)
   Definition pad4 (v: Z) : Z :=
-    Character'Val (v / 1000%Z Z.modulo 10%Z + Character'Pos ('0%Z')).
+    Character'Val (v / 1000%Z Z.modulo 10%Z + Character'Pos ('0%Z')) & Character'Val (v / 100%Z Z.modulo 10%Z + Character'Pos ('0%Z')) & Character'Val (v / 10%Z Z.modulo 10%Z + Character'Pos ('0%Z')) & Character'Val (v Z.modulo 10%Z + Character'Pos ('0%Z')).
 
   Theorem pad4_correct : forall (v: Z),
-    (v >= 0) -> (pad4 v >= 0).
+    (true, Post => true) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

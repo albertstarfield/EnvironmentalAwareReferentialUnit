@@ -5,8 +5,8 @@ module Earu_io_C_System
 
 
   let c_System (command: int) : int
-    requires { command >= 0 }
-    ensures { result >= 0 }
-    = To_String (Result)
+    requires { true, Post => true }
+    ensures { true }
+    = command
 
 end

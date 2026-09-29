@@ -14,7 +14,7 @@ Module Earu_bcg_detection_Push_Sample.
     0%Z.
 
   Theorem push_Sample_correct : forall (n: Z),
-    (Bounded (S)) -> (Samples_Buffered (S) = Natural'Min).
+    (Bounded (S) — state audited before every push (contract in .ads).) -> (count increments (saturating at 8000), Integrity_Ok /\ Bounded hold (contract in .ads).).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

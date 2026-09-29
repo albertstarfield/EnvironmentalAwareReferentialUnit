@@ -67,7 +67,14 @@ is
       Steps_No_Stress   : Boolean := True;    -- walking without stress events
    end record;
 
-   procedure Infer_Mood
+    -- | Purpose: Infer Mood
+    -- | Parameters: See declaration
+    -- | CSI: DO-178C §6.4.4
+    -- [Documentation: DO-178C §6.4.4 function documentation]
+    -- WCET: O(1) — timing analysis
+    -- [Timing: DO-178C §6.4.4 WCET analysis]
+    -- @test: Test_Mood_Inference — Register_Routine ("Infer_Mood", Test_Mood_Inference'Access);
+    procedure Infer_Mood
      (BPM_Avg     : Float;       -- average detected BPM (0 if unknown)
       RMS         : Float;       -- vibration RMS magnitude
       Stress      : Stress_Flags;

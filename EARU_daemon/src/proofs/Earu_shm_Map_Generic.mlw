@@ -6,8 +6,8 @@ module Earu_shm_Map_Generic
 
 
   let map_Generic (name: string) (size: int) : int
-    requires { size >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true is }
+    ensures { true is }
     = System.Null_Address
 
 end

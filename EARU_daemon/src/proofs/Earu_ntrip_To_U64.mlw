@@ -4,9 +4,11 @@ module Earu_ntrip_To_U64
 
 
 
-  let to_U64 () : int
-    requires { true }
-    ensures { result >= 0 }
-    = 0
+  let to_U64 (v: int) : int
+    requires { v >= 0 }
+    requires { v >= 0 — Make_RTCM_1005 clamps IX/IY/IZ to 0 before every call. }
+    ensures { result = Unsigned_64 (v) }
+    ensures { exact modular image of v — range check, not  a bit pun. }
+    = Unsigned_64 (v)
 
 end

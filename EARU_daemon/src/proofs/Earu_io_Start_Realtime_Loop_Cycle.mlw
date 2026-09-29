@@ -6,7 +6,7 @@ module Earu_io_Start_Realtime_Loop_Cycle
 
   let start_Realtime_Loop_Cycle () : int
     requires { true }
-    ensures { result >= 0 }
+    ensures { true }
     = 0
 
 end

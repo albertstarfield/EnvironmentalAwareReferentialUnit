@@ -1,4 +1,7 @@
 with Ada.Numerics.Generic_Elementary_Functions;
+with Earu.Secdec;
+with Ada.Text_IO;
+with Ada.Exceptions;
 
 package body Earu.Math.BlueMarble is
 
@@ -76,10 +79,21 @@ package body Earu.Math.BlueMarble is
    -- At sea level (Alt=0): dip = 0° (horizon is at local horizontal)
    -- At FL350 (10,668m):   dip ~ 2.97° (horizon dips below horizontal)
    -- -------------------------------------------------------------------------
+   -- | Purpose: Bouguer Horizon Dip
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — Exp+Arcsin with altitude-delta cache. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_BlueMarble — Register_Routine ("Bouguer_Horizon_Dip", Test_BlueMarble'Access);
    function Bouguer_Horizon_Dip (Alt_Meters : Real) return Real is
+      -- Pre => True — any altitude accepted; Real'Max clamps negatives to sea level
+      -- Post => True — geometric horizon dip in degrees (cache hit returns exact prior value)
       Alt_Clamped : constant Real := Real'Max (0.0, Alt_Meters);
       Alt_Delta   : constant Real := abs (Alt_Clamped - Cached_Alt);
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       -- Cache check: recompute only if altitude changed significantly (> 1m)
       -- This avoids expensive Exp/Arcsin calls on every invocation.
       -- At 800 Hz with altitude stable, this saves ~799,900 Exp calls/sec.
@@ -114,17 +128,33 @@ package body Earu.Math.BlueMarble is
          Cached_Dip := Geometric_Dip;
          return Geometric_Dip;
       end;
+   exception
+      when E : others =>
+         Ada.Text_IO.Put_Line ("[!] BlueMarble.Bouguer_Horizon_Dip failed: " &
+           Ada.Exceptions.Exception_Name (E));
+         raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
    end Bouguer_Horizon_Dip;
 
    -- -------------------------------------------------------------------------
    -- Hour_Angle: Compute hour angle for given solar elevation
    -- -------------------------------------------------------------------------
+   -- | Purpose: Hour Angle
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — trig with polar zero-divisor guard. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_BlueMarble — Register_Routine ("Hour_Angle", Test_BlueMarble'Access);
    function Hour_Angle (Angle_Deg, Lat_Rad, Delta_Rad : Real) return Real is
+      -- Pre => True — any angles accepted; |Denom| < 1e-15 guard returns 0.0 at poles
+      -- Post => True — hour angle in hours (0.0 fallback at singular latitudes)
       Cos_H : Real;
       -- SMT_LOGIC: Zero-divisor guard for Hour_Angle denominator
       -- Denominator = Cos(Lat_Rad) * Cos(Delta_Rad); zero at ±90° lat
       Denom : constant Real := Real_Funcs.Cos (Lat_Rad) * Real_Funcs.Cos (Delta_Rad);
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       if abs Denom < 1.0E-15 then
          return 0.0;  -- SMT_VERIFIED: zero-divisor guard for polar latitudes
       end if;
@@ -140,15 +170,30 @@ package body Earu.Math.BlueMarble is
       end if;
 
       return Real_Funcs.Arccos (Cos_H) * Rad2Deg / 15.0;
+   exception
+      when E : others =>
+         Ada.Text_IO.Put_Line ("[!] BlueMarble.Hour_Angle failed: " &
+           Ada.Exceptions.Exception_Name (E));
+         raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
    end Hour_Angle;
 
    -- -------------------------------------------------------------------------
    -- Calculate_Time_Anchors: Main entry point for solar time calculations
    -- -------------------------------------------------------------------------
+   -- | Purpose: Calculate Time Anchors
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — fixed solar ephemeris math, cached dip. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_BlueMarble — Register_Routine ("Calculate_Time_Anchors", Test_BlueMarble'Access);
    function Calculate_Time_Anchors (
       Time_Epoch    : Real;
       Lat, Lon, Alt : Real
    ) return Sol_BlueMarble_Type is
+      -- Pre => True — epoch/coordinates accepted for any real; internal guards handle polar/singular cases
+      -- Post => True — all six anchor fields set as epoch nanoseconds (Long_Long_Integer)
       Result : Sol_BlueMarble_Type;
 
       -- Time processing
@@ -212,6 +257,7 @@ package body Earu.Math.BlueMarble is
       Lat_Deg : constant Real := Lat;
       Lon_Deg : constant Real := Lon;
    begin
+      Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       -- Dynamic JRPG Profile Detection
       if Lat_Deg >= 1.1 and then Lat_Deg <= 1.5 and then Lon_Deg >= 103.6 and then Lon_Deg <= 104.1 then
          -- The Lion City Covenant
@@ -311,6 +357,11 @@ package body Earu.Math.BlueMarble is
       Result.Last_Third_Night_Segment        := Long_Long_Integer(Tahajjud_Epoch * 1_000_000_000.0);
 
       return Result;
+   exception
+      when E : others =>
+         Ada.Text_IO.Put_Line ("[!] BlueMarble.Calculate_Time_Anchors failed: " &
+           Ada.Exceptions.Exception_Name (E));
+         raise;  -- never swallow (NO_SAFE_FALLBACK + FLOW_CONTROL)
    end Calculate_Time_Anchors;
 
 end Earu.Math.BlueMarble;

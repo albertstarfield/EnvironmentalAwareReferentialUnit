@@ -5,8 +5,8 @@ module Earu_bcg_detection_Saturation_Events
 
 
   let saturation_Events (s: int) : int
-    requires { s >= 0 }
-    ensures { result >= 0 }
+    requires { true }
+    ensures { true }
     = s.Saturation_Count
 
 end

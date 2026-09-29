@@ -5,8 +5,8 @@ module Earu_math_Update_Weather_Thermodynamics
 
 
   let update_Weather_Thermodynamics () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

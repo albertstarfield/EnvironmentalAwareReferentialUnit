@@ -138,26 +138,53 @@ _DEMO_BT: list[dict[str, Any]] = [
 
 
 def wireless_scan_loop() -> None:
-    """Background loop: scan WiFi + Bluetooth every 15s, update globals."""
+    """Background loop: scan WiFi + Bluetooth every 15s, update globals in place.
+
+    AXIOMS:     Readers import these lists by value
+                (``from earu_wireless_bridge import global_wifi_devices``),
+                so the list OBJECT identity must stay stable for the whole
+                process lifetime — consumers hold the reference captured at
+                their import time.
+    THEORIES:   A plain rebinding (``global_wifi_devices = sorted(...)``)
+                allocates a NEW list and only updates this module's name;
+                every importer keeps observing the original empty list, so
+                downstream gates (has_le / dense_wifi) starve forever.
+    APPLICATIONS: slice-assign (``[:] =``) mutates the shared object, so
+                module-attribute readers AND by-value importers all observe
+                each fresh scan; a per-iteration try/except keeps the thread
+                alive on transient scan failures (SAFETY_FALLBACK).
+    [Reference: Python reference — ``from X import n`` binds the object at
+     import time; later rebinding of X.n does not propagate —
+     https://docs.python.org/3/reference/simple_stmts.html#import]
+    """
     global global_wifi_devices, global_bt_devices
     while True:
-        wifi_list = _scan_wifi_corewlan()
-        if not wifi_list:
-            wifi_list = _scan_wifi_airport()
-        if not wifi_list:
-            wifi_list = [
-                {**ap, "rssi": ap["rssi"] - random.randint(0, 3)}
-                for ap in _DEMO_WIFI
-            ]
-        global_wifi_devices = sorted(wifi_list, key=lambda x: x["rssi"], reverse=True)
+        try:
+            wifi_list = _scan_wifi_corewlan()
+            if not wifi_list:
+                wifi_list = _scan_wifi_airport()
+            if not wifi_list:
+                wifi_list = [
+                    {**ap, "rssi": ap["rssi"] - random.randint(0, 3)}
+                    for ap in _DEMO_WIFI
+                ]
+            # In-place update (B3): keep object identity shared with every
+            # importer — rebinding here would silently desync readers.
+            global_wifi_devices[:] = sorted(wifi_list, key=lambda x: x["rssi"], reverse=True)
 
-        bt_list = _scan_bluetooth()
-        if not bt_list:
-            bt_list = [
-                {**dev, "rssi": dev["rssi"] - random.randint(0, 3)}
-                for dev in _DEMO_BT
-            ]
-        global_bt_devices = bt_list
+            bt_list = _scan_bluetooth()
+            if not bt_list:
+                bt_list = [
+                    {**dev, "rssi": dev["rssi"] - random.randint(0, 3)}
+                    for dev in _DEMO_BT
+                ]
+            # In-place update (B3): same object-identity rationale as above.
+            global_bt_devices[:] = bt_list
+        except Exception as e:
+            # SAFETY_FALLBACK: keep the previous scan lists and retry next
+            # tick — a dead thread would silently starve the SigLoc gates
+            # (the exact B3 failure class this loop caused).
+            print(f"[!] Wireless scan iteration failed (keeping last lists): {e}")
 
         time.sleep(15.0)
 
@@ -167,6 +194,25 @@ def request_wireless_permissions() -> None:
     print("[*] Wireless scanning permissions bypassed (running headless).")
 
 
+# Guard flag: one scan thread per *process*. With mp start-method "spawn" each
+# child re-imports this module fresh (flag=False), so each process that calls
+# start_wireless_scanning() gets its own thread and its own global_*_devices
+# lists. Without this guard a second in-process call would leak a duplicate
+# thread hammering CoreWLAN/system_profiler every 15s.
+# [Reference: multiprocessing spawn semantics — child re-imports __main__ deps]
+_scan_thread_started: bool = False
+
+
 def start_wireless_scanning() -> None:
-    """Start the background wireless scanning thread."""
+    """Start the background wireless scanning thread (idempotent per process).
+
+    AXIOMS: A process that reads global_wifi_devices/global_bt_devices must run
+    the scanner in *its own* address space; spawn-children never inherit the
+    parent's thread. THEORIES: flag-guards make repeat calls safe. APPLICATIONS:
+    first call starts the daemon thread, later calls are no-ops.
+    """
+    global _scan_thread_started
+    if _scan_thread_started:
+        return
+    _scan_thread_started = True
     threading.Thread(target=wireless_scan_loop, daemon=True).start()

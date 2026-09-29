@@ -14,7 +14,7 @@ Module Earu_bcg_shared_Buffered.
     Earu.BCG_Detection.Samples_Buffered (State);  -- SMT_VERIFIED.
 
   Theorem buffered_correct : forall (n: Z),
-    (True) -> (buffered n >= 0).
+    (true — total read over the private State.) -> (Samples_Buffered-style bound: buffered n <= 8000 (delegated contract).).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

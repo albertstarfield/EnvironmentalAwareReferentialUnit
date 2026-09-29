@@ -6,7 +6,10 @@ project Earu_Daemon is
    for Object_Dir use "obj/" & Earu_Daemon_Config.Build_Profile;
    for Create_Missing_Dirs use "True";
    for Exec_Dir use "bin";
-    for Main use ("earu_daemon.adb", "print_offsets.adb", "test_gravity_nav.adb");
+      --  test_earu_math_elem_funcs.adb was missing here, so its 24 checks
+      --  (Sqrt/Sin/Cos/Exp/Log/Arctan incl. the asymmetric two-argument
+      --  atan2 order anchors) were never compiled or executed by `alr build`.
+      for Main use ("earu_daemon.adb", "print_offsets.adb", "test_gravity_nav.adb", "test_earu_math.adb", "test_earu_math_elem_funcs.adb", "test_location_bridge.adb", "test_weather_shm_task.adb");
 
    for Archive_Builder use ("/usr/bin/ar", "cr");
    for Archive_Indexer use ("/usr/bin/ranlib");

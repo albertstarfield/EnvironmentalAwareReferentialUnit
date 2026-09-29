@@ -7,6 +7,6 @@ module Earu_bcg_detection_Samples_Buffered
   let samples_Buffered (s: int) : int
     requires { true }
     ensures { result <= 8000 }
-    = s.Saturation_Count
+    = s.Total
 
 end

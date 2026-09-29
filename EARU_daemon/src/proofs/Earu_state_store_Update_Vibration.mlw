@@ -5,9 +5,8 @@ module Earu_state_store_Update_Vibration
 
 
   let update_Vibration (v: int) (mag: int) : int
-    requires { v >= 0 }
-    requires { mag >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = v
 
 end

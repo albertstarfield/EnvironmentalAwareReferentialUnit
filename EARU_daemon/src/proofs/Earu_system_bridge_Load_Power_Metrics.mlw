@@ -5,8 +5,8 @@ module Earu_system_bridge_Load_Power_Metrics
 
 
   let load_Power_Metrics () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

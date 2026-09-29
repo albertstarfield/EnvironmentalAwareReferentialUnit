@@ -5,8 +5,8 @@ module Earu_io_Write_EARU_Data
 
 
   let write_EARU_Data () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

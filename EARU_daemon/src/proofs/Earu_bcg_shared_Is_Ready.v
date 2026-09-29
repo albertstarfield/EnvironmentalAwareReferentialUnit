@@ -14,7 +14,7 @@ Module Earu_bcg_shared_Is_Ready.
     Earu.BCG_Detection.Ready (State);  -- SMT_VERIFIED.
 
   Theorem is_Ready_correct : forall (n: Z),
-    (True) -> (is_Ready n >= 0).
+    (true — total predicate over the private State.) -> (true — Boolean by construction (delegates to Ready).).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

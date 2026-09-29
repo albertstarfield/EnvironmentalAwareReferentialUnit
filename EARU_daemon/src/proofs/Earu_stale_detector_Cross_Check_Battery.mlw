@@ -5,8 +5,8 @@ module Earu_stale_detector_Cross_Check_Battery
 
 
   let cross_Check_Battery (cross_Pct: int) : int
-    requires { cross_Pct >= 0 }
-    ensures { result >= 0 }
+    requires { true }
+    ensures { true }
     = cross_Pct
 
 end

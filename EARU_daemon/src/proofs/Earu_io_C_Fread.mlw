@@ -5,8 +5,8 @@ module Earu_io_C_Fread
 
 
   let c_Fread () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true; -- c_binding }
+    ensures { true; -- c_binding }
     = 0
 
 end

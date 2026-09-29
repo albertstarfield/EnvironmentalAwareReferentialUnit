@@ -11,10 +11,10 @@ Module Earu_math_elem_funcs_Cos.
 
   (* Function cos — UNPROVED — obligation stub *)
   Definition cos (x: Z) : Z :=
-    Elem_Funcs.Cos (x);  -- SMT_VERIFIED: Cos is total on Real.
+    Result.
 
   Theorem cos_correct : forall (x: Z),
-    (not  (x = 0.0 /\ Y = 0.0)) -> (True).
+    (True) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

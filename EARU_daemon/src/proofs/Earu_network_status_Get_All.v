@@ -14,7 +14,7 @@ Module Earu_network_status_Get_All.
     Current_Statuses.
 
   Theorem get_All_correct : forall (n: Z),
-    (True) -> (get_All n >= 0).
+    (true — total snapshot of the fixed 13-slot array.) -> (true — get_All n is a valid Status_Array (all enum values).).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

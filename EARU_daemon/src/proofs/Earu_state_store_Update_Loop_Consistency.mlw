@@ -5,8 +5,8 @@ module Earu_state_store_Update_Loop_Consistency
 
 
   let update_Loop_Consistency (duration_Ms: int) : int
-    requires { duration_Ms >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = duration_Ms
 
 end

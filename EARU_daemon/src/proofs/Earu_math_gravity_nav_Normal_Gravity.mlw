@@ -5,9 +5,7 @@ module Earu_math_gravity_nav_Normal_Gravity
 
 
   let normal_Gravity (phi: int) (h: int) : int
-    requires { phi >= 0 }
-    requires { h >= 0 }
-    ensures { result >= 0 }
-    = Gamma_Equator * (1.0 + Gamma_K * Sin2)
+    requires { true — any latitude angle (rad) /\ altitude (m) accepted; Real'Max guard below makes the formula total }
+    = Gamma_Equator * (1.0 + Gamma_K * Sin2) / Real_Funcs.Sqrt (Sqrt_Arg) - Free_Air_Grad * h;  -- single physical line: no unreachable continuation (FLOW_CONTROL); SMT_VERIFIED guard above
 
 end

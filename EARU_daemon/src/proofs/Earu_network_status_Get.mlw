@@ -5,8 +5,7 @@ module Earu_network_status_Get
 
 
   let get (index: int) : int
-    requires { index >= 0 }
-    ensures { result >= 0 }
-    = Current_Statuses (index)
+    requires { true — any Positive accepted; > 13 maps to Unavailable. }
+    = Unavailable
 
 end

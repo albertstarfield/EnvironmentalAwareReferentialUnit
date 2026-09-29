@@ -6,8 +6,8 @@ module Earu_state_store_Set_Log_Error
 
 
   let set_Log_Error (detected: bool) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

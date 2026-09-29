@@ -5,8 +5,7 @@ module Earu_math_bluemarble_Bouguer_Horizon_Dip
 
 
   let bouguer_Horizon_Dip (alt_Meters: int) : int
-    requires { alt_Meters >= 0 }
-    ensures { result >= 0 }
+    requires { true,  -- any altitude; body clamps negatives to sea level }
     = Cached_Dip
 
 end

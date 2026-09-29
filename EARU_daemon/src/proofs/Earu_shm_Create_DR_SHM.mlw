@@ -6,8 +6,8 @@ module Earu_shm_Create_DR_SHM
 
 
   let create_DR_SHM (name: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Result
 
 end

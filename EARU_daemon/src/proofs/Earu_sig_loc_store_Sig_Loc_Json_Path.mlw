@@ -5,8 +5,8 @@ module Earu_sig_loc_store_Sig_Loc_Json_Path
 
 
   let sig_Loc_Json_Path () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — Project_Root constant, join cannot fail. }
+    ensures { true — non-empty path mem ending significant_locations.json. }
     = Earu.IO.Project_Root & "/save_state/significant_locations.json"
 
 end

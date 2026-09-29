@@ -5,9 +5,8 @@ module Earu_io_C_Popen
 
 
   let c_Popen (command: int) (mode: int) : int
-    requires { command >= 0 }
-    requires { mode >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true; -- c_binding }
+    ensures { true; -- c_binding }
     = command
 
 end

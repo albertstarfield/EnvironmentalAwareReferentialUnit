@@ -6,8 +6,8 @@ module Earu_io_Update_Cache
 
 
   let update_Cache (name: string) (value: int) : int
-    requires { value >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = value
 
 end

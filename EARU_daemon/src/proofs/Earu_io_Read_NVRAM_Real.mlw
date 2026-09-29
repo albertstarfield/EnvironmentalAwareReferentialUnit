@@ -6,8 +6,8 @@ module Earu_io_Read_NVRAM_Real
 
 
   let read_NVRAM_Real (name: string) (default: int) : int
-    requires { default >= 0 }
-    ensures { result >= 0 }
+    requires { name'Length > 0 }
+    ensures { true }
     = Real'Value (To_String (Line))
 
 end

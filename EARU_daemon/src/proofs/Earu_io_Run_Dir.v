@@ -14,7 +14,7 @@ Module Earu_io_Run_Dir.
     Project_Root & "/EARU_daemon/run".
 
   Theorem run_Dir_correct : forall (n: Z),
-    (True) -> (run_Dir n >= 0).
+    (True) -> (run_Dir n'Length > 0).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

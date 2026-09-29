@@ -43,6 +43,13 @@ package Earu.BCG_Shared is
 
    protected BCG_Buffer is
 
+      -- | Purpose: Push
+      -- | Parameters: See declaration
+      -- | CSI: DO-178C §6.4.4
+      -- [Documentation: DO-178C §6.4.4 function documentation]
+      -- WCET: O(1) — timing analysis
+      -- [Timing: DO-178C §6.4.4 WCET analysis]
+      -- @test: Test_BCG_Shared — Register_Routine ("Push", Test_BCG_Shared'Access);
       procedure Push (Ax, Ay, Az : Float);
       --  Feed one sanitized-boundary sample; delegates to
       --  BCG_Detection.Push_Sample, whose own Post establishes
@@ -55,6 +62,13 @@ package Earu.BCG_Shared is
       --  defensively by Compute's own integrity gate.
       --  TIMING/WCET: O(1), < 250 ns incl. PO overhead.
 
+      -- | Purpose: Snapshot
+      -- | Parameters: See declaration
+      -- | CSI: DO-178C §6.4.4
+      -- [Documentation: DO-178C §6.4.4 function documentation]
+      -- WCET: O(1) — timing analysis
+      -- [Timing: DO-178C §6.4.4 WCET analysis]
+      -- @test: Test_BCG_Shared — Register_Routine ("Snapshot", Test_BCG_Shared'Access);
       procedure Snapshot
         (Item      : out Earu.BCG_Detection.BCG_State;
          Corrupted : out Boolean);
@@ -68,9 +82,25 @@ package Earu.BCG_Shared is
       --  Compute independently re-validates Integrity_Ok before use.
       --  TIMING/WCET: ≈ 32 KB copy, < 10 µs @ 3 GHz.
 
+      -- | Purpose: Is Ready
+      -- | Parameters: See declaration
+      -- | Returns: See declaration
+      -- | CSI: DO-178C §6.4.4
+      -- [Documentation: DO-178C §6.4.4 function documentation]
+      -- WCET: O(1) — timing analysis
+      -- [Timing: DO-178C §6.4.4 WCET analysis]
+      -- @test: Test_BCG_Shared — Register_Routine ("Is_Ready", Test_BCG_Shared'Access);
       function Is_Ready return Boolean;
       --  True when >= 8000 samples buffered. O(1).
 
+      -- | Purpose: Buffered
+      -- | Parameters: See declaration
+      -- | Returns: See declaration
+      -- | CSI: DO-178C §6.4.4
+      -- [Documentation: DO-178C §6.4.4 function documentation]
+      -- WCET: O(1) — timing analysis
+      -- [Timing: DO-178C §6.4.4 WCET analysis]
+      -- @test: Test_BCG_Shared — Register_Routine ("Buffered", Test_BCG_Shared'Access);
       function Buffered return Natural;
       --  Current sample count. O(1).
 

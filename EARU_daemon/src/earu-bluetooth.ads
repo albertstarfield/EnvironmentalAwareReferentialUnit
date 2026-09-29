@@ -58,16 +58,35 @@ package Earu.Bluetooth is
       with Convention => C;
 
    --  C functions (implemented in bluetooth_scanner.mm)
+   -- | Purpose: Bluetooth Scan Init
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    function Bluetooth_Scan_Init
       return Interfaces.Integer_32
       with Import => True, Convention => C,
            External_Name => "bluetooth_scan_init";
 
+   -- | Purpose: Bluetooth Scan Perform
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure Bluetooth_Scan_Perform
       (Result : access BLE_Scan_Result)
       with Import => True, Convention => C,
            External_Name => "bluetooth_scan_perform";
 
+   -- | Purpose: Bluetooth Scan Cleanup
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure Bluetooth_Scan_Cleanup
       with Import => True, Convention => C,
            External_Name => "bluetooth_scan_cleanup";

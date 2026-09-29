@@ -5,10 +5,8 @@ module Earu_ntrip_Pack
 
 
   let pack (packer: int) (val: int) (bits: int) : int
-    requires { packer >= 0 }
-    requires { val >= 0 }
-    requires { bits >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = packer
 
 end

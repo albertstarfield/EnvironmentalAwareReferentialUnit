@@ -6,6 +6,7 @@ module Earu_math_Mahony_Update
 
   let mahony_Update () : int
     requires { (DT > 0.0 /\ DT < 1.0) }
+    ensures { true }
     = 0
 
 end

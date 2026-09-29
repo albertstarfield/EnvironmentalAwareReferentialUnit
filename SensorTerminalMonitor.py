@@ -245,6 +245,12 @@ try:
 except ImportError:
     HAS_OPENGL = False
 
+# Compass labels for the 16-sector Wind Rose, indexed by sector // 2. The rose
+# labels every other sector, so these are the 8 principal points of a 16-point
+# compass starting at North and running clockwise (N, NE, E, SE, S, SW, W, NW).
+# [Citation: WMO-No. 8 - 16-point compass rose convention, degrees true]
+_COMPASS_LABELS: tuple[str, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
 class TileManager:
     """Manages map tiles, downloads, and OpenGL texture creation."""
     def __init__(self):
@@ -498,6 +504,33 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
         glEnd()
 
 class PrimaryFlightDisplay:
+    # ---------------------------------------------------------------------
+    # SENSE (page 5) owns three sub-pages. WIND (page 6) was retired as a
+    # top-level destination and now survives only as a shortcut into
+    # SENSE > WIND MAP, so labels and counts must stay in lock-step.
+    # ---------------------------------------------------------------------
+    SENSE_SUB_LABELS: tuple[str, ...] = ("ATMOSPHERE", "WIND MAP", "WIND ROSE")
+
+    # Top-level pages reachable by PREV/NEXT, in navigation order.
+    # Page 6 is deliberately absent: a plain `(% 10)` walk would land the user
+    # on the retired slot and render an empty canvas. Kept ascending so the
+    # nav bar order (SAVT..SEARCH) still matches the key order.
+    PAGE_ORDER: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 7, 8, 9)
+
+    # Wind Rose geometry. 16 sectors is the meteorological standard
+    # (360/16 = 22.5 deg per sector), matching the compass points on a METAR.
+    # [Citation: WMO-No. 8 - Guide to Instruments and Methods of Observation,
+    #  Annex C, wind direction reported in degrees true, 16-point compass]
+    ROSE_SECTORS: int = 16
+    # Upper edges of the speed bands, in knots. Three edges give four bands:
+    # 0-5, 5-10, 10-20, and 20+. Colours run cool->hot so the rose reads
+    # as intensity without needing a legend to be useful.
+    ROSE_BANDS_KTS: tuple[float, ...] = (5.0, 10.0, 20.0)
+    ROSE_BAND_COLORS: tuple[str, ...] = ("#1f4e5f", "#2a7f9e", "#f2c14e", "#e8503a")
+    # A rose needs a baseline to be meaningful; below this many valid samples
+    # we show an ACCUMULATING notice instead of an empty circle.
+    ROSE_MIN_SAMPLES: int = 8
+
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("SensorAugmentedViewerandTools")
@@ -755,6 +788,14 @@ class PrimaryFlightDisplay:
 
         self.adv_subpage: int = 0
         self.adv_detail_page: int = 0
+        # SENSE sub-page selector, mirroring adv_subpage above.
+        # 0 = ATMOSPHERE (METAR/TAF), 1 = WIND MAP, 2 = WIND ROSE.
+        self.sense_subpage: int = 0
+        # Rolling (wind_dir_deg, wind_speed_kts) samples backing the Wind Rose.
+        # maxlen caps memory at 600 samples; the deque evicts the oldest entry
+        # on overflow, so the rose shows a recent window rather than all
+        # history and can never grow without bound (Murphy's Law).
+        self._wind_hist: deque[tuple[float, float]] = deque(maxlen=600)
         self.wifi_devices: list[dict[str, Any]] = []
         self.bt_devices: list[dict[str, Any]] = []
 
@@ -825,6 +866,14 @@ class PrimaryFlightDisplay:
                 return
             elif key in ('Down', 's') and self.adv_subpage == 0:
                 self.adv_detail_page = min(2, self.adv_detail_page + 1)
+                return
+        # SENSE (page 5) sub-page navigation, same Left/Right convention as ADV.
+        if self.page in (5, 6):
+            if key in ('Left', 'a'):
+                self.sense_subpage = (self.sense_subpage - 1) % len(self.SENSE_SUB_LABELS)
+                return
+            elif key in ('Right', 'd'):
+                self.sense_subpage = (self.sense_subpage + 1) % len(self.SENSE_SUB_LABELS)
                 return
         if self.page != 4: return
 
@@ -1347,7 +1396,10 @@ class PrimaryFlightDisplay:
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
             {"label": "SENSE", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
-            {"label": "WIND", "page": 6, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
+            # WIND is a shortcut into SENSE > WIND MAP rather than its own
+            # page. The rect stays at its historical slot so the 13-button nav
+            # bar layout is unchanged for users who learned those positions.
+            {"label": "WIND", "page": 5, "sense_sub": 1, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
             {"label": "WEATHER", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
             {"label": "ENERGY", "page": 9, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
             {"label": "SEARCH", "page": 8, "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
@@ -1355,6 +1407,29 @@ class PrimaryFlightDisplay:
             {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 5.0, float(w - btn_w - 10), 55.0)},
             {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 5.0, float(w - 5), 55.0)}
         ]
+
+    def _cycle_page(self, step: int) -> int:
+        """Advance the top-level page by `step` through the reachable page order.
+
+        Purpose: PREV/NEXT used `(self.page +/- 1) % 10`, which now lands on
+        page 6 -- the retired standalone WIND page. Walking PAGE_ORDER instead
+        makes the nav bar skip the dead slot and wrap cleanly.
+
+        Parameters:
+            step: 1 to move forward (NEXT), -1 to move backward (PREV).
+        Returns:
+            The next page id from PAGE_ORDER.
+        [Citation: Non-issue -- pure index arithmetic on PAGE_ORDER.]
+        Safe_Fallback: if self.page is not in PAGE_ORDER (e.g. restored from a
+        stale session), snap to the first page instead of raising, so a bad
+        value can never wedge the nav bar into an unclickable state.
+        """
+        order = self.PAGE_ORDER
+        try:
+            idx = order.index(self.page)
+        except ValueError:
+            return order[0]
+        return order[(idx + step) % len(order)]
 
     def on_nav_click(self, event: tk.Event) -> None:
         self._on_interaction()
@@ -1367,14 +1442,22 @@ class PrimaryFlightDisplay:
                 # Debug print to verify click detection
                 # print(f"Clicked {key['label']} at ({event.x}, {event.y})")
                 page_val = key.get("page")
+                sense_sub = key.get("sense_sub")
                 if isinstance(page_val, int):
                     if self.page == 7 and page_val == 7:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
+                    # Re-clicking SENSE itself walks its sub-pages, the same
+                    # affordance WEATHER gives clim_subpage. A key carrying an
+                    # explicit sense_sub (WIND) overrides the cycle below.
+                    if self.page == 5 and page_val == 5 and sense_sub is None:
+                        self.sense_subpage = (self.sense_subpage + 1) % len(self.SENSE_SUB_LABELS)
                     self.page = page_val
+                    if isinstance(sense_sub, int):
+                        self.sense_subpage = sense_sub % len(self.SENSE_SUB_LABELS)
                 elif key.get("cmd") == "next":
-                    self.page = (self.page + 1) % 10
+                    self.page = self._cycle_page(1)
                 elif key.get("cmd") == "prev":
-                    self.page = (self.page - 1) % 10
+                    self.page = self._cycle_page(-1)
                 elif key.get("cmd") == "center":
                     self.set_auto_center(True)
                 self.switch_page_view()
@@ -1739,6 +1822,10 @@ class PrimaryFlightDisplay:
 
                 data = clean_none(data)
                 self.full_data = data
+                # Sample wind history for the SENSE Wind Rose. Runs on every
+                # telemetry frame so the rose reflects a genuinely rolling
+                # window rather than a single instantaneous reading.
+                self._sample_wind_history(data)
 
                 # Smooth rates & thermodynamics (EMA filters)
                 smc = data.get('smc', {})
@@ -1987,8 +2074,11 @@ class PrimaryFlightDisplay:
         elif self.page == 2: self.draw_seismic_page(w, h)
         elif self.page == 3: self.draw_advanced_page(w, h)
         elif self.page == 4: self.draw_map_overlay(w, h)
-        elif self.page == 5: self.draw_metar_page(w, h)
-        elif self.page == 6: self.draw_wind_page(w, h)
+        elif self.page == 5: self.draw_sense_page(w, h)
+        # Page 6 was the standalone WIND page. It is no longer reachable from
+        # the nav bar or PREV/NEXT, but a restored session could still hold it,
+        # so route it to WIND MAP rather than rendering nothing.
+        elif self.page == 6: self.draw_sense_page(w, h, forced_subpage=1)
         elif self.page == 7: self.draw_weather_page(w, h)
         elif self.page == 8: self.draw_search_page(w, h)
         elif self.page == 9: self.draw_energy_page(w, h)
@@ -2342,6 +2432,15 @@ class PrimaryFlightDisplay:
                     self.adv_detail_page = 2
                     return
 
+        # SENSE (page 5) and its legacy alias (page 6) share the same tab strip.
+        # Hit-testing reuses _sense_tab_rects so the clickable regions can never
+        # drift away from the rectangles actually drawn.
+        if self.page in (5, 6):
+            for idx, (tx1, ty1, tx2, ty2) in enumerate(self._sense_tab_rects(self.canvas.winfo_width())):
+                if tx1 <= event.x <= tx2 and ty1 <= event.y <= ty2:
+                    self.sense_subpage = idx
+                    return
+
         if self.page == 8:
             # Check if clicked on a search result
             y = 150.0
@@ -2554,7 +2653,13 @@ class PrimaryFlightDisplay:
             rect = key.get("rect")
             if not isinstance(rect, (list, tuple)) or len(rect) < 4: continue
             x1, y1, x2, y2 = rect
+            # A key is active when its page is current AND, if it pins a
+            # sub-page, that sub-page is the one showing. Without the sub-page
+            # test, SENSE and WIND would both light up on every SENSE sub-page.
             active = (self.page == key.get("page"))
+            sense_sub = key.get("sense_sub")
+            if active and isinstance(sense_sub, int):
+                active = (self.sense_subpage == sense_sub)
             color = "#444" if not active else "#0077be"
             self.nav_canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="white", width=1)
             label = str(key.get("label", ""))
@@ -4967,7 +5072,9 @@ class PrimaryFlightDisplay:
                 sp = grid[r][c][0] if len(grid[r][c]) > 0 else 0.0
                 if sp > 0.01: avg_spd += sp; cnt += 1
         if cnt > 0: avg_spd /= cnt
-        self.canvas.create_text(w/2, 70, text=f"AVG INTENSITY: {avg_spd:.2f} m/s  |  GRID: {gs}x{gs}  |  HOVER FOR DETAILS",
+        # y=108 clears the SENSE sub-page tab strip (70-95), which is drawn
+        # after this page and would otherwise cover a summary line at y=70.
+        self.canvas.create_text(w/2, 108, text=f"AVG INTENSITY: {avg_spd:.2f} m/s  |  GRID: {gs}x{gs}  |  HOVER FOR DETAILS",
                                  fill="#aaa", font=("Monaco", 9))
         for r in range(gs):
             for c in range(gs):
@@ -5013,6 +5120,281 @@ class PrimaryFlightDisplay:
                         'pressure': press, 'temperature': temp,
                         'pos_x': pos_x, 'pos_y': pos_y,
                     })
+
+    # ===================== SENSE (page 5) SUB-PAGE SUPPORT =====================
+
+    def _sample_wind_history(self, data: dict[str, Any]) -> None:
+        """Append one usable wind observation to the Wind Rose history.
+
+        Purpose:
+            A wind rose is a *distribution* of wind direction and speed over
+            time, so it needs a rolling buffer fed by many samples. This pulls
+            the scalar wind fields the daemon already publishes each frame.
+
+        Parameters:
+            data: the freshly cleaned telemetry dict, already assigned to
+                self.full_data by the caller.
+
+        Returns:
+            None. Mutates self._wind_hist in place.
+
+        [Citation: EARU telemetry schema - ecosystem_weather.metar_taf carries
+        wind_dir_deg and wind_speed_kts; wind_dir_deg is the meteorological
+        "from" bearing per WMO-No. 8 / ICAO Doc 8585, so it maps directly onto
+        a rose spoke without a 180-degree correction.]
+
+        Safe_Fallback:
+            A calm reading (0.0 kts) carries no direction information, and a
+            0.0 deg is the daemon's "unknown" sentinel rather than a real
+            northerly. Recording either would paint a phantom north spoke onto
+            the rose. Missing, non-numeric, non-finite, or out-of-range values
+            are skipped rather than raising, because this runs on the hot path
+            of every telemetry frame.
+        """
+        try:
+            weather = data.get('ecosystem_weather', {})
+            if not isinstance(weather, dict): return
+            metar_taf = weather.get('metar_taf', {})
+            if not isinstance(metar_taf, dict): return
+            direction = float(metar_taf.get('wind_dir_deg', 0.0))
+            speed = float(metar_taf.get('wind_speed_kts', 0.0))
+        except (AttributeError, TypeError, ValueError):
+            # Garbled payload: skip this frame rather than poisoning history.
+            return
+        if not (math.isfinite(direction) and math.isfinite(speed)): return
+        if speed <= 0.0: return
+        # 0.0 deg doubles as the "no wind reported" sentinel, so require the
+        # reading to agree with a real direction *and* a non-calm speed.
+        if direction <= 0.0 or direction >= 360.0: return
+        self._wind_hist.append((direction, speed))
+
+    def _sense_tab_rects(self, w: int) -> list[tuple[float, float, float, float]]:
+        """Return the SENSE sub-page tab rectangles for a canvas width.
+
+        Purpose:
+            Single source of truth for tab geometry. The renderer and the
+            click hit-test both call this, so a tab can never be drawn somewhere
+            the click handler is not listening (or vice versa) -- the classic
+            way a UI silently stops responding after a layout tweak.
+
+        Parameters:
+            w: canvas width in pixels.
+
+        Returns:
+            One (x1, y1, x2, y2) tuple per SENSE sub-page, in label order.
+        """
+        if w < 100: w = 1000
+        count = len(self.SENSE_SUB_LABELS)
+        tab_w = 200
+        gap = 20
+        total = count * tab_w + (count - 1) * gap
+        x0 = max(20.0, (w - total) / 2.0)
+        return [(x0 + i * (tab_w + gap), 70.0, x0 + i * (tab_w + gap) + tab_w, 95.0)
+                for i in range(count)]
+
+    def _draw_sense_tabs(self, w: int, active: int) -> None:
+        """Draw the SENSE sub-page tab strip.
+
+        Purpose:
+            Mirrors the ADV tab affordance so SENSE navigation is discoverable
+            without reading the source.
+
+        Parameters:
+            w: canvas width in pixels.
+            active: index of the currently selected sub-page.
+
+        Returns:
+            None. Draws on self.canvas.
+        """
+        for idx, (x1, y1, x2, y2) in enumerate(self._sense_tab_rects(w)):
+            fill = "#0077be" if idx == active else "#2a2a2a"
+            self.canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline="white", width=1)
+            self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2,
+                                    text=self.SENSE_SUB_LABELS[idx], fill="white",
+                                    font=("Monaco", 10, "bold"))
+
+    def draw_sense_page(self, w: float, h: float, forced_subpage: int | None = None) -> None:
+        """Render the SENSE page (page 5) for the selected sub-page.
+
+        Purpose:
+            SENSE now owns ATMOSPHERE, WIND MAP, and WIND ROSE. Existing
+            sub-pages 0 and 1 delegate to the original single-purpose renderers
+            so their layout and hover behaviour stay byte-for-byte unchanged.
+
+        Parameters:
+            w: canvas width in pixels.
+            h: canvas height in pixels.
+            forced_subpage: render this sub-page instead of sense_subpage, used
+                by the retired page 6 compatibility alias.
+
+        Returns:
+            None. Draws on self.canvas.
+        """
+        sub = self.sense_subpage if forced_subpage is None else forced_subpage
+        # Safe_Fallback: a restored session or a bad modulo could leave
+        # sense_subpage out of range; clamp instead of indexing into nothing.
+        sub = sub % len(self.SENSE_SUB_LABELS)
+        # Draw the sub-page first, then the tab strip on top, so the strip is
+        # never painted over by a sub-page's own background.
+        if sub == 0:
+            self.draw_metar_page(w, h)
+        elif sub == 1:
+            self.draw_wind_page(w, h)
+        else:
+            self.draw_wind_rose(w, h)
+        self._draw_sense_tabs(int(w), sub)
+
+    def _rose_wedge(self, cx: float, cy: float, r_in: float, r_out: float,
+                    a0: float, a1: float) -> list[float]:
+        """Build a flat coordinate list for one annular sector of a rose.
+
+        Purpose:
+            Tkinter has no annular-sector primitive, so each speed band of each
+            sector is assembled as a polygon whose outer edge is traced at
+            r_out and whose inner edge is traced back at r_in.
+
+        Parameters:
+            cx, cy: rose centre in canvas pixels.
+            r_in, r_out: inner and outer radii in pixels (r_in <= r_out).
+            a0, a1: start and end bearing in degrees true, 0 = North, increasing
+                clockwise.
+
+        Returns:
+            A flat [x0, y0, x1, y1, ...] list accepted by create_polygon.
+        """
+        # 0.5-degree steps are plenty for a 22.5-degree sector and keep the
+        # polygon count low enough for a smooth 15Hz redraw.
+        step = 0.5
+        span = a1 - a0
+        n = max(2, int(span / step))
+        pts: list[float] = []
+        # Screen y grows downward, so bearing theta maps to (sin, -cos) to put
+        # North at the top and make the sweep clockwise.
+        for i in range(n + 1):
+            th = math.radians(a0 + span * i / n)
+            pts.append(cx + r_out * math.sin(th))
+            pts.append(cy - r_out * math.cos(th))
+        for i in range(n, -1, -1):
+            th = math.radians(a0 + span * i / n)
+            pts.append(cx + r_in * math.sin(th))
+            pts.append(cy - r_in * math.cos(th))
+        return pts
+
+    def draw_wind_rose(self, w: float, h: float) -> None:
+        """Render the SENSE Wind Rose (sub-page 2).
+
+        Purpose:
+            Show the prevailing wind regime -- which way it comes from and how
+            fast -- over the recent history, which the instantaneous 7x7 grid
+            on WIND MAP cannot express.
+
+        Parameters:
+            w: canvas width in pixels.
+            h: canvas height in pixels.
+
+        Returns:
+            None. Draws on self.canvas.
+
+        [Citation: 16-sector layout and meteorological "from" convention follow
+        WMO-No. 8 Guide to Instruments and Methods of Observation; speed bands
+        of 0-5 / 5-10 / 10-20 / 20+ kts are the standard aviation groupings.]
+
+        Safe_Fallback:
+            Below ROSE_MIN_SAMPLES valid observations the rose is statistically
+            meaningless, so render an explicit ACCUMULATING notice with a live
+            sample count instead of an empty circle that looks like a bug.
+        """
+        self.canvas.create_text(w / 2, 40, text="WIND ROSE: PREVAILING WIND", fill="#00ffff",
+                                font=("Monaco", 20, "bold"))
+        hist = list(self._wind_hist)
+        if len(hist) < self.ROSE_MIN_SAMPLES:
+            self.canvas.create_text(w / 2, h / 2,
+                                    text=f"ACCUMULATING... ({len(hist)}/{self.ROSE_MIN_SAMPLES} SAMPLES)",
+                                    fill="#ffaa00", font=("Monaco", 16, "bold"))
+            self.canvas.create_text(w / 2, h / 2 + 30,
+                                    text="THE ROSE NEEDS MORE TELEMETRY FRAMES", fill="#888",
+                                    font=("Monaco", 10))
+            return
+
+        sector_span = 360.0 / self.ROSE_SECTORS
+        # counts[sector][band] -> number of samples in that direction/speed cell
+        counts = [[0] * (len(self.ROSE_BANDS_KTS) + 1) for _ in range(self.ROSE_SECTORS)]
+        for direction, speed in hist:
+            sector = int(direction / sector_span) % self.ROSE_SECTORS
+            band = 0
+            for i, edge in enumerate(self.ROSE_BANDS_KTS):
+                if speed >= edge: band = i + 1
+            counts[sector][band] += 1
+
+        # Normalise spoke length against the busiest sector so the prevailing
+        # direction fills the outer ring and rare directions stay visible.
+        peak = max(sum(row) for row in counts)
+        cx, cy = w / 2, h / 2 + 40
+        r_max = max(60.0, min(w, h) / 2 - 140)
+
+        # Reference rings.
+        for frac in (0.25, 0.5, 0.75, 1.0):
+            rr = r_max * frac
+            self.canvas.create_oval(cx - rr, cy - rr, cx + rr, cy + rr,
+                                    outline="#333", width=1)
+
+        # Stack the speed bands outward per sector, calm band innermost.
+        for s in range(self.ROSE_SECTORS):
+            r_in = 0.0
+            for b, colour in enumerate(self.ROSE_BAND_COLORS):
+                n = counts[s][b]
+                r_out = r_in + (r_max * n / peak if peak > 0 else 0.0)
+                if n > 0 and r_out > r_in:
+                    a0 = s * sector_span
+                    a1 = a0 + sector_span
+                    self.canvas.create_polygon(
+                        self._rose_wedge(cx, cy, r_in, r_out, a0, a1),
+                        fill=colour, outline="#111", width=1)
+                r_in = r_out
+
+        # Compass labels at the 8 principal points (every other sector).
+        for s in range(0, self.ROSE_SECTORS, 2):
+            th = math.radians(s * sector_span)
+            lx = cx + (r_max + 16) * math.sin(th)
+            ly = cy - (r_max + 16) * math.cos(th)
+            self.canvas.create_text(lx, ly, text=_COMPASS_LABELS[s // 2],
+                                    fill="#00ff7f" if s == 0 else "#888",
+                                    font=("Monaco", 9, "bold"))
+
+        # Dominant direction and mean speed, both straight off the history.
+        sector_totals = [sum(row) for row in counts]
+        dom = max(range(self.ROSE_SECTORS), key=lambda i: sector_totals[i])
+        # Report the true mean bearing of the samples inside the dominant sector
+        # instead of the sector's lower edge, which sits up to a full sector
+        # (here 22.5 deg) away from the direction actually observed. Bearings
+        # wrap at 360/0, so average unit vectors with atan2 rather than raw
+        # degrees: the mean of 350 and 10 is north, not 180.
+        dom_rads = [math.radians(d) for d, _ in hist
+                    if int(d / sector_span) % self.ROSE_SECTORS == dom]
+        # dom_rads is non-empty: peak > 0 because the ROSE_MIN_SAMPLES guard
+        # above already returned on an empty history. atan2(0, 0) == 0.0, so
+        # the degenerate case stays safe even if the invariant is broken.
+        dom_bearing = (math.degrees(math.atan2(sum(math.sin(r) for r in dom_rads),
+                                               sum(math.cos(r) for r in dom_rads)))
+                       + 360.0) % 360.0
+        mean_speed = sum(s for _, s in hist) / len(hist)
+        self.canvas.create_text(70, h - 90, anchor="nw",
+                                text=(f"SAMPLES: {len(hist)}\n"
+                                      f"DOMINANT FROM: {dom_bearing:.0f} deg\n"
+                                      f"MEAN SPEED: {mean_speed:.1f} kts"),
+                                fill="#00ff7f", font=("Monaco", 10))
+
+        # Speed-band legend.
+        ly = h - 90
+        prev = 0.0
+        for i, colour in enumerate(self.ROSE_BAND_COLORS):
+            hi = self.ROSE_BANDS_KTS[i] if i < len(self.ROSE_BANDS_KTS) else None
+            label = f"{prev:.0f}-{hi:.0f} kts" if hi is not None else f"{prev:.0f}+ kts"
+            self.canvas.create_rectangle(w - 190, ly + i * 20, w - 168, ly + i * 20 + 15,
+                                         fill=colour, outline="white")
+            self.canvas.create_text(w - 160, ly + i * 20 + 8, anchor="w", text=label,
+                                    fill="white", font=("Monaco", 9))
+            if hi is not None: prev = hi
 
     def draw_weather_page(self, w: float, h: float) -> None:
         sub_t = ["SUMMARY & TRENDS", "SURFACE & SOIL", "SOLAR RADIATION", "AVIATION & STABILITY", "HUMIDITY & VAPOUR"]

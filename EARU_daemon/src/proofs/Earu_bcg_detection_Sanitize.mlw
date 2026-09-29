@@ -6,7 +6,9 @@ module Earu_bcg_detection_Sanitize
 
   let sanitize (v: real) (lo: real) (hi: real) : int
     requires { lo <= hi }
+    requires { lo <= hi — ordered envelope (mirrors .ads contract). }
     ensures { result = result }
-    = 0
+    ensures { result is non-NaN (X = X) /\ inside the envelope — every path returns 0.0, lo, hi, \/ finite v. }
+    = 0.0;            --  NaN -> missing data (A3)
 
 end

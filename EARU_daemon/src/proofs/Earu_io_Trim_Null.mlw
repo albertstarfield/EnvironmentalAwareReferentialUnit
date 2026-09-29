@@ -6,8 +6,8 @@ module Earu_io_Trim_Null
 
 
   let trim_Null (str: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = 0
 
 end

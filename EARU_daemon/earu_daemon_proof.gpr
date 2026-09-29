@@ -36,8 +36,6 @@ project Earu_Daemon_Proof is
     --  Excluded_Source_Files for Compiler: all files EXCEPT our proof targets.
    --  earu-math.adb, earu-math.ads, earu-types.ads are PROOF TARGETS — not excluded.
    for Excluded_Source_Files use (
-      "b~test_time.adb",
-      "b~test_time.ads",
       "earu-bluetooth.ads",
       "earu-bridge.adb",
       "earu-bridge.ads",
@@ -78,8 +76,6 @@ project Earu_Daemon_Proof is
    --  Excluded_Source_Files for Gnatprove: same as Compiler — earu-math and earu-types are PROOF TARGETS.
    package Gnatprove is
       for Excluded_Source_Files use (
-         "b~test_time.adb",
-         "b~test_time.ads",
          "earu-bluetooth.ads",
          "earu-bridge.adb",
          "earu-bridge.ads",

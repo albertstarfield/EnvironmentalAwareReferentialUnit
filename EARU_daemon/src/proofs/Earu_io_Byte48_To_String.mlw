@@ -5,8 +5,8 @@ module Earu_io_Byte48_To_String
 
 
   let byte48_To_String (arr: int) : int
-    requires { arr >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Result
 
 end

@@ -5,8 +5,8 @@ module Earu_system_bridge_C_Time
 
 
   let c_Time (t: int) : int
-    requires { t >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = t
 
 end

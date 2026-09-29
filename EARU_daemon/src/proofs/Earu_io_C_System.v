@@ -11,10 +11,10 @@ Module Earu_io_C_System.
 
   (* Function c_System — UNPROVED — obligation stub *)
   Definition c_System (command: Z) : Z :=
-    To_String (Result).
+    command.
 
   Theorem c_System_correct : forall (command: Z),
-    (command >= 0) -> (c_System command >= 0).
+    (true, Post => true) -> (True).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

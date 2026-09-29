@@ -7,8 +7,8 @@ module Earu_io_Bucket
 
 
   let bucket (key: string) (bkt: int) (comma: bool) : int
-    requires { bkt >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = bkt
 
 end

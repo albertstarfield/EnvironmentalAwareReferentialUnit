@@ -5,8 +5,7 @@ module Test_aws_Test_Aws
 
 
   let test_Aws () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — standalone test main; network failure degrades to [Failed]. }
     = 0
 
 end

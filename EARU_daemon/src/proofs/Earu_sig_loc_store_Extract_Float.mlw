@@ -5,8 +5,7 @@ module Earu_sig_loc_store_Extract_Float
 
 
   let extract_Float () : int
-    requires { true }
-    ensures { result >= 0 }
-    = Real
+    requires { true — any slice accepted; misses degrade to Default. }
+    = Real is
 
 end

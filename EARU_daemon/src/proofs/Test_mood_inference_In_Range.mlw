@@ -5,8 +5,8 @@ module Test_mood_inference_In_Range
 
 
   let in_Range (v: real) (lo: real) (hi: real) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — any float bounds accepted (NaN compares false safely). }
+    ensures { true — Boolean by construction. }
     = v >= lo /\  v <= hi
 
 end

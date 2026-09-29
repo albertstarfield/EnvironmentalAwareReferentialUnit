@@ -5,8 +5,7 @@ module Earu_sig_loc_store_Load_Sig_Locs
 
 
   let load_Sig_Locs () : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — idempotent; safe to call once at daemon startup. }
     = 0
 
 end

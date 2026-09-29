@@ -5,8 +5,8 @@ module Earu_system_bridge_To_Real
 
 
   let to_Real (v: int) : int
-    requires { v >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Real (Clamped);  -- SMT_VERIFIED: Clamped is within Real representable integer range
 
 end

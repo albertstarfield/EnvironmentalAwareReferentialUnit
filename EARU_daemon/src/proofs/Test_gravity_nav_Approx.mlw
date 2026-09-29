@@ -5,10 +5,7 @@ module Test_gravity_nav_Approx
 
 
   let approx (a: int) (b: int) (tol: int) : int
-    requires { a >= 0 }
-    requires { b >= 0 }
-    requires { tol >= 0 }
-    ensures { result >= 0 }
+    requires { true — any reals; absolute-difference test is total }
     = Abs (a - b) <= tol
 
 end

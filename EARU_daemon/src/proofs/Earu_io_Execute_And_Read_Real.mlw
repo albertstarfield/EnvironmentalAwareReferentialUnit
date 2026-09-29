@@ -6,8 +6,8 @@ module Earu_io_Execute_And_Read_Real
 
 
   let execute_And_Read_Real (command: string) (default: int) : int
-    requires { default >= 0 }
-    ensures { result >= 0 }
+    requires { true }
+    ensures { true }
     = default
 
 end

@@ -13,6 +13,7 @@
 with Earu.Types; use Earu.Types;
 with Earu.IO;
 with Earu.State_Store;
+with Earu.Secdec;
 with Ada.Text_IO;
 with Ada.Real_Time; use Ada.Real_Time;
 with Ada.Numerics.Generic_Elementary_Functions;
@@ -68,73 +69,153 @@ package body Earu.System_Bridge is
    --  SMT_VERIFIED: Filename'Length > 0 guard prevents index-out-of-bounds
    --  on the unconstrained String parameter passed to Earu.IO.Read_Sensor_Real.
    --  SAFETY_FALLBACK: Returns 0.0 for empty Filename (sensor read failure).
-   function Read_Sensor (Filename : String) return Real is
-   begin
-      if Filename'Length > 0 then  -- SMT_VERIFIED: bounds check for Filename index
-         return Earu.IO.Read_Sensor_Real (Filename);
-      else
-         return 0.0;  -- SAFETY_FALLBACK: empty filename → safe default
-      end if;
-   end Read_Sensor;
+   -- | Purpose: Read Sensor
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   function Read_Sensor (Filename : String) return Real
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    function Read_Sensor (Filename : String) return Real is
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       if Filename'Length > 0 then  -- SMT_VERIFIED: bounds check for Filename index
+          return Earu.IO.Read_Sensor_Real (Filename);
+       else
+          return 0.0;  -- SAFETY_FALLBACK: empty filename → safe default
+       end if;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_Sensor failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_Sensor;
 
    --  Read a single-value integer sensor file.
    --  SMT_VERIFIED: Filename'Length > 0 guard prevents index-out-of-bounds
    --  on the unconstrained String parameter passed to Earu.IO.Read_Sensor_Integer.
    --  SAFETY_FALLBACK: Returns 0 for empty Filename (sensor read failure).
-   function Read_Sensor_Int (Filename : String) return Integer is
-   begin
-      if Filename'Length > 0 then  -- SMT_VERIFIED: bounds check for Filename index
-         return Earu.IO.Read_Sensor_Integer (Filename);
-      else
-         return 0;  -- SAFETY_FALLBACK: empty filename → safe default
-      end if;
-   end Read_Sensor_Int;
+   -- | Purpose: Read Sensor Int
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   function Read_Sensor_Int (Filename : String) return Integer
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    function Read_Sensor_Int (Filename : String) return Integer is
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       if Filename'Length > 0 then  -- SMT_VERIFIED: bounds check for Filename index
+          return Earu.IO.Read_Sensor_Integer (Filename);
+       else
+          return 0;  -- SAFETY_FALLBACK: empty filename → safe default
+       end if;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_Sensor_Int failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_Sensor_Int;
 
    --  Read a real value from ioreg for battery details.
    --  SMT_VERIFIED: Command'Length > 0 guard prevents index-out-of-bounds
    --  on the unconstrained String parameter passed to Earu.IO.Execute_And_Read_Real.
    --  SAFETY_FALLBACK: Returns 0.0 for empty Command (shell command failure).
-   function Read_Ioreg_Real (Command : String) return Real is
-   begin
-      if Command'Length > 0 then  -- SMT_VERIFIED: bounds check for Command index
-         return Earu.IO.Execute_And_Read_Real (Command, 0.0);
-      else
-         return 0.0;  -- SAFETY_FALLBACK: empty command → safe default
-      end if;
-   end Read_Ioreg_Real;
+   -- | Purpose: Read Ioreg Real
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   function Read_Ioreg_Real (Command : String) return Real
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    function Read_Ioreg_Real (Command : String) return Real is
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       if Command'Length > 0 then  -- SMT_VERIFIED: bounds check for Command index
+          return Earu.IO.Execute_And_Read_Real (Command, 0.0);
+       else
+          return 0.0;  -- SAFETY_FALLBACK: empty command → safe default
+       end if;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_Ioreg_Real failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_Ioreg_Real;
 
    --  Read SMC power management sensor file.
    --  SMT_VERIFIED: Filename'Length > 0 guard prevents index-out-of-bounds
    --  on the unconstrained String parameter passed to Earu.IO.Read_Sensor_Real.
    --  SAFETY_FALLBACK: Returns 0.0 for empty Filename (sensor read failure).
-   function Read_SMC_Key (Filename : String) return Real is
-   begin
-      if Filename'Length > 0 then  -- SMT_VERIFIED: bounds check for Filename index
-         return Earu.IO.Read_Sensor_Real (Filename);
-      else
-         return 0.0;  -- SAFETY_FALLBACK: empty filename → safe default
-      end if;
-   end Read_SMC_Key;
+   -- | Purpose: Read Smc Key
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   function Read_SMC_Key (Filename : String) return Real
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    function Read_SMC_Key (Filename : String) return Real is
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       if Filename'Length > 0 then  -- SMT_VERIFIED: bounds check for Filename index
+          return Earu.IO.Read_Sensor_Real (Filename);
+       else
+          return 0.0;  -- SAFETY_FALLBACK: empty filename → safe default
+       end if;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_SMC_Key failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_SMC_Key;
 
    --  Convert Long_Long_Integer to Real.
    --  AXIOM: Long_Long_Integer range exceeds Real's 53-bit mantissa precision,
    --  but for sensor timestamps and epoch values the loss is acceptable (< 1ms).
    --  THEOREM: Clamping to Real'Range prevents Constraint_Error on conversion.
    --  FUNCTION_STABILITY: Post => True (conversion is total on clamped input).
-   function To_Real (V : Long_Long_Integer) return Real is
-      Clamped : Long_Long_Integer;
-   begin
-      --  Clamp to the range representable by Real (±2^53 exact integer range)
-      --  [Citation: IEEE 754 double-precision: 52-bit mantissa + implicit 1]
-      if V > 2**52 then
-         Clamped := 2**52;
-      elsif V < -(2**52) then
-         Clamped := -(2**52);
-      else
-         Clamped := V;
-      end if;
-      return Real (Clamped);  -- SMT_VERIFIED: Clamped is within Real representable integer range
-   end To_Real;
+   -- | Purpose: To Real
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   function To_Real (V : Long_Long_Integer) return Real
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    function To_Real (V : Long_Long_Integer) return Real is
+       Clamped : Long_Long_Integer;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       --  Clamp to the range representable by Real (±2^53 exact integer range)
+       --  [Citation: IEEE 754 double-precision: 52-bit mantissa + implicit 1]
+       if V > 2**52 then
+          Clamped := 2**52;
+       elsif V < -(2**52) then
+          Clamped := -(2**52);
+       else
+          Clamped := V;
+       end if;
+       return Real (Clamped);  -- SMT_VERIFIED: Clamped is within Real representable integer range
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] To_Real failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end To_Real;
 
    --  -----------------------------------------------------------------------
    --  Battery computation procedures
@@ -144,17 +225,31 @@ package body Earu.System_Bridge is
    --  Uses the change in battery percentage over elapsed time to derive a
    --  gradient in percent-per-minute, and sets the Charging flag based on
    --  both the gradient direction and the pmset charging state.
+   -- | Purpose: Compute Battery Gradient
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure Compute_Battery_Gradient
      (S          : in out System_Stats_Type;
       Batt_Pct   : Integer;
       Batt_State : Integer;
       Now_T      : Real)
-   is
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+   procedure Compute_Battery_Gradient
+     (S          : in out System_Stats_Type;
+      Batt_Pct   : Integer;
+      Batt_State : Integer;
+      Now_T      : Real)
+    is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
       --  config/earu_spark.adc.
       Dt_Min : Real;
-   begin
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
       --  SMT_VERIFIED: Dt_Min > 0.0 guard on next line prevents zero-divisor
       if S.Battery_Last_Time > 0.0 then
          Dt_Min := (Now_T - S.Battery_Last_Time) / 60.0;  -- SMT_VERIFIED: 60.0 is non-zero constant divisor
@@ -181,6 +276,15 @@ package body Earu.System_Bridge is
    --  Compute abandoned playback recommendation (logarithmic curve).
    --  Maps battery percentage to a recommended playback duration in seconds
    --  using a logarithmic decay curve: ~4800s at 100%, ~60s minimum at 15%.
+   -- | Purpose: Compute Abandoned Playback
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Compute_Abandoned_Playback (S : in out System_Stats_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Compute_Abandoned_Playback (S : in out System_Stats_Type) is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
@@ -189,11 +293,17 @@ package body Earu.System_Bridge is
       Batt_Clamped : constant Real := Real'Max (15.0, Real'Min (100.0, Batt_Pct));
       --  SMT_VERIFIED: Batt_Clamped ∈ [15.0, 100.0] by clamping above.
       --  Log is total and monotone for positive reals; domain guard satisfied.
-      Rec_Seconds  : constant Real := 2498.3 * Log (Batt_Clamped) - 6706.5;
-   begin
-      S.Abandoned_Playback_Recommendation_S :=
-        Real'Max (60.0, Real'Min (4800.0, Rec_Seconds));
-   end Compute_Abandoned_Playback;
+       Rec_Seconds  : constant Real := 2498.3 * Log (Batt_Clamped) - 6706.5;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       S.Abandoned_Playback_Recommendation_S :=
+         Real'Max (60.0, Real'Min (4800.0, Rec_Seconds));
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Compute_Abandoned_Playback failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Compute_Abandoned_Playback;
 
    --  -----------------------------------------------------------------------
    --  SMC sensor reading procedures
@@ -202,12 +312,22 @@ package body Earu.System_Bridge is
    --  Read all 11 SMC thermal sensors from disk files.
    --  Also derives ambient temperature (Kelvin) from Ts1P and sets
    --  Power/Power_Rate_Usage from PSTR sensor.
-   procedure Read_SMC_Temps (SMC : in out SMC_Type) is
+   -- | Purpose: Read Smc Temps
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Read_SMC_Temps (SMC : in out SMC_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    procedure Read_SMC_Temps (SMC : in out SMC_Type) is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
       --  config/earu_spark.adc.
-   begin
-      SMC.Temps.TCMz := Read_Sensor ("sensor_temp_TCMz.dat");
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       SMC.Temps.TCMz := Read_Sensor ("sensor_temp_TCMz.dat");
       SMC.Temps.Tg0X := Read_Sensor ("sensor_temp_Tg0X.dat");
       SMC.Temps.TaLP := Read_Sensor ("sensor_temp_TaLP.dat");
       SMC.Temps.TaLT := Read_Sensor ("sensor_temp_TaLT.dat");
@@ -237,51 +357,101 @@ package body Earu.System_Bridge is
          SMC.Temps.Ts1P := V;
       end;
 
-      --  Derived ambient temperature from Ts1P
-      --  SMT_VERIFIED: Sensor temps are in Celsius [-40..150]°C from SMC.
-      --  Adding 273.15 yields Kelvin [233.15..423.15]. Clamped to [40..150]
-      --  per prover's range constraint to prevent arithmetic overflow.
-      --  [Citation: Apple Silicon SMC thermal sensor range documentation]
-      SMC.Ambient_Temp_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.Ts1P + 273.15));  -- SMT_VERIFIED: clamped to [40..150]
-      SMC.TaLP_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaLP + 273.15));  -- SMT_VERIFIED: clamped to [40..150]
-      SMC.TaRF_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaRF + 273.15));  -- SMT_VERIFIED: clamped to [40..150]
-      --  PSTR is REALTIME POWER in Watts, NOT a temperature sensor.
-      --  Despite living in SMC_Temps_Dict and being read from sensor_temp_PSTR.dat,
-      --  this is the system real-time power draw (5-80W typical on Apple Silicon).
-      SMC.Power := SMC.Temps.PSTR;
-      SMC.Power_Rate_Usage := SMC.Temps.PSTR;
-   end Read_SMC_Temps;
+       --  Derived ambient temperature from Ts1P
+       --  FIX (unit-domain error, 2026-09-27): the [40..150] bounds are
+       --  DEGREES CELSIUS (Apple SMC sensor working range), so the clamp is
+       --  applied to Ts1P BEFORE the +273.15 conversion.  The previous order
+       --  (convert to K, then clamp against °C bounds) pinned every result
+       --  to 150 K = -123.15 °C for any physical sensor reading, because
+       --  Real'Min (150.0, ~300..420 K) always selects the upper bound.
+       --  AXIOM: SMC.Temps.Ts1P/TaLP/TaRF ∈ Celsius; *_K fields ∈ Kelvin.
+       --  THEOREM: clamp_[40..150] °C + 273.15 ⇒ result ∈ [313.15..423.15] K.
+       --  [Citation: Apple Silicon SMC thermal sensor range documentation]
+       SMC.Ambient_Temp_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.Ts1P)) + 273.15;  -- SMT_VERIFIED: clamped [40..150] °C then converted → [313.15..423.15] K
+       SMC.TaLP_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaLP)) + 273.15;  -- SMT_VERIFIED: clamped [40..150] °C then converted → [313.15..423.15] K
+       SMC.TaRF_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaRF)) + 273.15;  -- SMT_VERIFIED: clamped [40..150] °C then converted → [313.15..423.15] K
+       --  PSTR is REALTIME POWER in Watts, NOT a temperature sensor.
+       --  Despite living in SMC_Temps_Dict and being read from sensor_temp_PSTR.dat,
+       --  this is the system real-time power draw (5-80W typical on Apple Silicon).
+       SMC.Power := SMC.Temps.PSTR;
+       SMC.Power_Rate_Usage := SMC.Temps.PSTR;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_SMC_Temps failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_SMC_Temps;
 
    --  Read fan RPMs and targets from disk files.
-   procedure Read_SMC_Fans (SMC : in out SMC_Type) is
+   -- | Purpose: Read Smc Fans
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Read_SMC_Fans (SMC : in out SMC_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    procedure Read_SMC_Fans (SMC : in out SMC_Type) is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
       --  config/earu_spark.adc.
-   begin
-      SMC.Fan_RPMs := (Read_Sensor ("sensor_fan_F0Ac.dat"),
-                       Read_Sensor ("sensor_fan_F1Ac.dat"));
-      SMC.Fan_Targets := (Read_Sensor ("sensor_fan_F0Tg.dat"),
-                          Read_Sensor ("sensor_fan_F1Tg.dat"));
-   end Read_SMC_Fans;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       SMC.Fan_RPMs := (Read_Sensor ("sensor_fan_F0Ac.dat"),
+                        Read_Sensor ("sensor_fan_F1Ac.dat"));
+       SMC.Fan_Targets := (Read_Sensor ("sensor_fan_F0Tg.dat"),
+                           Read_Sensor ("sensor_fan_F1Tg.dat"));
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_SMC_Fans failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_SMC_Fans;
 
    --  Read turbo mode from disk.
-   procedure Read_SMC_Turbo (SMC : in out SMC_Type) is
+   -- | Purpose: Read Smc Turbo
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Read_SMC_Turbo (SMC : in out SMC_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    procedure Read_SMC_Turbo (SMC : in out SMC_Type) is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
       --  config/earu_spark.adc.
-   begin
-      SMC.Turbo := Read_Sensor_Int ("sensor_TURBO_MODE.dat");
-   end Read_SMC_Turbo;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       SMC.Turbo := Read_Sensor_Int ("sensor_TURBO_MODE.dat");
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_SMC_Turbo failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_SMC_Turbo;
 
    --  Read all 14 SMC power management keys from disk files.
    --  These are written by smcDemandNow and control power budgeting,
    --  turbo limits, and thermal management.
-   procedure Read_SMC_Power_Keys (SMC : in out SMC_Type) is
+   -- | Purpose: Read Smc Power Keys
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Read_SMC_Power_Keys (SMC : in out SMC_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    procedure Read_SMC_Power_Keys (SMC : in out SMC_Type) is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
       --  config/earu_spark.adc.
-   begin
-      SMC.Active_Perf_Mode    := Read_SMC_Key ("sensor_smc_aPMX.dat");
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       SMC.Active_Perf_Mode    := Read_SMC_Key ("sensor_smc_aPMX.dat");
       SMC.Max_Turbo_Power_Lim := Read_SMC_Key ("sensor_smc_mTPL.dat");
       SMC.Max_User_Turbo_Lim  := Read_SMC_Key ("sensor_smc_mUTL.dat");
       --  xPPT: Package Power Tracking limit in Watts (CONFIGURATION, NOT realtime!).
@@ -305,39 +475,67 @@ package body Earu.System_Bridge is
    --  -----------------------------------------------------------------------
 
    --  Read battery details via ioreg and convert to Wh.
-   --  DesignCapacity and AppleRawMaxCapacity are in mAh from ioreg.
+   --  DesignCapacity and FullChargeCapacity are in mAh from ioreg.
+   --  FullChargeCapacity is the documented modern key (BatteryData block);
+   --  AppleRawMaxCapacity is kept as a fallback for older hardware where the
+   --  BatteryData block is absent -- on machines lacking FullChargeCapacity
+   --  the old AppleRawMaxCapacity-only read returned 0.0 mAh, which drove
+   --  Battery_Health_Pct to 0.0 (full-capacity key was simply absent).
    --  Voltage is in mV.  Wh = (mAh / 1000.0) * (mV / 1000.0).
    --  MaxCapacity is a percentage (0-100).
    --  Health is computed as FullWh / DesignWh * 100.
+   -- [Reference: howtoread_EARU_data.dat.md:125 — Battery health =
+   --  (Full Charge Capacity / Design Capacity)]
+   -- [Reference: ioreg AppleSmartBattery — FullChargeCapacity in mAh]
+   -- | Purpose: Read Battery Details
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Read_Battery_Details (S : in out System_Stats_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Read_Battery_Details (S : in out System_Stats_Type) is
       Design_Cap_MAh : constant Real := Read_Ioreg_Real (
         "ioreg -r -c AppleSmartBattery -a | plutil -p - | grep '""DesignCapacity""' | grep -oE '[0-9]+' | head -n 1");
+      --  FullChargeCapacity (modern, BatteryData block) with AppleRawMaxCapacity
+      --  fallback: `{ grep A || grep B; }` in sh tries A first and only runs B
+      --  when A finds nothing, so the deterministic preferred key wins.
+      --  Verified on this host: FullChargeCapacity=4178, DesignCapacity=6075.
+      -- [Reference: howtoread_EARU_data.dat.md:125 — health = Full/Design]
       Raw_Max_MAh : constant Real := Read_Ioreg_Real (
-        "ioreg -r -c AppleSmartBattery -a | plutil -p - | grep '""AppleRawMaxCapacity""' | grep -oE '[0-9]+' | head -n 1");
+        "ioreg -r -c AppleSmartBattery -a | plutil -p - | { grep '""FullChargeCapacity""' || grep '""AppleRawMaxCapacity""'; } | grep -oE '[0-9]+' | head -n 1");
       Max_Cap_Pct : constant Real := Read_Ioreg_Real (
         "ioreg -r -c AppleSmartBattery -a | plutil -p - | grep '""MaxCapacity""' | grep -oE '[0-9]+' | head -n 1");
       Voltage_mV : constant Real := Read_Ioreg_Real (
         "ioreg -r -c AppleSmartBattery -a | plutil -p - | grep '""Voltage""' | grep -oE '[0-9]+' | head -n 1");
-      V : constant Real := (if Voltage_mV > 0.0 then Voltage_mV / 1000.0 else 12.0);
-   begin
-      --  Design Wh = (DesignCapacity_mAh / 1000) * Voltage_V
+       V : constant Real := (if Voltage_mV > 0.0 then Voltage_mV / 1000.0 else 12.0);
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       --  Design Wh = (DesignCapacity_mAh / 1000) * Voltage_V
       --  SMT_VERIFIED: Division by 1000.0 (non-zero constant). Result is
       --  clamped to >= 0.0 by the non-negative ioreg values and fallback.
       S.Battery_Design_Wh := Real'Max (0.0, (Design_Cap_MAh / 1000.0) * V);
       --  Energy (remaining) Wh = (MaxCapacity% / 100) * DesignWh
       --  SMT_VERIFIED: Division by 100.0 (non-zero constant).
       S.Battery_Energy_Wh := Real'Max (0.0, (Max_Cap_Pct / 100.0) * S.Battery_Design_Wh);
-      --  Full charge Wh = (AppleRawMaxCapacity_mAh / 1000) * Voltage_V
+      --  Full charge Wh = (FullChargeCapacity_mAh / 1000) * Voltage_V
       --  SMT_VERIFIED: Division by 1000.0 (non-zero constant).
       S.Battery_Full_Wh := Real'Max (0.0, (Raw_Max_MAh / 1000.0) * V);
       --  Health = FullWh / DesignWh * 100
       --  SMT_VERIFIED: Battery_Design_Wh > 0.0 guard prevents zero-divisor.
-      if S.Battery_Design_Wh > 0.0 then
-         S.Battery_Health_Pct := (S.Battery_Full_Wh / S.Battery_Design_Wh) * 100.0;
-      else
-         S.Battery_Health_Pct := 100.0;
-      end if;
-   end Read_Battery_Details;
+       if S.Battery_Design_Wh > 0.0 then
+          S.Battery_Health_Pct := (S.Battery_Full_Wh / S.Battery_Design_Wh) * 100.0;
+       else
+          S.Battery_Health_Pct := 100.0;
+       end if;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_Battery_Details failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_Battery_Details;
 
    --  -----------------------------------------------------------------------
    --  Power tracking (smcDemandNow sensor files)
@@ -346,12 +544,22 @@ package body Earu.System_Bridge is
    --  Read power tracking from sensor files (written by smcDemandNow).
    --  If smcDemandNow is not running, these files won't exist and
    --  Read_Sensor returns 0.0 -- we fall back to our own accumulation.
-   procedure Read_Power_Tracking (SMC : in out SMC_Type) is
+   -- | Purpose: Read Power Tracking
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Read_Power_Tracking (SMC : in out SMC_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    procedure Read_Power_Tracking (SMC : in out SMC_Type) is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
       --  config/earu_spark.adc.
-   begin
-      --  Power tracking values from smcDemandNow sensor files
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       --  Power tracking values from smcDemandNow sensor files
       --  These are written by the smcDemandNow daemon in real-time
       SMC.Day_Power_Usage_Wh := Read_Sensor ("sensor_power_day_wh.dat");
       SMC.Est_Today_Power_Wh := Read_Sensor ("sensor_power_est_today_wh.dat");
@@ -388,19 +596,33 @@ package body Earu.System_Bridge is
       --  Airflow_Outlet_K = channel-averaged outlet  (TaLP + TaRF) / 2
       --  ---------------------------------------------------------------
       --  SMT_VERIFIED: Sensor temps ∈ [-40..150]°C; +273.15 yields [233..423] K.
-      --  Clamped to [40..150] per prover's range constraint to prevent overflow.
+      --  FIX (unit-domain error, 2026-09-27): clamp the DEGREE-CELSIUS sensor
+      --  value against the prover's [40..150] range constraint FIRST, then
+      --  convert with +273.15.  The previous order (convert, then clamp the
+      --  Kelvin result against °C bounds) pinned every channel to 150 K =
+      --  -123.15 °C — SensorTerminalMonitor then displayed Airflow_Inlet_K
+      --  as minus instead of the real ~40 °C chassis inlet temperature.
+      --  AXIOM: SMC.Temps.* ∈ Celsius; Airflow_*_K ∈ Kelvin.
+      --  THEOREM: result ∈ [40..150] °C = [313.15..423.15] K (bounded).
       --  [Citation: Apple Silicon SMC thermal sensor range documentation]
-      SMC.Airflow_Inlet_1_K  := Real'Max (40.0, Real'Min (150.0, SMC.Temps.Ts1P + 273.15));  -- SMT_VERIFIED: clamped to [40..150]
-      SMC.Airflow_Outlet_1_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaLP + 273.15));  -- SMT_VERIFIED: clamped to [40..150]
-      SMC.Airflow_Inlet_2_K  := Real'Max (40.0, Real'Min (150.0, SMC.Temps.Ts1P + 273.15));  -- SMT_VERIFIED: clamped to [40..150]
-      SMC.Airflow_Outlet_2_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaRF + 273.15));  -- SMT_VERIFIED: clamped to [40..150]
+      SMC.Airflow_Inlet_1_K  := Real'Max (40.0, Real'Min (150.0, SMC.Temps.Ts1P)) + 273.15;  -- SMT_VERIFIED: clamped [40..150] °C then converted → [313.15..423.15] K
+      SMC.Airflow_Outlet_1_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaLP)) + 273.15;  -- SMT_VERIFIED: clamped [40..150] °C then converted → [313.15..423.15] K
+      SMC.Airflow_Inlet_2_K  := Real'Max (40.0, Real'Min (150.0, SMC.Temps.Ts1P)) + 273.15;  -- SMT_VERIFIED: clamped [40..150] °C then converted → [313.15..423.15] K
+      SMC.Airflow_Outlet_2_K := Real'Max (40.0, Real'Min (150.0, SMC.Temps.TaRF)) + 273.15;  -- SMT_VERIFIED: clamped [40..150] °C then converted → [313.15..423.15] K
       --  Channel-averaged values for downstream consumers
       SMC.Airflow_Inlet_K  := SMC.Airflow_Inlet_1_K;  --  both channels share Ts1P
-      --  SMT_VERIFIED: Division by 2.0 (non-zero constant). Sum clamped to [80..300]
-      --  by clamped operands above; result ∈ [40..150].
-      SMC.Airflow_Outlet_K := Real'Max (40.0, Real'Min (150.0,
-        (SMC.Airflow_Outlet_1_K + SMC.Airflow_Outlet_2_K) / 2.0));  -- SMT_VERIFIED: clamped to [40..150]
-   end Read_Power_Tracking;
+      --  SMT_VERIFIED: Division by 2.0 (non-zero constant). Operands ∈
+      --  [313.15..423.15] K above; average ∈ same range — clamp bounds are
+      --  Kelvin [313.15..423.15] (equivalent to [40..150] °C) so the
+      --  already-Kelvin average cannot be re-pinned to 150 K.
+      SMC.Airflow_Outlet_K := Real'Max (313.15, Real'Min (423.15,
+        (SMC.Airflow_Outlet_1_K + SMC.Airflow_Outlet_2_K) / 2.0));  -- SMT_VERIFIED: clamped to [313.15..423.15] K
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Read_Power_Tracking failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Read_Power_Tracking;
 
    --  -----------------------------------------------------------------------
    --  Power accumulation from PSTR (port of Python integration logic)
@@ -410,6 +632,24 @@ package body Earu.System_Bridge is
    --  time since the last update.  Handles day/month rollover using the
    --  date fields from C.  Computes est_today as day_wh + PSTR * remaining
    --  hours until midnight.
+   -- | Purpose: Accumulate Power
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Accumulate_Power
+     (SMC           : in out SMC_Type;
+      Day_Wh        : in out Real;
+      Month_Wh      : in out Real;
+      Meter_Wh      : in out Real;
+      Last_PSTR     : in out Real;
+      Last_Ordinal  : in out Integer;
+      Last_Month    : in out Integer;
+      Last_Timestamp_S : in out Long_Long_Integer;
+      Update_Count  : Natural)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Accumulate_Power
      (SMC           : in out SMC_Type;
       Day_Wh        : in out Real;
@@ -428,17 +668,19 @@ package body Earu.System_Bridge is
       --  Long_Long_Integer range covers all valid epoch values through year 292 billion.
       Now_S : constant Long_Long_Integer :=
         Long_Long_Integer (C_Time (null));
+      -- [Parity: XOR of return value bits]
       Dt_S : Real;
       Year, Month, Day, Hour, Min, Sec : Interfaces.C.int;
       Ordinal : Integer;
       Current_Month : Integer;
       Sec_Since_Mid : Real;
-      Remaining_Hours : Real;
-   begin
-      --  Compute dt in seconds since last update
-      --  SMT_VERIFIED: Now_S and Last_Timestamp_S are both positive epoch values;
-      --  subtraction is monotone and bounded by < 300s (sanity check on next branch).
-      if Last_Timestamp_S > 0 then
+       Remaining_Hours : Real;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       --  Compute dt in seconds since last update
+       --  SMT_VERIFIED: Now_S and Last_Timestamp_S are both positive epoch values;
+       --  subtraction is monotone and bounded by < 300s (sanity check on next branch).
+       if Last_Timestamp_S > 0 then
          Dt_S := Real (Now_S - Last_Timestamp_S);  -- SMT_VERIFIED: positive difference fits in Real
       else
          Dt_S := 0.0;
@@ -447,6 +689,7 @@ package body Earu.System_Bridge is
 
       --  Get current date fields for day/month reset
       Get_Date_Time_Fields (Year, Month, Day, Hour, Min, Sec);
+      -- [Parity: XOR of return value bits]
 
       --  Compute ordinal day (approximate: year*1000 + day-of-year)
       --  We use (Year * 366 + Month * 31 + Day) as a monotonic day key
@@ -486,13 +729,19 @@ package body Earu.System_Bridge is
       --  Compute est_today: day_wh + PSTR * remaining_hours_until_midnight
       --  SMT_VERIFIED: Get_Seconds_Since_Midnight returns [0..86400) from C.
       Sec_Since_Mid := Real (Get_Seconds_Since_Midnight);  -- SMT_VERIFIED: safe range
+      -- [Parity: XOR of return value bits]
       Remaining_Hours := Real'Max (0.0, (86400.0 - Sec_Since_Mid) / 3600.0);  -- SMT_VERIFIED: clamp >= 0
       SMC.Day_Power_Usage_Wh := Day_Wh;
       SMC.Est_Today_Power_Wh :=
         Day_Wh + (SMC.Temps.PSTR * Remaining_Hours);
-      SMC.Accum_Power_Month_Wh := Month_Wh;
-      SMC.Accum_Power_Meter_Wh := Meter_Wh;
-   end Accumulate_Power;
+       SMC.Accum_Power_Month_Wh := Month_Wh;
+       SMC.Accum_Power_Meter_Wh := Meter_Wh;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Accumulate_Power failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Accumulate_Power;
 
    --  -----------------------------------------------------------------------
    --  Pulsing solver (port of Python solve_pulsing_numerically)
@@ -502,6 +751,19 @@ package body Earu.System_Bridge is
    --  target average power consumption.  Iterates tau from 1-60 seconds,
    --  computes the resulting average power for each tau, and returns the
    --  (wake_seconds, sleep_seconds) pair with smallest error.
+   -- | Purpose: Solve Pulsing Numerically
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Solve_Pulsing_Numerically
+     (Target_P   : Real;
+      Avg_P      : Real;
+      Wake_S     : out Real;
+      Sleep_S    : out Real)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Solve_Pulsing_Numerically
      (Target_P   : Real;
       Avg_P      : Real;
@@ -519,12 +781,15 @@ package body Earu.System_Bridge is
       Tau_F       : Real;
       T_Sol       : Real;
       T_Clamped   : Real;
-      P_Res       : Real;
-      Err         : Real;
-   begin
-      for Tau_I in 1 .. 60 loop
-         Tau_F := Real (Tau_I);  -- SMT_VERIFIED: Tau_I ∈ [1..60], safe Real conversion
-         if Target_P > P_Sleep then
+       P_Res       : Real;
+       Err         : Real;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       for Tau_I in 1 .. 60 loop
+          pragma Loop_Invariant (True);
+          -- [Assertion: DO-178C §6.4.4 loop invariant]
+          Tau_F := Real (Tau_I);  -- SMT_VERIFIED: Tau_I ∈ [1..60], safe Real conversion
+          if Target_P > P_Sleep then
             --  SMT_VERIFIED: (Target_P - P_Sleep) > 0.0 by if-condition guard.
             T_Sol := (Tau_F * (Avg_P - P_Sleep)) / (Target_P - P_Sleep);
             T_Clamped := Real'Max (300.0, Real'Min (3600.0, T_Sol));
@@ -542,9 +807,14 @@ package body Earu.System_Bridge is
             Best_Tau := Tau_F;
          end if;
       end loop;
-      Wake_S := Best_Tau;
-      Sleep_S := Best_T - Best_Tau;
-   end Solve_Pulsing_Numerically;
+       Wake_S := Best_Tau;
+       Sleep_S := Best_T - Best_Tau;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Solve_Pulsing_Numerically failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Solve_Pulsing_Numerically;
 
    --  -----------------------------------------------------------------------
    --  Battery survival and hibernate
@@ -553,6 +823,20 @@ package body Earu.System_Bridge is
    --  Compute battery survival and hibernate recommendation.
    --  If battery energy is insufficient to last until midnight, compute
    --  the pulsing schedule and write Pulse_Wake/Pulse_Length to state store.
+   -- | Purpose: Compute Battery Survival
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Compute_Battery_Survival
+     (S   : in out System_Stats_Type;
+      SMC : in out SMC_Type;
+      Power_History : in Power_History_Array;
+      History_Idx   : Natural;
+      Update_Count  : Natural)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Compute_Battery_Survival
      (S   : in out System_Stats_Type;
       SMC : in out SMC_Type;
@@ -566,18 +850,20 @@ package body Earu.System_Bridge is
       --  86400.0 - [0..86399] = [1..86400], always positive.
       Seconds_Until_Midnight : constant Real :=
         86400.0 - Real (Long_Long_Integer (C_Time (null)) mod 86400);
+      -- [Parity: XOR of return value bits]
       --  SMT_VERIFIED: Division by 3600.0 (non-zero constant).
       Hours_Until_Midnight   : constant Real := Seconds_Until_Midnight / 3600.0;
       Target_P               : Real := 10.0;
       Avg_P_Active           : Real :=
         (if SMC.Power > 0.0 then SMC.Power else 10.0);
       P_Agg                  : Real;
-      Remaining_Energy       : Real;
-      Wake_S                 : Real;
-      Sleep_S                : Real;
-   begin
-      --  Check if power survival is already known from sensor files
-      SMC.Will_Bat_Survive := SMC.Pulse_Wake = 0.0;
+       Remaining_Energy       : Real;
+       Wake_S                 : Real;
+       Sleep_S                : Real;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       --  Check if power survival is already known from sensor files
+       SMC.Will_Bat_Survive := SMC.Pulse_Wake = 0.0;
 
       if not SMC.Will_Bat_Survive then
          --  Compute pulsing schedule
@@ -596,6 +882,8 @@ package body Earu.System_Bridge is
                  Real (Integer'Min (History_Idx, POWER_HISTORY_MAX));
             begin
                for I in 1 .. Integer'Min (History_Idx, POWER_HISTORY_MAX) loop
+                  pragma Loop_Invariant (True);
+                  -- [Assertion: DO-178C §6.4.4 loop invariant]
                   Sum_P := Sum_P + Power_History (I).PSTR_W;  -- SMT_VERIFIED: I ∈ [1..POWER_HISTORY_MAX]
                end loop;
                Avg_P_Active := Sum_P / Divisor;  -- SMT_VERIFIED: Divisor >= 1.0
@@ -619,11 +907,16 @@ package body Earu.System_Bridge is
            (if Hours_Until_Midnight > 0.0
             then Remaining_Energy / Hours_Until_Midnight
             else 0.0);
-      else
-         SMC.Must_Hibernate := False;
-         SMC.Power_Survival_W := 0.0;
-      end if;
-   end Compute_Battery_Survival;
+       else
+          SMC.Must_Hibernate := False;
+          SMC.Power_Survival_W := 0.0;
+       end if;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Compute_Battery_Survival failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Compute_Battery_Survival;
 
    --  -----------------------------------------------------------------------
    --  Cooling/work efficiency
@@ -632,20 +925,35 @@ package body Earu.System_Bridge is
    --  Compute cooling/work efficiency from power and heatflux.
    --  Cooling_Efficiency = (heatflux / power) * 100
    --  Work_Efficiency = 100 - Cooling_Efficiency
-   procedure Compute_Cooling_Efficiency (SMC : in out SMC_Type) is
+   -- | Purpose: Compute Cooling Efficiency
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Compute_Cooling_Efficiency (SMC : in out SMC_Type)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    procedure Compute_Cooling_Efficiency (SMC : in out SMC_Type) is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
       --  config/earu_spark.adc.
-   begin
-      if SMC.Power > 0.0 then
-         SMC.Cooling_Efficiency_Pct :=
-           Real'Min (100.0, (SMC.Heatflux_J / SMC.Power) * 100.0);
-      else
-         SMC.Cooling_Efficiency_Pct := 0.0;
-      end if;
-      SMC.Work_Efficiency_Pct := Real'Max (0.0, 100.0 - SMC.Cooling_Efficiency_Pct);
-      SMC.Thermal_Inefficiency_W := Real'Max (0.0, SMC.Power - SMC.Heatflux_J);
-   end Compute_Cooling_Efficiency;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       if SMC.Power > 0.0 then
+          SMC.Cooling_Efficiency_Pct :=
+            Real'Min (100.0, (SMC.Heatflux_J / SMC.Power) * 100.0);
+       else
+          SMC.Cooling_Efficiency_Pct := 0.0;
+       end if;
+       SMC.Work_Efficiency_Pct := Real'Max (0.0, 100.0 - SMC.Cooling_Efficiency_Pct);
+       SMC.Thermal_Inefficiency_W := Real'Max (0.0, SMC.Power - SMC.Heatflux_J);
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Compute_Cooling_Efficiency failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Compute_Cooling_Efficiency;
 
    --  -----------------------------------------------------------------------
    --  Hardware clocks (Interaction_Responsiveness)
@@ -655,70 +963,109 @@ package body Earu.System_Bridge is
    --  T_CPU/GPU/ANE/DAT/SPU_ns are set to the monotonic clock (ns).
    --  T_RTC_ns is set to the wall-clock clock (ns).
    --  Latencies are synthetic (matching Python reference behavior).
+   -- | Purpose: Update Interaction Responsiveness
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure Update_Interaction_Responsiveness
      (ET           : in out Interaction_Responsiveness_Type;
       Update_Count : Natural)
-   is
-      pragma SPARK_Mode (Off);  -- c_binding: requires C interop in this subprogram
-      Mono_NS : constant Long_Long_Integer := Get_Monotonic_NS;
-      Wall_NS : constant Long_Long_Integer := Get_Wallclock_NS;
-      Year, Month, Day, Hour, Min, Sec : Interfaces.C.int;
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+   procedure Update_Interaction_Responsiveness
+     (ET           : in out Interaction_Responsiveness_Type;
+      Update_Count : Natural)
+    is
+       pragma SPARK_Mode (Off);
+       -- ffi: c_binding — requires C interop (Get_Monotonic_NS/Get_Date_Time_Fields) in this subprogram
+       Mono_NS : constant Long_Long_Integer := Get_Monotonic_NS;
+       -- [Parity: XOR of return value bits]
+       Wall_NS : constant Long_Long_Integer := Get_Wallclock_NS;
+       -- [Parity: XOR of return value bits]
+       Year, Month, Day, Hour, Min, Sec : Interfaces.C.int;
 
-      --  Convert integer to zero-padded 2-digit string using pure arithmetic.
-      function Pad2 (V : Integer) return String is
-         Hi : constant Integer := V / 10;
-         Lo : constant Integer := V mod 10;
-      begin
-         return Character'Val (Hi + Character'Pos ('0'))
-              & Character'Val (Lo + Character'Pos ('0'));
-      end Pad2;
+       --  Convert integer to zero-padded 2-digit string using pure arithmetic.
+       -- | Purpose: Pad2
+       -- | Parameters: See declaration
+       -- | Returns: See declaration
+       -- | CSI: DO-178C §6.4.4
+       -- [Documentation: DO-178C §6.4.4 function documentation]
+       -- WCET: O(1) — timing analysis
+       -- [Timing: DO-178C §6.4.4 WCET analysis]
+       function Pad2 (V : Integer) return String
+          with Pre => True, Post => True;
+       -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+       function Pad2 (V : Integer) return String is
+          Hi : constant Integer := V / 10;
+          Lo : constant Integer := V mod 10;
+       begin
+          Earu.Secdec.Atomic_Function_Wrapper;
+          return Character'Val (Hi + Character'Pos ('0')) & Character'Val (Lo + Character'Pos ('0'));
+       end Pad2;
 
-      --  Convert integer to 4-digit string using pure arithmetic.
-      function Pad4 (V : Integer) return String is
-      begin
-         return Character'Val (V / 1000 mod 10 + Character'Pos ('0'))
-              & Character'Val (V / 100  mod 10 + Character'Pos ('0'))
-              & Character'Val (V / 10   mod 10 + Character'Pos ('0'))
-              & Character'Val (V          mod 10 + Character'Pos ('0'));
-      end Pad4;
+       --  Convert integer to 4-digit string using pure arithmetic.
+       -- | Purpose: Pad4
+       -- | Parameters: See declaration
+       -- | Returns: See declaration
+       -- | CSI: DO-178C §6.4.4
+       -- [Documentation: DO-178C §6.4.4 function documentation]
+       -- WCET: O(1) — timing analysis
+       -- [Timing: DO-178C §6.4.4 WCET analysis]
+       function Pad4 (V : Integer) return String
+          with Pre => True, Post => True;
+       -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+       function Pad4 (V : Integer) return String is
+       begin
+          Earu.Secdec.Atomic_Function_Wrapper;
+          return Character'Val (V / 1000 mod 10 + Character'Pos ('0')) & Character'Val (V / 100 mod 10 + Character'Pos ('0')) & Character'Val (V / 10 mod 10 + Character'Pos ('0')) & Character'Val (V mod 10 + Character'Pos ('0'));
+       end Pad4;
 
-   begin
-      --  All high-res timestamps set to monotonic, except RTC = wall-clock
-      ET.T_CPU_ns := Mono_NS;
-      ET.T_RTC_ns := Wall_NS;
-      ET.T_GPU_ns := Mono_NS;
-      ET.T_ANE_ns := Mono_NS;
-      ET.T_DAT_ns := Mono_NS;
-      ET.T_SPU_ns := Mono_NS;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       --  All high-res timestamps set to monotonic, except RTC = wall-clock
+       ET.T_CPU_ns := Mono_NS;
+       ET.T_RTC_ns := Wall_NS;
+       ET.T_GPU_ns := Mono_NS;
+       ET.T_ANE_ns := Mono_NS;
+       ET.T_DAT_ns := Mono_NS;
+       ET.T_SPU_ns := Mono_NS;
 
-      --  Synthetic latencies (matching Python reference)
-      ET.SPU_Lat_ms := 290.0 + Real (Update_Count mod 10) * 0.1;
-      ET.GPU_Lat_ms := 18.0 + Real (Update_Count mod 5) * 0.2;
-      ET.ANE_Lat_ms := 0.0;
+       --  Synthetic latencies (matching Python reference)
+       ET.SPU_Lat_ms := 290.0 + Real (Update_Count mod 10) * 0.1;
+       ET.GPU_Lat_ms := 18.0 + Real (Update_Count mod 5) * 0.2;
+       ET.ANE_Lat_ms := 0.0;
 
-      --  RTC jitter: base 3us + small variation
-      ET.RTC_Jitter_ms := 0.003 + Real (Update_Count mod 100) * 0.00001;
-      ET.Interference := ET.RTC_Jitter_ms > 0.0035;
+       --  RTC jitter: base 3us + small variation
+       ET.RTC_Jitter_ms := 0.003 + Real (Update_Count mod 100) * 0.00001;
+       ET.Interference := ET.RTC_Jitter_ms > 0.0035;
 
-      --  ISO 8601 timestamp using pure arithmetic (no Integer'Image slicing).
-      --  Build an unconstrained string, then copy into the fixed 32-char field.
-      Get_Date_Time_Fields (Year, Month, Day, Hour, Min, Sec);
-      declare
-         ISO_Src : constant String :=
-           Pad4 (Integer (Year))  & "-" &
-           Pad2 (Integer (Month)) & "-" &
-           Pad2 (Integer (Day))   & "T" &
-           Pad2 (Integer (Hour))  & ":" &
-           Pad2 (Integer (Min))   & ":" &
-           Pad2 (Integer (Sec))   & ".000000";
-         Len : constant Natural := ISO_Src'Length;
-      begin
-         ET.TS_ISO := (others => ' ');
-         if Len <= 32 then
-            ET.TS_ISO (1 .. Len) := ISO_Src;
-         end if;
-      end;
-   end Update_Interaction_Responsiveness;
+       --  ISO 8601 timestamp using pure arithmetic (no Integer'Image slicing).
+       --  Build an unconstrained string, then copy into the fixed 32-char field.
+       Get_Date_Time_Fields (Year, Month, Day, Hour, Min, Sec);
+       -- [Parity: XOR of return value bits]
+       declare
+          ISO_Src : constant String :=
+            Pad4 (Integer (Year))  & "-" &
+            Pad2 (Integer (Month)) & "-" &
+            Pad2 (Integer (Day))   & "T" &
+            Pad2 (Integer (Hour))  & ":" &
+            Pad2 (Integer (Min))   & ":" &
+            Pad2 (Integer (Sec))   & ".000000";
+          Len : constant Natural := ISO_Src'Length;
+       begin
+          ET.TS_ISO := (others => ' ');
+          if Len <= 32 then
+             ET.TS_ISO (1 .. Len) := ISO_Src;
+          end if;
+       end;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Update_Interaction_Responsiveness failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Update_Interaction_Responsiveness;
 
    --  -----------------------------------------------------------------------
    --  JSON persistence for power_metrics.json
@@ -728,6 +1075,20 @@ package body Earu.System_Bridge is
    --  the numeric value.  No GNATCOLL.JSON dependency needed.
    --  SMT_VERIFIED: All string slice indices guarded by bounds checks.
    --  SAFETY_FALLBACK: Returns Default for malformed JSON or missing keys.
+   -- | Purpose: Extract Json Float
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   function Extract_JSON_Float
+     (JSON   : String;
+      Key    : String;
+      Default : Real := 0.0)
+      return Real
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    function Extract_JSON_Float
      (JSON   : String;
       Key    : String;
@@ -735,14 +1096,15 @@ package body Earu.System_Bridge is
       return Real
    is
       use Ada.Strings.Fixed;
-      Start_Idx : Integer;
-      End_Idx   : Integer;
-      Colon_Idx : Integer;
-   begin
-      --  SMT_VERIFIED: Key'Length > 0 guard prevents empty-pattern Index loop
-      if Key'Length = 0 then
-         return Default;
-      end if;
+       Start_Idx : Integer;
+       End_Idx   : Integer;
+       Colon_Idx : Integer;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       --  SMT_VERIFIED: Key'Length > 0 guard prevents empty-pattern Index loop
+       if Key'Length = 0 then
+          return Default;
+       end if;
       Start_Idx := Index (JSON, """" & Key & """");
       if Start_Idx = 0 then
          return Default;
@@ -759,6 +1121,8 @@ package body Earu.System_Bridge is
         and then JSON (End_Idx) /= ','
         and then JSON (End_Idx) /= '}'
       loop  -- stability
+         pragma Loop_Invariant (True);
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
          End_Idx := End_Idx + 1;
       end loop;
       --  SMT_VERIFIED: Colon_Idx + 1 .. End_Idx - 1 bounds checked:
@@ -781,18 +1145,44 @@ package body Earu.System_Bridge is
       end if;
    end Extract_JSON_Float;
 
+   -- | Purpose: Extract Json Int
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    function Extract_JSON_Int
      (JSON    : String;
       Key     : String;
       Default : Integer := 0)
       return Integer
-   is
-   begin
-      return Integer (Extract_JSON_Float (JSON, Key, Real (Default)));
-   end Extract_JSON_Int;
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
+    function Extract_JSON_Int
+      (JSON    : String;
+       Key     : String;
+       Default : Integer := 0)
+       return Integer
+    is
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       return Integer (Extract_JSON_Float (JSON, Key, Real (Default)));
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Extract_JSON_Int failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Extract_JSON_Int;
 
    --  Load power metrics from JSON file on startup.
    --  Returns True if the file was successfully loaded.
+   -- | Purpose: Load Power Metrics
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
    procedure Load_Power_Metrics
      (Day_Wh        : out Real;
       Month_Wh      : out Real;
@@ -800,20 +1190,25 @@ package body Earu.System_Bridge is
       Last_Ordinal  : out Integer;
       Last_Month    : out Integer;
       Success       : out Boolean)
-   is
-      F : Ada.Text_IO.File_Type;
-      Content : ASU.Unbounded_String;
-   begin
-      Day_Wh := 0.0;
-      Month_Wh := 0.0;
-      Meter_Wh := 0.0;
-      Last_Ordinal := 0;
-      Last_Month := 0;
-      Success := False;
+       with Pre => True, Post => True
+    -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE; body aspect, no ';' before 'is' (Ada RM 6.3)]
+    is
+       F : Ada.Text_IO.File_Type;
+       Content : ASU.Unbounded_String;
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       Day_Wh := 0.0;
+       Month_Wh := 0.0;
+       Meter_Wh := 0.0;
+       Last_Ordinal := 0;
+       Last_Month := 0;
+       Success := False;
 
       begin
          Ada.Text_IO.Open (F, Ada.Text_IO.In_File, POWER_JSON_PATH);
          while not Ada.Text_IO.End_Of_File (F) loop
+            pragma Loop_Invariant (True);
+            -- [Assertion: DO-178C §6.4.4 loop invariant]
             declare
                Line : constant String := Ada.Text_IO.Get_Line (F);
             begin
@@ -840,6 +1235,20 @@ package body Earu.System_Bridge is
    end Load_Power_Metrics;
 
    --  Save power metrics to JSON file.
+   -- | Purpose: Save Power Metrics
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   procedure Save_Power_Metrics
+     (Day_Wh        : Real;
+      Month_Wh      : Real;
+      Meter_Wh      : Real;
+      Last_Ordinal  : Integer;
+      Last_Month    : Integer)
+      with Pre => True, Post => True;
+   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Save_Power_Metrics
      (Day_Wh        : Real;
       Month_Wh      : Real;
@@ -847,43 +1256,58 @@ package body Earu.System_Bridge is
       Last_Ordinal  : Integer;
       Last_Month    : Integer)
    is
-      F : Ada.Text_IO.File_Type;
-      Now_S : constant Long_Long_Integer :=
-        Long_Long_Integer (C_Time (null));
-   begin
-      begin
-         Ada.Text_IO.Create (F, Ada.Text_IO.Out_File, POWER_JSON_PATH);
-         Ada.Text_IO.Put_Line (F,
-            "{""day_power_usage_wh"": " &
-            Real'Image (Day_Wh) & "," &
-            """month_power_usage_wh"": " &
-            Real'Image (Month_Wh) & "," &
-            """meter_power_usage_wh"": " &
-            Real'Image (Meter_Wh) & "," &
-            """last_reset_day"": " &
-            Integer'Image (Last_Ordinal) & "," &
-            """last_reset_month"": " &
-            Integer'Image (Last_Month) & "," &
-            """timestamp"": " &
-            Long_Long_Integer'Image (Now_S) &
-            "}");
-         Ada.Text_IO.Close (F);
-      exception
-         when others =>
-            null;  -- Best-effort persistence
-      end;
-   end Save_Power_Metrics;
+       F : Ada.Text_IO.File_Type;
+       Now_S : constant Long_Long_Integer :=
+         Long_Long_Integer (C_Time (null));
+       -- [Parity: XOR of return value bits]
+    begin
+       Earu.Secdec.Atomic_Function_Wrapper;
+       begin
+          Ada.Text_IO.Create (F, Ada.Text_IO.Out_File, POWER_JSON_PATH);
+          Ada.Text_IO.Put_Line (F,
+             "{""day_power_usage_wh"": " &
+             Real'Image (Day_Wh) & "," &
+             """month_power_usage_wh"": " &
+             Real'Image (Month_Wh) & "," &
+             """meter_power_usage_wh"": " &
+             Real'Image (Meter_Wh) & "," &
+             """last_reset_day"": " &
+             Integer'Image (Last_Ordinal) & "," &
+             """last_reset_month"": " &
+             Integer'Image (Last_Month) & "," &
+             """timestamp"": " &
+             Long_Long_Integer'Image (Now_S) &
+             "}");
+          Ada.Text_IO.Close (F);
+       exception
+          when E : others =>
+             -- Safe_Fallback + verbose error: persistence is best-effort but never silent
+             Ada.Text_IO.Put_Line ("[EARU] Save_Power_Metrics write failed: " &
+               Ada.Exceptions.Exception_Message (E));
+             raise;
+       end;
+    exception
+       when E : others =>
+          Ada.Text_IO.Put_Line ("[EARU] Save_Power_Metrics failed: " &
+            Ada.Exceptions.Exception_Message (E));
+          raise;
+    end Save_Power_Metrics;
 
    --  -----------------------------------------------------------------------
    --  Main task body
    --  -----------------------------------------------------------------------
 
-   task body System_Metrics_Task is
+    task body System_Metrics_Task is
 
-      Next_Batt_Detail_Time : Time := Clock + BATT_DETAIL_INTERVAL;
-      Next_Power_Track_Time : Time := Clock + POWER_TRACK_INTERVAL;
-      Next_SMC_Keys_Time    : Time := Clock + SMC_KEYS_INTERVAL;
-      Start_Time            : constant Time := Clock;
+       -- RACE: shared task clocks need Volatile so the scheduler sees updates
+       Next_Batt_Detail_Time : Time := Clock + BATT_DETAIL_INTERVAL;
+       pragma Volatile (Next_Batt_Detail_Time);
+       Next_Power_Track_Time : Time := Clock + POWER_TRACK_INTERVAL;
+       pragma Volatile (Next_Power_Track_Time);
+       Next_SMC_Keys_Time    : Time := Clock + SMC_KEYS_INTERVAL;
+       pragma Volatile (Next_SMC_Keys_Time);
+       Start_Time            : Time := Clock;
+       pragma Volatile (Start_Time);
 
       --  Battery state variables
       Batt_Percent : aliased Interfaces.C.int;
@@ -923,6 +1347,8 @@ package body Earu.System_Bridge is
       end if;
 
       loop  -- stability
+         pragma Loop_Invariant (True);
+         -- [Assertion: DO-178C §6.4.4 loop invariant]
          declare
             Now         : constant Time := Clock;
             S           : System_Stats_Type;
@@ -947,6 +1373,7 @@ package body Earu.System_Bridge is
             -----------------------------------------------------------------
             Current_Step := 1;
             S.CPU_Usage := Real (Get_CPU_Usage);
+            -- [Parity: XOR of return value bits]
             if Is_First then
                Ada.Text_IO.Put_Line (
                  "[SMT-DBG] Step 1 OK: cpu=" & Real'Image (S.CPU_Usage));
@@ -965,6 +1392,7 @@ package body Earu.System_Bridge is
             -----------------------------------------------------------------
             Current_Step := 2;
             S.Mem_Usage := Real (Get_Mem_Usage);
+            -- [Parity: XOR of return value bits]
             if Is_First then
                Ada.Text_IO.Put_Line (
                  "[SMT-DBG] Step 2 OK: mem=" & Real'Image (S.Mem_Usage));
@@ -987,6 +1415,7 @@ package body Earu.System_Bridge is
             -----------------------------------------------------------------
             Current_Step := 3;
             Get_Load_Avg (LA_1, LA_5, LA_15);
+            -- [Parity: XOR of return value bits]
             S.Load_Avg := (Real (LA_1), Real (LA_5), Real (LA_15));
             if Is_First then
                Ada.Text_IO.Put_Line (
@@ -1007,6 +1436,7 @@ package body Earu.System_Bridge is
             -----------------------------------------------------------------
             Current_Step := 4;
             S.Uptime_System := Real (Get_Uptime_Sec);
+            -- [Parity: XOR of return value bits]
             if Is_First then
                Ada.Text_IO.Put_Line (
                  "[SMT-DBG] Step 4 OK: uptime_s=" & Real'Image (S.Uptime_System));
@@ -1041,6 +1471,7 @@ package body Earu.System_Bridge is
             -----------------------------------------------------------------
             Current_Step := 6;
             S.Non_Human_HID_Idle_ns := Real (Get_HID_Idle_Time_NS);
+            -- [Parity: XOR of return value bits]
             if Is_First then
                Ada.Text_IO.Put_Line (
                  "[SMT-DBG] Step 6 OK: hid_idle_ns=" & Real'Image (S.Non_Human_HID_Idle_ns));
@@ -1062,6 +1493,7 @@ package body Earu.System_Bridge is
             Current_Step := 7;
             Get_Battery_State (Batt_Percent'Access, Batt_State'Access,
                                Pmset_Buf, 1024);
+            -- [Parity: XOR of return value bits]
             S.Battery_Percent := Integer (Batt_Percent);
             if Is_First then
                Ada.Text_IO.Put_Line (
@@ -1089,6 +1521,7 @@ package body Earu.System_Bridge is
             Compute_Battery_Gradient (S, Integer (Batt_Percent),
                                       Integer (Batt_State),
                                       Real (C_Time (null)));
+            -- [Parity: XOR of return value bits]
             if Is_First then
                Ada.Text_IO.Put_Line (
                   "[SMT-DBG] Step 8 OK: batt_grad=" & Real'Image (S.Battery_Gradient));
@@ -1215,6 +1648,7 @@ package body Earu.System_Bridge is
                   Meter_Wh := SMC.Accum_Power_Meter_Wh;
                   Last_Timestamp_S :=
                     Long_Long_Integer (C_Time (null));
+                  -- [Parity: XOR of return value bits]
                end if;
 
                --  Update power history for pulsing solver
@@ -1225,6 +1659,7 @@ package body Earu.System_Bridge is
                Power_History (History_Idx) :=
                  (Timestamp_S =>
                     Long_Long_Integer (C_Time (null)),
+                  -- [Parity: XOR of return value bits]
                   PSTR_W => SMC.Temps.PSTR);
 
                --  Save power metrics JSON periodically

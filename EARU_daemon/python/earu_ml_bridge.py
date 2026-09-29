@@ -11,6 +11,7 @@ import gc
 import json
 import math
 import os
+import queue  # stdlib: Empty sentinel for mp.Queue drain in ml_worker
 import struct
 import subprocess
 import sys
@@ -55,6 +56,13 @@ global_last_confirmed_ground: bool = False
 
 # In-memory significant location cache — no more JSON file I/O on Python side.
 # Ada daemon owns persistence to save_state/significant_locations.json.
+# PROCESS-ISOLATION NOTE (mp start-method "spawn"): each worker is a separate
+# OS process with its OWN copy of this list, so a single list cannot serve both
+# roles. The weather_worker appends detections HERE (dedup source) and mirrors
+# each entry over sig_loc_q; the ml_worker drains the queue into ITS copy of
+# this same name and packs from it. Before the queue existed, ml_worker packed
+# an always-empty list -> sig_count always 0 -> daemon received no locations.
+# [Reference: multiprocessing spawn — child re-imports module, no shared heap]
 _sig_loc_cache: list[dict[str, Any]] = []
 
 
@@ -211,10 +219,24 @@ class VibrationDetector:
 # ---------------------------------------------------------------------------
 # Weather Worker
 # ---------------------------------------------------------------------------
-def weather_worker() -> None:
-    """Collect weather + location telemetry and pack into WEATHER_SHM."""
+def weather_worker(sig_loc_q: Any = None) -> None:
+    """Collect weather + location telemetry and pack into WEATHER_SHM.
+
+    Parameters
+    ----------
+    sig_loc_q : multiprocessing.Queue | None
+        Cross-process channel: every detected significant location is mirrored
+        here so ml_worker (a *different* spawn process) can pack it into
+        ML_SHM for the Ada daemon. None disables the hop (tests/tools).
+    """
     global global_last_confirmed_ground
     print("[*] Weather worker started.")
+    # FIX (B1): this body runs in a spawn child — the parent's wireless scan
+    # thread does NOT exist in this address space, so global_wifi_devices and
+    # global_bt_devices would stay empty forever and the detection gates
+    # has_le / dense_wifi could never pass. Start our own scanner here; the
+    # idempotent guard in earu_wireless_bridge keeps repeat calls safe.
+    start_wireless_scanning()
     shm: shared_memory.SharedMemory | None = None
     try:
         shm = shared_memory.SharedMemory(name=WEATHER_SHM_NAME)
@@ -477,7 +499,7 @@ def weather_worker() -> None:
                                     )
 
                                     if not is_duplicate:
-                                        _sig_loc_cache.append({
+                                        _entry = {
                                             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                                             "lat": start_lat,
                                             "lon": start_lon,
@@ -486,8 +508,16 @@ def weather_worker() -> None:
                                             "ble_count": ble_count,
                                             "type": "User Anchor Base / Home Hub",
                                             "description": "Dwell time > 5 min, low velocity (< 30 kts), strong local WiFi and BLE beacon anchors.",
-                                        })
+                                        }
+                                        _sig_loc_cache.append(_entry)
                                         print(f"[SigLoc] Detected #{len(_sig_loc_cache)}: {start_lat:.6f}, {start_lon:.6f}")
+                                        # FIX (B2): mirror to ml_worker — it packs
+                                        # from ITS OWN process copy of _sig_loc_cache,
+                                        # which this append can never reach. put() is
+                                        # non-blocking (unbounded queue); any failure
+                                        # is logged by the caller's except below.
+                                        if sig_loc_q is not None:
+                                            sig_loc_q.put(_entry)
                                 except Exception as e:
                                     print(f"[!] Error detecting significant location: {e}")
 
@@ -568,8 +598,19 @@ def weather_worker() -> None:
 # ---------------------------------------------------------------------------
 # ML Worker — CoreML battery prediction + daily fine-tuning
 # ---------------------------------------------------------------------------
-def ml_worker() -> None:
-    """CoreML battery prediction loop with daily LSTM fine-tuning."""
+def ml_worker(sig_loc_q: Any = None) -> None:
+    """CoreML battery prediction loop with gated LSTM fine-tuning.
+
+    Training gate (all three must hold, plus data sufficiency):
+      HIDIdle >= 3600 s AND battery_charging AND cooldown >= 43200 s (3600*12).
+
+    Parameters
+    ----------
+    sig_loc_q : multiprocessing.Queue | None
+        Cross-process channel fed by weather_worker; drained every cycle so
+        significant-location detections reach this spawn process (where the
+        ML_SHM payload is actually packed). None disables the hop.
+    """
     print("[*] ML worker started.")
 
     try:
@@ -591,14 +632,21 @@ def ml_worker() -> None:
 
     update_count = 0
     day_data_buffer: list[list[float]] = []
-    last_train_day = 0
+    # [Training gate spec — retrain ONLY when HIDIdle >= 3600 s (HIDIdleHigh)
+    #  AND battery_charging AND cooldown >= 43200 s (3600*12) since last train.]
+    # SAFETY_FALLBACK: cooldown anchor initialised to NOW at worker start so a
+    # fresh process can never immediately retrain (fail-closed on restart).
+    last_train_ts = time.time()
+    last_gate_log_ts = 0.0
 
     while True:
         try:
-            today = datetime.date.today().toordinal()
-
             energy_wh = 50.0
             power_w = 10.0
+            # TRAIN-GATE defaults: FAIL-CLOSED — if EARU_data.dat is unreadable
+            # the gate stays shut (never train on missing inputs; Murphy's Law).
+            hid_idle_s = 0.0
+            is_charging = False
             try:
                 with open("/Volumes/EARU_dataIO/EARU_data.dat") as f:
                     data = json.load(f)
@@ -606,17 +654,41 @@ def ml_worker() -> None:
                 smc = data.get("smc", {})
                 power_w = float(smc.get("power", 10.0))
                 energy_wh = float(system.get("BatteryEnergyBankWh", 50.0))
+                hid_idle_s = float(system.get("nonHumanInputHIDIdle", 0.0))
+                is_charging = bool(system.get("battery_charging", False))
             except Exception:
                 pass
 
-            if last_train_day == 0:
-                last_train_day = today
             day_data_buffer.append([power_w, energy_wh])
             if len(day_data_buffer) > 14400:
                 day_data_buffer.pop(0)
 
-            if today != last_train_day and len(day_data_buffer) > 100:
-                print(f"[*] Daily Reset: Adapting battery model for day {today}...")
+            # Training gate — ALL three conditions must hold plus data
+            # sufficiency (>100 samples) before the torch path is touched.
+            gate_hid_high = hid_idle_s >= 3600.0
+            gate_charging = is_charging
+            gate_cooldown = (time.time() - last_train_ts) >= 43200.0
+            if time.time() - last_gate_log_ts >= 3600.0:
+                # Hourly gate telemetry so bridge.log shows why training did
+                # or did not run (verbose visibility, no silent gating).
+                print(
+                    f"[*] Train gate: hid={hid_idle_s:.1f}s(>=3600:{gate_hid_high}) "
+                    f"chg={gate_charging} "
+                    f"cool={time.time() - last_train_ts:.0f}s(>=43200:{gate_cooldown}) "
+                    f"samples={len(day_data_buffer)}",
+                )
+                last_gate_log_ts = time.time()
+
+            if (
+                gate_hid_high
+                and gate_charging
+                and gate_cooldown
+                and len(day_data_buffer) > 100
+            ):
+                print(
+                    f"[*] Train gate OPEN: adapting battery model "
+                    f"(HID idle {hid_idle_s:.0f}s, charging, cooldown ok)...",
+                )
                 try:
                     import torch
                     import torch.nn as nn
@@ -677,7 +749,7 @@ def ml_worker() -> None:
                         "/usr/local/EnvironmentalAwareReferentialUnit/EARU_daemon/python/BatteryPredictor.mlpackage",
                     )
                     print(f"[ok] Battery model adapted and deployed to ANE (Loss: {loss.item():.6f})")
-                    last_train_day = today
+                    last_train_ts = time.time()
                     day_data_buffer = []
                 except Exception as train_err:
                     print(f"[!] Model adaptation failed: {train_err}")
@@ -718,6 +790,15 @@ def ml_worker() -> None:
 
             # Significant Locations (Latest 10) — pack from in-memory cache
             # Persistence (read/write JSON) is handled by Ada daemon.
+            # FIX (B2): drain cross-process queue first — detections were made
+            # in the weather_worker spawn process and mirrored here; without
+            # this drain this process's cache stayed empty forever.
+            if sig_loc_q is not None:
+                while True:
+                    try:
+                        _sig_loc_cache.append(sig_loc_q.get_nowait())
+                    except queue.Empty:
+                        break
             sig_loc_data = bytearray()
             sig_count = 0
             try:
@@ -852,9 +933,15 @@ def main() -> None:
 
     import multiprocessing as mp
 
+    # Cross-process significant-location channel: weather_worker (detector)
+    # -> ml_worker (packer). mp.Queue passed via Process args is pickled and
+    # yields a connected proxy in each spawn child; unbounded so put() never
+    # blocks the 1 Hz weather loop. This process must keep a reference alive
+    # (loop below runs forever) so the queue's feeder thread stays up.
+    sig_loc_queue: Any = mp.Queue()
     processes = [
-        mp.Process(target=weather_worker, daemon=True),
-        mp.Process(target=ml_worker, daemon=True),
+        mp.Process(target=weather_worker, args=(sig_loc_queue,), daemon=True),
+        mp.Process(target=ml_worker, args=(sig_loc_queue,), daemon=True),
     ]
     for p in processes:
         p.start()

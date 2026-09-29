@@ -6,7 +6,7 @@ module Earu_system_bridge_Read_SMC_Key
 
 
   let read_SMC_Key (filename: string) : int
-    requires { true }
+    requires { true, Post => true }
     ensures { true (conversion is total on clamped input). }
     = Earu.IO.Read_Sensor_Real (filename)
 

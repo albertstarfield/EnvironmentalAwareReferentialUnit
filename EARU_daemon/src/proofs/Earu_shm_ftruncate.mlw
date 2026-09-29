@@ -5,9 +5,8 @@ module Earu_shm_ftruncate
 
 
   let ftruncate (fd: int) (length: int) : int
-    requires { fd >= 0 }
-    requires { length >= 0 }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = System.Null_Address
 
 end

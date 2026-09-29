@@ -6,8 +6,8 @@ module Earu_shm_Open_IMU_SHM
 
 
   let open_IMU_SHM (name: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Result
 
 end

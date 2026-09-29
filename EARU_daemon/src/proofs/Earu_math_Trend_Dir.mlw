@@ -5,8 +5,8 @@ module Earu_math_Trend_Dir
 
 
   let trend_Dir (v: int) : int
-    requires { v >= 0 }
-    ensures { result >= 0 }
+    requires { true — any tendency value accepted }
+    ensures { true — "^^^" rising, "vvv" falling, "---" stable }
     = v
 
 end

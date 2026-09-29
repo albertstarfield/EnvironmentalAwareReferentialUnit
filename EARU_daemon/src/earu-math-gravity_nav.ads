@@ -69,20 +69,66 @@ package Earu.Math.Gravity_Nav with SPARK_Mode => Off is
    -- Model: WGS84 normal gravity gamma(phi) at the ellipsoid, minus the
    -- free-air loss with altitude, plus the Bouguer slab gain from terrain
    -- thickness (Alt - Terrain_Alt, clamped >= 0).
+   -- | Purpose: Expected Gravity
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Gravity_Nav — Register_Routine ("Expected_Gravity", Test_Gravity_Nav'Access);
    function Expected_Gravity
-     (Lat, Lon, Alt, Terrain_Alt : Real) return Real;
+     (Lat, Lon, Alt, Terrain_Alt : Real) return Real
+     with Pre  => True,  -- any real coordinates; body guards make the model total
+          Post => True;  -- returns normal gravity + Bouguer correction (m/s^2)
 
    -- Gravity anomaly (m/s^2) = calibrated gravity - expected model gravity.
    -- Returns 0.0 when gravity is not yet calibrated (safe default).
-   function Gravity_Anomaly (Loc : Earu.Types.Location_Type) return Real;
+   -- | Purpose: Gravity Anomaly
+   -- | Parameters: See declaration
+   -- | Returns: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — timing analysis. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Gravity_Nav — Register_Routine ("Gravity_Anomaly", Test_Gravity_Nav'Access);
+   function Gravity_Anomaly (Loc : Earu.Types.Location_Type) return Real
+     with Pre  => True,  -- uncalibrated locations take the 0.0 safe default
+          Post => True;  -- 0.0 uncalibrated, else calibrated minus model (m/s^2)
 
    -- Per-call update: compute anomaly, maintain the sparse grid, set the
    -- motion flags. Results are written back into
    --   Loc.Gravity_Anomaly / Loc.Gravity_Grid_Match / Loc.Gravity_Motion_Conflict.
    -- Never raises; safe to call from the main DR loop.
+   -- | Purpose: Update
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — bounded 64-cell ring scan. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Gravity_Nav — Register_Routine ("Update", Test_Gravity_Nav'Access);
    procedure Update
      (Loc   : in out Earu.Types.Location_Type;
-      Now_T : in     Real);
+      Now_T : in     Real)
+    with Pre  => True,  -- safe for any location/clock state
+         Post => True;  -- gravity flags updated; DR position fields untouched
+
+   -- | Purpose: Forget the motion-conflict baseline (Pos_Seeded,
+   -- |          Last_Anomaly, Last_Pos, Last_Start_*) so the next Update
+   -- |          call re-seeds cleanly at the current anchor. Package state
+   -- |          only — Loc is never touched. The normal daemon path is
+   -- |          covered automatically by the Start_* change detection in
+   -- |          Update; this procedure exists for tests and as an explicit
+   -- |          recovery hook (e.g. after NVRAM restore).
+   -- | Parameters: None.
+   -- | Returns: None (package state reset).
+   -- | CSI: DO-178C section 6.4.4
+   -- [Documentation: DO-178C section 6.4.4 procedure documentation]
+   -- WCET: O(1) — six scalar assignments, no I/O. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C section 6.4.4 WCET analysis]
+   -- [Citation: PHYSICS_AND_ASSUMPTIONS.md section 11.8]
+   -- @test: Test_Gravity_Nav — Register_Routine ("Reset_Baseline", Test_Gravity_Nav'Access);
+   procedure Reset_Baseline;
 
 private
 
@@ -106,5 +152,21 @@ private
     Last_Anomaly : Real     := 0.0;
     Last_Pos     : Earu.Types.Vector3 := (others => 0.0);
     Pos_Seeded   : Boolean  := False;  -- False until first Update seeds Last_Pos
+
+   -- Last-accepted-anchor state for re-anchor (teleport) detection.
+   -- AXIOM: the daemon writes Loc.Start_Lat/Lon/Alt ONLY when a GPS fix is
+   --   accepted (Monitor_Task gate in earu_daemon.adb); Dead_Reckon_Update
+   --   never mutates them. Therefore a Start_* change is equivalent to
+   --   "Process_GPS_Update ran with a new fix" — including teleports
+   --   (PHYSICS_AND_ASSUMPTIONS.md section 11.8). The daemon also zeroes
+   --   Loc.Pos on every accepted fix, so a Pos delta across an anchor
+   --   change is an EXPLAINED frame reset, not spurious DR motion: Update
+   --   skips conflict detection for that one cycle and re-baselines here.
+   -- RACE: only Sensors_Task calls Update, so these package variables are
+   --   single-writer — no cross-task Reset_Baseline call is needed or
+   --   allowed (the daemon must never mutate Gravity_Nav state directly).
+    Last_Start_Lat : Real := 0.0;
+    Last_Start_Lon : Real := 0.0;
+    Last_Start_Alt : Real := 0.0;
 
 end Earu.Math.Gravity_Nav;

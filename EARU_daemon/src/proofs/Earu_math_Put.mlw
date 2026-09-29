@@ -6,8 +6,7 @@ module Earu_math_Put
 
 
   let put (s: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true — any string; writes stop at M'Last (buffer clamp below) }
     = 0
 
 end

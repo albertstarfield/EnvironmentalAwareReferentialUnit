@@ -6,8 +6,8 @@ module Earu_system_bridge_Read_Ioreg_Real
 
 
   let read_Ioreg_Real (command: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Earu.IO.Execute_And_Read_Real (command, 0.0)
 
 end

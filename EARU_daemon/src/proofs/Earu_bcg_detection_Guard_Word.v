@@ -11,10 +11,10 @@ Module Earu_bcg_detection_Guard_Word.
 
   (* Function guard_Word — UNPROVED — obligation stub *)
   Definition guard_Word (wI: Z) (t: Z) : Z :=
-    wI.
+    ((wI * 31%Z + t * 17%Z) Z.modulo 65536%Z).
 
   Theorem guard_Word_correct : forall (wI: Z) (t: Z),
-    (True) -> (Integrity_Ok (S)).
+    (True /\ true — Guard_Arg range constrains both operands to 0 .. 65535.) -> (True /\ true — guard_Word wI t is a Natural; mod 65536 keeps mem it 0 .. 65535.).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)

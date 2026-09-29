@@ -42,3 +42,47 @@ EARU_Tasks/
 thoughts/
 # pyrefly V8: mlpackage weights dir has root-only perms that crash pyrefly walker
 **/BatteryPredictor.mlpackage/
+
+# GNAT / Alire / SPARK compiler artifacts
+# These were previously untracked-but-not-ignored, which left ~1000 generated
+# files in `git status`. All of them are fully regenerable from source.
+*.ali
+*.glob
+*.aux
+*.vo
+*.vok
+*.vos
+*.nra
+.nra.cache
+*.cache
+
+# Auto-generated Coq/WhyML obligation stubs emitted by the verifier pipeline.
+# These files literally declare themselves "UNPROVED - obligation stub" and
+# contain syntactically invalid WhyML, so committing them would misrepresent
+# them as real proofs.
+#
+# The generated stubs are named after whatever Ada unit they came from
+# (Test_*, Earu_*, Sabotage_verifier_*, Print_offsets_*, Realtime_helper_*, ...),
+# so prefix matching is unmaintainable. The reliable discriminator is the
+# hand-authored naming convention instead: a real proof is named
+# "<unit>_proof.v" (earu-watchdog_a_proof.v, test_gravity_nav_proof.v, ...).
+# The PROOF_MISSING audit rule also expects real proofs by that exact name.
+EARU_daemon/src/proofs/*
+!EARU_daemon/src/proofs/*_proof.v
+
+# Verifier / link caches and local runtime state
+.verifier_cache/
+.link_verification_cache.json
+.bt_hash
+.tmp/
+.earu_ramdisk_dev
+
+# PAR2 parity-recovery state written by the self-patching parity engine.
+# Machine-specific and regenerable: each .par2 embeds an absolute source_path
+# and a source_hash, so it is meaningless on any other checkout.
+.parity/
+
+# Stray nested path artifact: EARU_daemon/src/src/utils/sabotage_verifier.py is
+# a byte-identical duplicate of the tracked ./src/utils/sabotage_verifier.py,
+# created by running a path command from inside EARU_daemon/src/.
+EARU_daemon/src/src/

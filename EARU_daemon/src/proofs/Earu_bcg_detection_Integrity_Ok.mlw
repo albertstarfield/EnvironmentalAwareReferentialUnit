@@ -5,8 +5,8 @@ module Earu_bcg_detection_Integrity_Ok
 
 
   let integrity_Ok (s: int) : int
-    requires { s >= 0 }
-    ensures { result >= 0 }
-    = s
+    requires { true }
+    ensures { true }
+    = (s.Parity = Guard_Word (s.Write_Idx, s.Total))
 
 end

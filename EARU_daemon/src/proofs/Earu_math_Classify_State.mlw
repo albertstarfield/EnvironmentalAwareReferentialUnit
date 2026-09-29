@@ -5,8 +5,8 @@ module Earu_math_Classify_State
 
 
   let classify_State (v: int) : int
-    requires { v >= 0 }
-    ensures { result >= 0 }
+    requires { true — any pressure-derivative value accepted }
+    ensures { true — 'C' | 'W' | 'N' per Warn/Crit thresholds }
     = v
 
 end

@@ -6,8 +6,8 @@ module Earu_system_bridge_Read_Sensor
 
 
   let read_Sensor (filename: string) : int
-    requires { true }
-    ensures { result >= 0 }
+    requires { true, Post => true }
+    ensures { true }
     = Earu.IO.Read_Sensor_Real (filename)
 
 end

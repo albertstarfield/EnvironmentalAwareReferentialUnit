@@ -14,7 +14,7 @@ Module Earu_sig_loc_store_Sig_Loc_Json_Path.
     Earu.IO.Project_Root & "/save_state/significant_locations.json".
 
   Theorem sig_Loc_Json_Path_correct : forall (n: Z),
-    (True) -> (sig_Loc_Json_Path n >= 0).
+    (true — Project_Root constant, join cannot fail.) -> (true — non-empty path mem ending significant_locations.json.).
   Proof.
     intros.
     admit. (* obligation not discharged by SMT solver *)
