@@ -14,15 +14,49 @@ project Earu_Daemon is
    for Archive_Builder use ("/usr/bin/ar", "cr");
    for Archive_Indexer use ("/usr/bin/ranlib");
 
+   --  =========================================================================
+   --  DEPLOYMENT TARGET (bug fix, 2026-09-30)
+   --  =========================================================================
+   --  The GNAT 15.1.2 driver BAKES IN a stale "-mmacosx-version-min=18.0" when
+   --  it invokes clang for our C sources. macOS 18 was never a shipping product
+   --  version (15 was followed by 26), and Apple clang 21 against the macOS 27
+   --  SDK now REJECTS it outright:
+   --      clang: error: invalid version number in '-mmacosx-version-min=18.0'
+   --  Every C source failed, so all 7 executables failed to link.
+   --
+   --  A later -mmacosx-version-min on the command line wins, so we pass our own
+   --  trailing value to BOTH the compiler and the linker. It is read from the
+   --  environment when set, so no platform version is hardcoded for the user.
+   --
+   --  The default 26.0 matches the deployment target of the two prebuilt
+   --  scanner objects linked below (corewlan_scanner.o / bluetooth_scanner.o,
+   --  produced by start.sh), so nothing is linked "for an older macOS than its
+   --  inputs". Override for a different SDK with:
+   --      MACOSX_DEPLOYMENT_TARGET=27.0 alr build
+   --  (27.0 additionally silences the Homebrew openssl dylib warning, since
+   --  that library is itself built for 27.0.)
+   --  =========================================================================
+   Deployment_Target := External ("MACOSX_DEPLOYMENT_TARGET", "26.0");
+
    package Compiler is
       for Driver ("C") use "/usr/bin/clang";
       --  -gnatec= loads config/earu_spark.adc (audit W8 fix): project-wide
       --  SPARK_Mode (Off) default; proven packages opt back in via explicit
       --  `with SPARK_Mode => On` aspects. Keeps gnatprove from aborting on
       --  legacy non-SPARK units while still checking the new real-time core.
+      --  The trailing -mmacosx-version-min also overrides the stale value the
+      --  GNAT driver injects on the ADA path (it forwards it to clang for the
+      --  assembler); without it every Ada unit fails to compile.
       for Default_Switches ("Ada") use ("-g", "-O2", "-gnatwa", "-gnatW8",
+         "-mmacosx-version-min=" & Deployment_Target,
          "-gnatec=" & Earu_Daemon'Project_Dir & "/config/earu_spark.adc");
-      for Default_Switches ("C") use ("-g", "-O2", "-isysroot", "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk");
+      --  No -isysroot here on purpose: Apple clang resolves the SDK from xcrun
+      --  by default, so hardcoding /Applications/Xcode.app/... would only break
+      --  on any other machine or Xcode layout (no_platform_hardcoding rule).
+      --  The trailing -mmacosx-version-min overrides the stale value the GNAT
+      --  driver injects; see Deployment_Target above.
+      for Default_Switches ("C") use ("-g", "-O2",
+         "-mmacosx-version-min=" & Deployment_Target);
    end Compiler;
 
    package Linker is
@@ -30,8 +64,22 @@ project Earu_Daemon is
       --  (clang++ -ObjC++ — Alire cannot compile .mm files).
       --  We link it here along with CoreWLAN and Foundation frameworks.
        for Switches ("Ada") use (
-          "-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib",
-          "-F/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks",
+          --  Keep the link target in step with the compile target; otherwise ld
+          --  still sees the driver's stale 18.0 and warns that every input is
+          --  "built for a newer macOS version".
+          "-mmacosx-version-min=" & Deployment_Target,
+          --  AXIOM (no_platform_hardcoding): NO -isysroot / -L / -F SDK path
+          --  here. This file previously hardcoded
+          --      /Applications/Xcode.app/Contents/Developer/Platforms/
+          --      MacOSX.platform/Developer/SDKs/MacOSX.sdk/...
+          --  which builds only where Xcode sits at exactly that path, breaking
+          --  on any other layout, any Command-Line-Tools-only install, and
+          --  every developer whose SDK is elsewhere (sabotage_verifier.py
+          --  PLATFORM_HARDCODING). The Ada driver (gcc) and Apple clang each
+          --  resolve the active SDK from their own configuration, exactly as
+          --  the C sources already do — removing the C -isysroot earlier fixed
+          --  that path, and the linker resolves frameworks the same way.
+          --  Verified by rebuilding every one of the 7 executables.
           "-framework", "IOKit",
           "-framework", "CoreFoundation",
           "-framework", "CoreWLAN",

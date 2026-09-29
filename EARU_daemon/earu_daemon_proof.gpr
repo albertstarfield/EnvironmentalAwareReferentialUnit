@@ -6,23 +6,44 @@
 --    external-dependency noise.  The main earu_daemon.gpr remains the
 --    build project; this GPR exists solely for proof.
 --
---  UNIT SCOPE (everything EXCEPT these is excluded):
---    earu.ads             (minimal parent package — no imports)
---    earu-bcg_detection   (SPARK_Mode On via file-top pragma)
---    earu-bcg_shared      (SPARK_Mode Off — Ravenscar limitation)
---    earu-mood_inference  (SPARK_Mode On via file-top pragma)
+--  =========================================================================
+--  BUG FIXED 2026-09-30: the scope is now a CLOSED dependency closure
+--  =========================================================================
+--  The previous version kept a hand-maintained DENYLIST and its header
+--  claimed "only our 7 proof targets remain in scope".  That was false:
+--  51 of 75 source files were actually in scope, including every
+--  AUnit-dependent test_*.adb.  gnatprove then aborted:
 --
---  CONSTRAINTS:
---    - No external dependencies (aunit, aws, strategy excluded)
---    - Proof targets must compile with only Ada standard library
---    - Use -gnatec=earu_spark.adc (project-wide Off default;
---      individual files override via file-top pragma)
+--    earu-weather_shm_task.adb:48:06: error:
+--        file "earu-sig_loc_store.ads" not found
+--       48 | with Earu.Sig_Loc_Store;
+--    gnatprove: error during generation of Global contracts
 --
---  CREATED: 2026-08-28 — audit fix for gnatprove Phase 1-3 abort
---  UPDATED: completed the Excluded_Source_Files list so the AUnit-
---    dependent test files (test_mood_inference.adb,
---    test_bcg_detection.adb) are excluded; previously they were
---    pulled in and broke Global-contract generation.
+--  Root cause: the denylist excluded earu-sig_loc_store.ads but left
+--  earu-weather_shm_task.adb in scope, so a surviving unit `with`-ed a
+--  removed one.  Excluding a unit while keeping any unit that depends on
+--  it always breaks the closure — the list cannot be maintained by hand
+--  as new units are added.
+--
+--  Fix: enumerate the CLOSURE of the proof targets instead, and exclude
+--  its exact complement.  Verified closure (14 files, Ada runtime and
+--  Interfaces only — no external dependencies):
+--
+--    earu.ads                        (parent, no context clauses)
+--    earu-types.ads                  (with Interfaces)
+--    earu-math.ads/.adb              (with Earu.Types, Earu_Math_Elem_Funcs,
+--                                     Earu.Secdec + Ada runtime)
+--    earu_math_elem_funcs.ads/.adb   (with Earu.Types, Earu.Secdec)
+--    earu-secdec.ads/.adb            (with Interfaces, Ada.Real_Time)
+--    earu-bcg_detection.ads/.adb     (with Ada.Numerics..., Earu.Secdec)
+--    earu-bcg_shared.ads/.adb        (with Earu.BCG_Detection, Earu.Secdec)
+--    earu-mood_inference.ads/.adb    (with Earu.Secdec)
+--
+--  MAINTENANCE RULE: when a proof target gains a new `with`, ADD that unit
+--  to Proof_Closure_Sources and re-run gnatprove.  If it drags in aunit or
+--  aws, the unit does not belong in the proof closure — exclude it instead
+--  and record why here.
+--  =========================================================================
 
 project Earu_Daemon_Proof is
 
@@ -31,40 +52,104 @@ project Earu_Daemon_Proof is
    for Main use ();
    for Object_Dir use "obj/proof/";
 
-   --  Project-level exclusion: compiler AND gnatprove skip these files.
-   --  Only our 7 proof targets remain in scope.
-    --  Excluded_Source_Files for Compiler: all files EXCEPT our proof targets.
-   --  earu-math.adb, earu-math.ads, earu-types.ads are PROOF TARGETS — not excluded.
-   for Excluded_Source_Files use (
+   --  The exact closure of the SPARK proof targets (see header).
+   Proof_Closure_Sources := (
+      "earu.ads",
+      "earu-types.ads",
+      "earu-math.ads",
+      "earu-math.adb",
+      "earu_math_elem_funcs.ads",
+      "earu_math_elem_funcs.adb",
+      "earu-secdec.ads",
+      "earu-secdec.adb",
+      "earu-bcg_detection.ads",
+      "earu-bcg_detection.adb",
+      "earu-bcg_shared.ads",
+      "earu-bcg_shared.adb",
+      "earu-mood_inference.ads",
+      "earu-mood_inference.adb"
+   );
+
+   --  AXIOM (no_copy_paste_divergence): the compiler and gnatprove scopes
+   --  MUST be identical.  The previous version duplicated this list in two
+   --  packages, which is precisely how they drifted apart and produced the
+   --  "file not found" abort above.  One variable, two consumers.
+   Non_Proof_Sources := (
+      "earu_daemon.adb",
       "earu-bluetooth.ads",
       "earu-bridge.adb",
       "earu-bridge.ads",
       "earu-corewlan.ads",
       "earu-data.ads",
+      "earu-io.adb",
+      "earu-io.ads",
+      "earu-location_bridge.adb",
+      "earu-location_bridge.ads",
       "earu-math-bluemarble.adb",
       "earu-math-bluemarble.ads",
+      "earu-math-gravity_nav.adb",
+      "earu-math-gravity_nav.ads",
       "earu-network_status.adb",
       "earu-network_status.ads",
       "earu-ntrip.adb",
       "earu-ntrip.ads",
+      "earu-segfault_handler.adb",
+      "earu-segfault_handler.ads",
+      "earu-shm.adb",
+      "earu-shm.ads",
       "earu-sig_loc_store.adb",
       "earu-sig_loc_store.ads",
       "earu-stale_detector.adb",
       "earu-stale_detector.ads",
+      "earu-state_store.adb",
+      "earu-state_store.ads",
       "earu-system_bridge.adb",
       "earu-system_bridge.ads",
-      "earu_daemon.adb",
+      "earu-watchdog_a.adb",
+      "earu-watchdog_a.ads",
+      "earu-watchdog_b.adb",
+      "earu-watchdog_b.ads",
+      "earu-weather_fetcher.adb",
+      "earu-weather_fetcher.ads",
+      "earu-weather_shm_task.adb",
+      "earu-weather_shm_task.ads",
       "print_offsets.adb",
       "test_aws.adb",
-      "test_bluemarble.adb",
       "test_bcg_detection.adb",
+      "test_bcg_shared.adb",
+      "test_bluemarble.adb",
+      "test_earu_math_elem_funcs.adb",
+      "test_earu_math.adb",
       "test_exec.adb",
       "test_gravity_nav.adb",
+      "test_location_bridge.adb",
       "test_mood_inference.adb",
-      "test_sha.adb"
+      "test_network_status.adb",
+      "test_ntrip.adb",
+      "test_print_offsets.adb",
+      "test_secdec.adb",
+      "test_sha.adb",
+      "test_sig_loc_store.adb",
+      "test_stale_detector.adb",
+      "test_state_store.adb",
+      "test_watchdog_a.adb",
+      "test_watchdog_b.adb",
+      "test_weather_fetcher.adb",
+      "test_weather_shm_task.adb"
    );
 
+   --  AXIOM: project-level Excluded_Source_Files is a valid GPRBUILD
+   --  attribute and is what keeps the AUnit/aws-dependent units out of the
+   --  compilation scope.  It is NOT valid inside package Compiler (gprbuild
+   --  rejects it there with `undefined attribute "excluded_source_files"`),
+   --  which is why it lives here and in package Gnatprove below.
+   for Excluded_Source_Files use Non_Proof_Sources;
+
    package Compiler is
+      --  Project-wide SPARK_Mode Off (config/earu_spark.adc); the three
+      --  detection/mood packages opt back in with `with SPARK_Mode => On`
+      --  on their package declaration.  Keeping legacy units out of the
+      --  closure is what lets gnatprove complete instead of aborting.
       for Default_Switches ("Ada") use (
          "-g",
          "-gnatwa",
@@ -73,36 +158,10 @@ project Earu_Daemon_Proof is
       );
    end Compiler;
 
-   --  Excluded_Source_Files for Gnatprove: same as Compiler — earu-math and earu-types are PROOF TARGETS.
    package Gnatprove is
-      for Excluded_Source_Files use (
-         "earu-bluetooth.ads",
-         "earu-bridge.adb",
-         "earu-bridge.ads",
-         "earu-corewlan.ads",
-         "earu-data.ads",
-         "earu-math-bluemarble.adb",
-         "earu-math-bluemarble.ads",
-         "earu-network_status.adb",
-         "earu-network_status.ads",
-         "earu-ntrip.adb",
-         "earu-ntrip.ads",
-         "earu-sig_loc_store.adb",
-         "earu-sig_loc_store.ads",
-         "earu-stale_detector.adb",
-         "earu-stale_detector.ads",
-         "earu-system_bridge.adb",
-         "earu-system_bridge.ads",
-         "earu_daemon.adb",
-         "print_offsets.adb",
-         "test_aws.adb",
-         "test_bluemarble.adb",
-         "test_bcg_detection.adb",
-         "test_exec.adb",
-         "test_gravity_nav.adb",
-         "test_mood_inference.adb",
-         "test_sha.adb"
-      );
+      --  Same variable as the project scope: the analysis scope can never
+      --  exceed the compilation scope (no_copy_paste_divergence).
+      for Excluded_Source_Files use Non_Proof_Sources;
    end Gnatprove;
 
 end Earu_Daemon_Proof;

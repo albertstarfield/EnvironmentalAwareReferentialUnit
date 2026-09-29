@@ -47,6 +47,38 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
 # [Based on: EARUruntime.log "link phase failed" + repro under service PATH]
 BUILD_PATH="/usr/bin:$PATH"
 
+# SDK discovery (2026-09-30, no_platform_hardcoding).
+# AXIOM: this file used to hardcode
+#   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/
+#   Developer/SDKs/MacOSX.sdk
+# which is only correct when Xcode sits at exactly that path and a full Xcode
+# (not just the Command Line Tools) is installed. It breaks on any other
+# layout, on CLT-only machines, and on any developer whose active SDK differs
+# (sabotage_verifier.py PLATFORM_HARDCODING).
+# THEORY: xcrun --show-sdk-path reports the SDK the toolchain is ACTUALLY
+#   configured to use, so it is correct by construction on every machine.
+# APPLICATION: resolved once here, forwarded to run_as_user. If it cannot be
+#   resolved we FAIL LOUDLY rather than silently building against a guessed or
+#   stale path — a wrong-but-present SDKROOT is worse than none, because it
+#   turns into confusing "undefined symbol"/"header not found" errors much
+#   later inside the build.
+# [Reference: xcrun(1) --show-sdk-path]
+if ! command -v xcrun >/dev/null 2>&1; then
+    echo "[FATAL] start.sh: xcrun not found; cannot locate the macOS SDK." >&2
+    echo "        Install the Xcode Command Line Tools: xcode-select --install" >&2
+    exit 1
+fi
+SDK_PATH="$(xcrun --show-sdk-path 2>/dev/null || true)"
+if [ -z "$SDK_PATH" ] || [ ! -d "$SDK_PATH" ]; then
+    echo "[FATAL] start.sh: 'xcrun --show-sdk-path' returned no usable SDK" >&2
+    echo "        (got: '${SDK_PATH}'). Run: xcode-select -p" >&2
+    exit 1
+fi
+# NOTE: LIBRARY_LIBRARY is a pre-existing (non-standard) name kept verbatim so
+#   this change is behaviour-preserving. The real variable would be
+#   LIBRARY_PATH; renaming it would silently alter the library search path, so
+#   it is reported rather than changed here.
+
 PROJECT_ROOT="/usr/local/EnvironmentalAwareReferentialUnit"
 DAEMON_DIR="$PROJECT_ROOT/EARU_daemon"
 
@@ -87,7 +119,7 @@ run_as_user() {
         run_path="$BUILD_PATH"
         shift
     fi
-    sudo -u "$ORIGINAL_USER" env PATH="$run_path" MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" CPATH="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include" LIBRARY_LIBRARY="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib" bash -c "cd \"$DAEMON_DIR\" && $*"
+    sudo -u "$ORIGINAL_USER" env PATH="$run_path" MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" SDKROOT="$SDK_PATH" CPATH="$SDK_PATH/usr/include" LIBRARY_LIBRARY="$SDK_PATH/usr/lib" bash -c "cd \"$DAEMON_DIR\" && $*"
 }
 
 # --- 0b. Auto-install missing dependencies (script bootloader) --------------
@@ -327,18 +359,17 @@ if [ -f "$MM_HASH_FILE" ]; then
     MM_OLD_HASH=$(cat "$MM_HASH_FILE")
 fi
 
-if [ -f "$MM_SRC" ] && ([ "$MM_CURRENT_HASH" != "$MM_OLD_HASH" ] || [ ! -f "$MM_OBJ" ] || [ "$FORCE_CLEAN" = true ]); then
+if [ -f "$MM_SRC" ] && { [ "$MM_CURRENT_HASH" != "$MM_OLD_HASH" ] || [ ! -f "$MM_OBJ" ] || [ "$FORCE_CLEAN" = true ]; }; then
     echo "[*] Compiling CoreWLAN scanner (.mm → .o)..."
     SDK_PATH=$(xcrun --show-sdk-path)
     # BUILD_PATH: see FIX #5 — force /usr/bin/ld-safe toolchain resolution.
-    run_as_user --build-path clang++ -ObjC++ -c "$MM_SRC" \
+    if run_as_user --build-path clang++ -ObjC++ -c "$MM_SRC" \
         -o "$MM_OBJ" \
         -isysroot "$SDK_PATH" \
         -framework CoreWLAN \
         -framework Foundation \
         -std=c++17 -O2 -g \
-        -I "$DAEMON_DIR/src"
-    if [ $? -eq 0 ]; then
+        -I "$DAEMON_DIR/src"; then
         echo "$MM_CURRENT_HASH" > "$MM_HASH_FILE"
         echo "[*] CoreWLAN scanner compiled successfully."
     else
@@ -382,18 +413,17 @@ if [ -f "$BT_HASH_FILE" ]; then
     BT_OLD_HASH=$(cat "$BT_HASH_FILE")
 fi
 
-if [ -f "$BT_SRC" ] && ([ "$BT_CURRENT_HASH" != "$BT_OLD_HASH" ] || [ ! -f "$BT_OBJ" ] || [ "$FORCE_CLEAN" = true ]); then
+if [ -f "$BT_SRC" ] && { [ "$BT_CURRENT_HASH" != "$BT_OLD_HASH" ] || [ ! -f "$BT_OBJ" ] || [ "$FORCE_CLEAN" = true ]; }; then
     echo "[*] Compiling Bluetooth scanner (.mm → .o)..."
     BT_SDK_PATH=$(xcrun --show-sdk-path)
     # BUILD_PATH: see FIX #5 — force /usr/bin/ld-safe toolchain resolution.
-    run_as_user --build-path clang++ -ObjC++ -c "$BT_SRC" \
+    if run_as_user --build-path clang++ -ObjC++ -c "$BT_SRC" \
         -o "$BT_OBJ" \
         -isysroot "$BT_SDK_PATH" \
         -framework CoreBluetooth \
         -framework Foundation \
         -std=c++17 -O2 -g \
-        -I "$DAEMON_DIR/src"
-    if [ $? -eq 0 ]; then
+        -I "$DAEMON_DIR/src"; then
         echo "$BT_CURRENT_HASH" > "$BT_HASH_FILE"
         echo "[*] Bluetooth scanner compiled successfully."
     else
@@ -431,9 +461,7 @@ if [ "$CURRENT_HASH" != "$OLD_HASH" ] || [ ! -f "./bin/earu_daemon" ] || [ "$FOR
     # Retry loop with exponential backoff: 5s, 25s, 125s, 625s
     while true; do
         # BUILD_PATH: see FIX #5 — anaconda ld64-530 lacks objc stub synthesis.
-        run_as_user --build-path alr --non-interactive build
-
-        if [ $? -eq 0 ]; then
+        if run_as_user --build-path alr --non-interactive build; then
             echo 0 > "$FAIL_COUNT_FILE"
             break  # Build succeeded
         fi
@@ -446,8 +474,7 @@ if [ "$CURRENT_HASH" != "$OLD_HASH" ] || [ ! -f "./bin/earu_daemon" ] || [ "$FOR
             rm -rf obj bin
             run_as_user alr --non-interactive clean 2>/dev/null
             # BUILD_PATH: see FIX #5 — anaconda ld64-530 lacks objc stub synthesis.
-            run_as_user --build-path alr --non-interactive build
-            if [ $? -ne 0 ]; then
+            if ! run_as_user --build-path alr --non-interactive build; then
                 echo "[!] Full clean rebuild also failed. Please check compilation logs."
                 exit 1
             fi
@@ -480,8 +507,7 @@ fi
 # to grant Location Services in System Settings → Privacy & Security.
 if [ -f "./bin/earu_daemon" ]; then
     echo "[*] Ad-hoc code signing binary for Location Services eligibility..."
-    codesign --force --sign - ./bin/earu_daemon 2>/dev/null
-    if [ $? -eq 0 ]; then
+    if codesign --force --sign - ./bin/earu_daemon 2>/dev/null; then
         echo "[*] Binary signed successfully. To enable WiFi SSID names:"
         echo "    System Settings → Privacy & Security → Location Services → Enable"
     else
