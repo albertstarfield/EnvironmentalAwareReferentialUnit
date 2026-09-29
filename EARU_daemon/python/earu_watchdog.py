@@ -15,7 +15,6 @@ daemon's supervisor and keeps both the Ada daemon and the Python sidecar
 alive under Murphy's Law conditions.
 """
 
-import os
 import signal
 import threading
 import time

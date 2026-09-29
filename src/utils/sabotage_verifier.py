@@ -19618,7 +19618,7 @@ def _build_python_audit_finding_patterns() -> list[Pattern]:
     - assert True (meaningless assertions)
     - subprocess.Popen without timeout
     - No atexit/signal cleanup for subprocess
-    
+
     AUDIT INCIDENTS (2026-08-09):
     - INC-GC-001: gc.disable() found in sidecar_ui.py line ~22.  # nosec: docstring incident record
       Incident: Global GC disable causes unbounded memory growth in long-running UI processes.
@@ -26202,16 +26202,16 @@ def enforce_dependencies(target: str = "") -> bool:
     print(f"\n{_BOLD}{'─'*70}{_RESET}")
     print(f"{_BOLD}  Dependency Enforcement Check{_RESET}")
     print(f"{_BOLD}{'─'*70}{_RESET}")
-    
+
     all_ok = True
     missing = []
 
     # === Python Dependencies ===
     print(f"\n{_BOLD}  [1/4] Python Dependencies{_RESET}")
-    
+
     # In self-test mode, also try venv Python for dependency checks
     venv_python = _SELF_TEST_VENV_PYTHON if is_self_test and os.path.exists(_SELF_TEST_VENV_PYTHON) else None
-    
+
     python_deps = [
         ("pyrefly", [sys.executable, "-m", "pyrefly", "--version"], "pyrefly"),
         ("ruff", [sys.executable, "-m", "ruff", "--version"], "ruff"),
@@ -26219,7 +26219,7 @@ def enforce_dependencies(target: str = "") -> bool:
         # crosshair doesn't support --version; use -c "import crosshair" to check
         ("crosshair", [sys.executable, "-c", "import crosshair; print('crosshair OK')"], "crosshair-tool"),
     ]
-    
+
     for name, cmd, pip_pkg in python_deps:
         # First check system Python
         found = _check_dependency(name, cmd, pip_package=pip_pkg)
@@ -26236,7 +26236,7 @@ def enforce_dependencies(target: str = "") -> bool:
 
     # === Ada/SPARK Dependencies ===
     print(f"\n{_BOLD}  [2/4] Ada/SPARK Dependencies{_RESET}")
-    
+
     # [Citation: code-quality.md §Auto-Install - Ada tools for non-self-analyzing mode]
     # When NOT self-analyzing, auto-install gnatcov_bin + alr + gnatprove
     if not is_self_test:
@@ -26264,7 +26264,7 @@ def enforce_dependencies(target: str = "") -> bool:
         if not alr_found:
             all_ok = False
             missing.append("alr")
-        
+
         # Try to install gnatprove via alr toolchain
         gnatprove_found = False
         if alr_found:
@@ -26289,7 +26289,7 @@ def enforce_dependencies(target: str = "") -> bool:
                         gnatprove_found = True
             except (OSError, subprocess.TimeoutExpired, ValueError) as e:
                 _verb(f"gnatprove toolchain install failed: {e}")
-            
+
             # Check gnatcov via alr toolchain
             print(f"  {_YELLOW}[INSTALL] Checking gnatcov via alr toolchain...{_RESET}")
             try:
@@ -26323,7 +26323,7 @@ def enforce_dependencies(target: str = "") -> bool:
 
     # === SMT Solvers ===
     print(f"\n{_BOLD}  [3/4] SMT Solvers (for gnatprove){_RESET}")
-    
+
     # z3: brew on macOS, apt on Linux, or pip z3-solver
     # cvc5: pip package (cvc5 Python bindings)
     # alt-ergo: opam package (OCaml)
@@ -26332,7 +26332,7 @@ def enforce_dependencies(target: str = "") -> bool:
         ("cvc5", ["cvc5", "--version"], "cvc5", None, None),
         ("alt-ergo", ["alt-ergo", "--version"], None, None, None),
     ]
-    
+
     for name, cmd, pip_pkg, brew_pkg, apt_pkg in solver_deps:
         # First check system PATH
         found = _check_dependency(name, cmd, pip_package=pip_pkg, brew_package=brew_pkg, apt_package=apt_pkg)
@@ -26385,10 +26385,10 @@ def enforce_dependencies(target: str = "") -> bool:
 
     # === sabotage_verifier.py ===
     print(f"\n{_BOLD}  [4/5] sabotage_verifier.py{_RESET}")
-    
+
     sabotage_py_path = os.path.join("src", "utils", "sabotage_verifier.py")
     sabotage_py_source = os.path.expanduser("~/.local/share/opencode/sabotage_verifier.py")
-    
+
     if os.path.exists(sabotage_py_path):
         print(f"  {_GREEN}[OK] sabotage_verifier.py found at {sabotage_py_path}{_RESET}")
     elif os.path.exists(sabotage_py_source):
@@ -26409,12 +26409,12 @@ def enforce_dependencies(target: str = "") -> bool:
 
     # === run.py Enforcement ===
     print(f"\n{_BOLD}  [5/5] run.py Pipeline Enforcement{_RESET}")
-    
+
     run_py_path = "run.py"
     if os.path.exists(run_py_path):
         with open(run_py_path, "r") as f:
             run_content = f.read()
-        
+
         # Check required pipeline components
         required_checks = [
             ("alr build", "Build step"),
@@ -26422,7 +26422,7 @@ def enforce_dependencies(target: str = "") -> bool:
             ("gnatcov", "Coverage step"),
             ("sabotage_verifier.py", "Sabotage audit step"),
         ]
-        
+
         for pattern, desc in required_checks:
             if pattern in run_content:
                 print(f"  {_GREEN}[OK] run.py contains {desc}: {pattern}{_RESET}")
@@ -26430,7 +26430,7 @@ def enforce_dependencies(target: str = "") -> bool:
                 print(f"  {_RED}[FAIL] run.py MISSING {desc}: {pattern}{_RESET}")
                 all_ok = False
                 missing.append(f"run.py:{pattern}")
-        
+
         # Check pipeline order (gnatcov before sabotage_verifier.py)
         gnatcov_pos = run_content.find("gnatcov")
         sabotage_pos = run_content.find("sabotage_verifier.py")
@@ -26450,7 +26450,7 @@ def enforce_dependencies(target: str = "") -> bool:
 
     # === Final Result ===
     print(f"\n{_BOLD}{'─'*70}{_RESET}")
-    
+
     if all_ok:
         print(f"  {_GREEN}{_BOLD}✅ ALL DEPENDENCIES SATISFIED — PROCEEDING WITH AUDIT{_RESET}")
         print(f"{_BOLD}{'─'*70}{_RESET}\n")

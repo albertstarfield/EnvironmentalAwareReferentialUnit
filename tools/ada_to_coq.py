@@ -18,7 +18,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import gen_coq_proofs as g  # reuse sanitize() and the proof templates
+# E402 is intentional and load-bearing: `gen_coq_proofs` lives beside this file,
+# so HERE MUST be on sys.path before the import runs. Moving this import to the
+# top of the file would raise ModuleNotFoundError.
+import gen_coq_proofs as g  # noqa: E402  # reuse sanitize() and the templates
 
 REPO_ROOT = g.REPO_ROOT
 PROOF_DIR = g.PROOF_DIR

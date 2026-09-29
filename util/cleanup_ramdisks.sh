@@ -15,8 +15,7 @@ fi
 for DISK in $DISKS; do
     echo "[*] Detaching $DISK..."
     # Force detach as some might be busy or stale
-    hdiutil detach -force "$DISK" 2>/dev/null
-    if [ $? -eq 0 ]; then
+    if hdiutil detach -force "$DISK" 2>/dev/null; then
         echo "  [ok] $DISK detached."
     else
         # Try finding mount point to unmount first
