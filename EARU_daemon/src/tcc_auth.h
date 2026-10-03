@@ -14,15 +14,17 @@
 /*  the only vantage point where the answer is meaningful.                    */
 /*                                                                            */
 /*  SCOPE                                                                      */
-/*  Bluetooth only. That is deliberate: CoreBluetooth is linked into this    */
-/*  process (see src/bluetooth_scanner.mm) and the daemon calls it itself,   */
-/*  so the daemon IS the TCC principal for that service.                      */
+/*  Bluetooth and Location-as-seen-by-this-process. Both are in-process calls  */
+/*  (src/bluetooth_scanner.mm -> CoreBluetooth; src/corewlan_scanner.mm ->     */
+/*  CoreWLAN), so the daemon is the TCC principal for both and only it can      */
+/*  answer for them.                                                          */
 /*                                                                            */
-/*  Location is NOT reported here, on purpose. Location is fetched by         */
-/*  spawning /opt/homebrew/bin/CoreLocationCLI through `launchctl asuser`, so */
-/*  CoreLocationCLI — not this process — is the TCC principal for it. Reading */
-/*  CLLocationManager.authorizationStatus here would report the status of the  */
-/*  wrong process, which is the exact error this header exists to avoid.     */
+/*  Location is reported here for a reason that is easy to get backwards: the   */
+/*  COORDINATE fetch is a different principal (CoreLocationCLI, spawned via    */
+/*  `launchctl asuser`, which is what util/earu_tcc.py probes). But on macOS   */
+/*  the SSID part of an in-process CoreWLAN scan is gated behind Location      */
+/*  Services, so THIS process's location authorization is exactly what decides  */
+/*  whether WiFi network names resolve or read "<Hidden SSID>".               */
 /*                                                                            */
 /*  Full Disk Access needs no bundle (it is keyed to a client PATH) and is    */
 /*  likewise not reported here.                                                */
@@ -37,8 +39,7 @@
 extern "C" {
 #endif
 
-/* ------------------------------------------------------------------------- */
-/* CBManagerAuthorization values (CoreBluetooth, macOS 11+).                   */
+/*  CBManagerAuthorization values (CoreBluetooth, macOS 11+).                   */
 /* These are the framework's own enum values, mirrored here so C and Ada can  */
 /* both use them without importing the framework headers.                     */
 /* ------------------------------------------------------------------------- */
@@ -60,6 +61,36 @@ int32_t tcc_bt_authorization(void);
 /*  caller tell "no grant" apart from "cannot tell", which the binary          */
 /*  database proxy cannot distinguish.                                        */
 int32_t tcc_probe_available(void);
+
+/* ------------------------------------------------------------------------- */
+/* CLAuthorizationStatus values (CoreLocation).                                */
+/* ------------------------------------------------------------------------- */
+#define EARU_LOC_AUTH_NOT_DETERMINED       0
+#define EARU_LOC_AUTH_RESTRICTED           1
+#define EARU_LOC_AUTH_DENIED               2
+#define EARU_LOC_AUTH_AUTHORIZED_ALWAYS    3
+#define EARU_LOC_AUTH_AUTHORIZED_WHEN_IN_USE 4
+
+/*  Location authorization AS SEEN BY THIS PROCESS.
+ *
+ *  This is NOT the location principal used for coordinates: those come from
+ *  CoreLocationCLI spawned via `launchctl asuser`, and that process is the
+ *  principal for the coordinate fetch. See tcc_auth.h's header comment.
+ *
+ *  It IS the principal that matters for WiFi: this process calls CoreWLAN
+ *  in-process (src/corewlan_scanner.mm), and on macOS the SSID portion of a
+ *  CoreWLAN scan is gated behind Location Services. So this value is what
+ *  decides whether scanned networks show their real names or "<Hidden SSID>".
+ *
+ *  Returns EARU_LOC_AUTH_NOT_DETERMINED when the status cannot be determined,
+ *  reported honestly rather than mapped to denied.                            */
+int32_t tcc_location_authorization(void);
+
+/*  1 when location authorization is either Always or WhenInUse.             */
+int32_t tcc_location_granted(void);
+
+/*  1 when the location query is available at all, else 0.                    */
+int32_t tcc_location_probe_available(void);
 
 #ifdef __cplusplus
 }

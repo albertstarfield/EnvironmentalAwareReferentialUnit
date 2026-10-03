@@ -277,29 +277,56 @@ is
       use Earu.Tcc_Auth;
       Avail : constant Interfaces.Integer_32 := Probe_Available;
       Auth  : constant Interfaces.Integer_32 := Bluetooth_Authorization;
+      LAvail : constant Interfaces.Integer_32 := Location_Probe_Available;
+      LAuth  : constant Interfaces.Integer_32 := Location_Authorization;
    begin
       --  FUNCTION_INTERNAL_PARITY (DO-178C §6.4.4): required in every
       --  non-test body, same as the rest of this unit.
       Earu.Secdec.Atomic_Function_Wrapper;
       Ada.Text_IO.Put_Line ("[*] Privacy (TCC) authorization, queried in-process:");
+
+      --  Bluetooth: the daemon scans with CoreBluetooth in-process.
       if Avail /= 0 then
          Ada.Text_IO.Put_Line
-           ("    Bluetooth (CoreBluetooth) : " & Auth_Label (Auth));
+           ("    Bluetooth (CoreBluetooth)   : " & Bt_Label (Auth));
+         if Auth /= Bt_Allowed then
+            Ada.Text_IO.Put_Line
+              ("[!] Bluetooth is NOT authorized. BLE data stays empty and no error"
+               & " is raised at runtime.");
+            Ada.Text_IO.Put_Line
+              ("    Grant: System Settings > Privacy & Security > Bluetooth,"
+               & " adding EARU.app. A bare binary cannot be granted at all;"
+               & " see util/build_app_bundle.sh.");
+         end if;
       else
          --  Distinguish "no grant" from "cannot tell"; the binary database
          --  proxy cannot make this separation.
          Ada.Text_IO.Put_Line
-           ("    Bluetooth (CoreBluetooth) : unavailable"
+           ("    Bluetooth (CoreBluetooth)   : unavailable"
             & " (macOS < 11 has no CBManager.authorization)");
       end if;
-      if Avail /= 0 and then Auth /= Bt_Allowed then
+
+      --  Location, as this process sees it. This is NOT the coordinate
+      --  principal (CoreLocationCLI is, via `launchctl asuser`), but it IS
+      --  what gates CoreWLAN SSID names, which are scanned in-process.
+      if LAvail /= 0 then
          Ada.Text_IO.Put_Line
-           ("[!] Bluetooth is NOT authorized. BLE data will stay empty and no"
-            & " error is raised at runtime.");
+           ("    Location (CoreWLAN SSID)     : " & Loc_Label (LAuth));
+         if LAuth /= Loc_Authorized_Always
+           and then LAuth /= Loc_Authorized_When_In_Use
+         then
+            Ada.Text_IO.Put_Line
+              ("[!] Location is NOT authorized. WiFi network names will read"
+               & " <Hidden SSID>.");
+            Ada.Text_IO.Put_Line
+              ("    Grant: System Settings > Privacy & Security > Location"
+               & " Services. Coordinates themselves come from CoreLocationCLI,"
+               & " a separate principal probed by util/earu_tcc.py.");
+         end if;
+      else
          Ada.Text_IO.Put_Line
-           ("    Grant it under System Settings > Privacy & Security >"
-            & " Bluetooth, adding EARU.app. A bare binary cannot be"
-            & " granted at all; see util/build_app_bundle.sh.");
+           ("    Location (CoreWLAN SSID)     : unavailable"
+            & " (CLLocationManager.authorizationStatus not reachable)");
       end if;
    exception
       when others =>

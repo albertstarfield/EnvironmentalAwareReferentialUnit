@@ -20,8 +20,16 @@ package body Earu.Tcc_Auth is
       return Bluetooth_Authorization = Bt_Allowed;
    end Bluetooth_Granted;
 
-   -- | Purpose: Human-readable form of an authorization value.
-   function Auth_Label (Value : Interfaces.Integer_32) return String is
+   -- | Purpose: Location authorization granted (Always or WhenInUse)?
+   function Location_Granted return Boolean is
+   begin
+      Earu.Secdec.Atomic_Function_Wrapper;
+      return Location_Authorization = Loc_Authorized_Always
+        or else Location_Authorization = Loc_Authorized_When_In_Use;
+   end Location_Granted;
+
+   -- | Purpose: Human-readable form of a BLUETOOTH authorization value.
+   function Bt_Label (Value : Interfaces.Integer_32) return String is
    begin
       Earu.Secdec.Atomic_Function_Wrapper;
       case Value is
@@ -36,6 +44,26 @@ package body Earu.Tcc_Auth is
          when others =>
             return "invalid";
       end case;
-   end Auth_Label;
+   end Bt_Label;
+
+   -- | Purpose: Human-readable form of a LOCATION authorization value.
+   function Loc_Label (Value : Interfaces.Integer_32) return String is
+   begin
+      Earu.Secdec.Atomic_Function_Wrapper;
+      case Value is
+         when Loc_Not_Determined =>
+            return "not-determined";
+         when Loc_Restricted =>
+            return "restricted";
+         when Loc_Denied =>
+            return "denied";
+         when Loc_Authorized_Always =>
+            return "authorized-always";
+         when Loc_Authorized_When_In_Use =>
+            return "authorized-when-in-use";
+         when others =>
+            return "invalid";
+      end case;
+   end Loc_Label;
 
 end Earu.Tcc_Auth;

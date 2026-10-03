@@ -64,15 +64,30 @@ procedure Test_Tcc_Auth is
    -- [Documentation: DO-178C §6.4.4 function documentation]
    -- WCET: O(1) — one Put_Line per call. Estimated Processing Time: O(1), Space Complexity: O(1)
    -- [Timing: DO-178C §6.4.4 WCET analysis]
-   -- @test: Test_Tcc_Auth — Register_Routine ("Check_Label", Test_Tcc_Auth'Access);
-   procedure Check_Label (Value : Interfaces.Integer_32; Expected : String) is
+   -- @test: Test_Tcc_Auth — Register_Routine ("Check_Bt_Label", Test_Tcc_Auth'Access);
+   procedure Check_Bt_Label (Value : Interfaces.Integer_32; Expected : String) is
    begin
-      Run_Test ("label(" & Integer_32'Image (Value) & ") = " & Expected,
-                Auth_Label (Value) = Expected);
-   end Check_Label;
+      Run_Test ("bt_label(" & Integer_32'Image (Value) & ") = " & Expected,
+                Bt_Label (Value) = Expected);
+   end Check_Bt_Label;
 
-   Avail : Interfaces.Integer_32;
-   Raw   : Interfaces.Integer_32;
+   -- | Purpose: Run Test
+   -- | Parameters: See declaration
+   -- | CSI: DO-178C §6.4.4
+   -- [Documentation: DO-178C §6.4.4 function documentation]
+   -- WCET: O(1) — one Put_Line per call. Estimated Processing Time: O(1), Space Complexity: O(1)
+   -- [Timing: DO-178C §6.4.4 WCET analysis]
+   -- @test: Test_Tcc_Auth — Register_Routine ("Check_Loc_Label", Test_Tcc_Auth'Access);
+   procedure Check_Loc_Label (Value : Interfaces.Integer_32; Expected : String) is
+   begin
+      Run_Test ("loc_label(" & Integer_32'Image (Value) & ") = " & Expected,
+                Loc_Label (Value) = Expected);
+   end Check_Loc_Label;
+
+   Avail    : Interfaces.Integer_32;
+   Raw      : Interfaces.Integer_32;
+   LAvail   : Interfaces.Integer_32;
+   LRaw     : Interfaces.Integer_32;
 
 begin
    Put_Line ("=== TCC authorization probe tests ===");
@@ -83,26 +98,60 @@ begin
    Put_Line ("[INFO] probe_available = " & Interfaces.Integer_32'Image (Avail));
 
    -- Label mapping must be total over the framework enum, and must not raise.
-   Check_Label (Bt_Not_Determined, "not-determined");
-   Check_Label (Bt_Restricted,     "restricted");
-   Check_Label (Bt_Denied,         "denied");
-   Check_Label (Bt_Allowed,        "allowed");
+   Check_Bt_Label (Bt_Not_Determined, "not-determined");
+   Check_Bt_Label (Bt_Restricted,     "restricted");
+   Check_Bt_Label (Bt_Denied,         "denied");
+   Check_Bt_Label (Bt_Allowed,        "allowed");
 
    -- The wrapper must agree with the framework's own raw value, whatever it is.
    Raw := Bluetooth_Authorization;
-   Run_Test ("raw authorization within enum range",
+   Run_Test ("bt raw authorization within enum range",
              Raw >= Bt_Not_Determined and then Raw <= Bt_Allowed);
    Run_Test ("Bluetooth_Granted agrees with raw value",
              Bluetooth_Granted = (Raw = Bt_Allowed));
    Put_Line ("[INFO] bluetooth_authorization = " & Interfaces.Integer_32'Image (Raw)
-             & " (" & Auth_Label (Raw) & ")");
+             & " (" & Bt_Label (Raw) & ")");
 
    -- When the API is unavailable the raw value must degrade honestly rather
    -- than claim a denial it cannot substantiate.
    if Avail = 0 then
-      Run_Test ("unavailable probe reports not-determined, not denied",
+      Run_Test ("unavailable bt probe reports not-determined, not denied",
                 Raw = Bt_Not_Determined);
    end if;
+
+   -- ── Location (governs CoreWLAN SSID names) ────────────────────────────
+   LAvail := Location_Probe_Available;
+   Run_Test ("Location_Probe_Available returns 0 or 1",
+             LAvail = 0 or else LAvail = 1);
+   Put_Line ("[INFO] location_probe_available = " & Interfaces.Integer_32'Image (LAvail));
+
+   Check_Loc_Label (Loc_Not_Determined,        "not-determined");
+   Check_Loc_Label (Loc_Restricted,            "restricted");
+   Check_Loc_Label (Loc_Denied,                "denied");
+   Check_Loc_Label (Loc_Authorized_Always,     "authorized-always");
+   Check_Loc_Label (Loc_Authorized_When_In_Use, "authorized-when-in-use");
+
+   LRaw := Location_Authorization;
+   Run_Test ("location raw authorization within enum range",
+             LRaw >= Loc_Not_Determined
+               and then LRaw <= Loc_Authorized_When_In_Use);
+   Run_Test ("Location_Granted agrees with raw value",
+             Location_Granted = (LRaw = Loc_Authorized_Always
+                                 or else LRaw = Loc_Authorized_When_In_Use));
+   Put_Line ("[INFO] location_authorization = " & Interfaces.Integer_32'Image (LRaw)
+             & " (" & Loc_Label (LRaw) & ")");
+
+   if LAvail = 0 then
+      Run_Test ("unavailable location probe reports not-determined, not denied",
+                LRaw = Loc_Not_Determined);
+   end if;
+
+   --  The two enums overlap numerically (0/1/2 mean the same thing to both),
+   --  which is why the label functions are separate. Assert the overlap is
+   --  labelled per-service rather than collapsed, so the separation cannot
+   --  silently regress into one combined function.
+   Run_Test ("overlapping value 3 labelled per-service, not collapsed",
+             Bt_Label (3) /= Loc_Label (3));
 
    Put_Line ("");
    Put_Line ("=== Results: " & Natural'Image (Passed) & " passed, "

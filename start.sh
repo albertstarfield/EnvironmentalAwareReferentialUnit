@@ -478,6 +478,7 @@ if [ -f "$TCC_SRC" ] && { [ "$TCC_CURRENT_HASH" != "$TCC_OLD_HASH" ] || [ ! -f "
         -o "$TCC_OBJ" \
         -isysroot "$TCC_SDK_PATH" \
         -framework CoreBluetooth \
+        -framework CoreLocation \
         -framework Foundation \
         -std=c++17 -O2 -g \
         -I "$DAEMON_DIR/src"; then
@@ -576,12 +577,17 @@ fi
 # util/build_app_bundle.sh supplies the missing half - Contents/Info.plist
 # carrying the usage descriptions, then the signature that binds it.
 #
-# This fixes the IN-PROCESS grantable services, chiefly Bluetooth
-# (src/bluetooth_scanner.h -> CBCentralManager), which the daemon calls itself.
-# It does NOT fix Location: CoreLocation is absent from the link line and there
-# are no CLLocationManager references in the Ada, so location is fetched by
-# spawning CoreLocationCLI, which is its own TCC principal. CoreLocationCLI is
-# an unbundled Homebrew binary and is not grantable as shipped.
+# This fixes the IN-PROCESS grantable services: Bluetooth
+# (src/bluetooth_scanner.h -> CBCentralManager) and the location authorization
+# that gates CoreWLAN SSID names (src/corewlan_scanner.mm -> CoreWLAN), both
+# called by the daemon itself.
+#
+# It does NOT fix the COORDINATE principal: location values are fetched by
+# spawning CoreLocationCLI via `launchctl asuser`, so CoreLocationCLI is its own
+# TCC principal and is not grantable as shipped (unbundled Homebrew binary).
+# CoreLocation IS now linked for the in-process authorization STATUS that WiFi
+# SSID gating depends on, but that is a different question from who fetches the
+# coordinates.
 #
 # Full Disk Access is the exception and needs no bundle: it is keyed to a
 # client PATH (kTCCServiceSystemPolicyAllFiles).
@@ -609,8 +615,9 @@ if python3 "$PROJECT_ROOT/util/earu_tcc.py"; then
 else
     echo "[!] One or more required privacy grants are missing (see above)."
     echo "    Missing grants are SILENT at runtime: the affected task retries"
-    echo "    forever without reporting. Location is fetched by CoreLocationCLI,"
-    echo "    which needs its own grant and is not grantable as installed."
+    echo "    forever without reporting. Coordinate location comes from"
+    echo "    CoreLocationCLI, a separate principal that is not grantable as"
+    echo "    installed; util/earu_tcc.py probes it functionally."
     echo "    This is a warning, not a startup failure."
 fi
 

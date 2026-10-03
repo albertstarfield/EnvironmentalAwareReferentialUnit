@@ -84,6 +84,11 @@ project Earu_Daemon is
           "-framework", "CoreFoundation",
           "-framework", "CoreWLAN",
           "-framework", "CoreBluetooth",
+          --  CoreLocation is linked for the TCC authorization probe: the SSID
+          --  portion of an in-process CoreWLAN scan is gated behind Location
+          --  Services, so the daemon needs its own location authorization
+          --  status. It was NOT previously a dependency of this project.
+          "-framework", "CoreLocation",
           "-framework", "Foundation",
           "-lstdc++",
           "obj/release/corewlan_scanner.o",

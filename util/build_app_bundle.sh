@@ -22,22 +22,28 @@
 #
 # SCOPE LIMIT — READ THIS BEFORE ASSUMING THE CONDUIT FIXES EVERYTHING
 # ---------------------------------------------------------------------
-# This bundle fixes the *in-process* grantable services, principally
-# Bluetooth (src/bluetooth_scanner.h -> CBCentralManager), which the daemon
-# calls itself. It does NOT fix Location: CoreLocation is absent from the link
-# line and there are no CLLocationManager references in the Ada, so location is
-# fetched by spawning /opt/homebrew/bin/CoreLocationCLI via
-# `launchctl asuser`. CoreLocationCLI is therefore its own TCC principal and
-# needs its own grant; bundling the daemon does not move that row. util/earu_tcc.py
-# reports the two separately instead of conflating them.
+# This bundle fixes the *in-process* grantable services:
+#   * Bluetooth - src/bluetooth_scanner.mm -> CoreBluetooth, called here.
+#   * Location  - src/corewlan_scanner.mm -> CoreWLAN, also called here. On
+#                 macOS the SSID portion of a scan is gated behind Location
+#                 Services, so the daemon's OWN location authorization decides
+#                 whether scanned network names resolve or read
+#                 "<Hidden SSID>".
+#
+# It does NOT fix the COORDINATE principal: location values are fetched by
+# spawning /opt/homebrew/bin/CoreLocationCLI via `launchctl asuser`, so
+# CoreLocationCLI is its own TCC principal and needs its own grant. It is an
+# unbundled Homebrew binary and is not grantable as shipped.
+# util/earu_tcc.py reports that principal separately, as a setup/audit helper
+# rather than an authority; src/tcc_auth.mm is the in-process authority.
 #
 # A SECOND LIMIT, not solvable here: a bundle supplies an identity, but a
 # session-scoped grant still has to be reachable from the calling process's
 # session. The daemon currently runs from a system-domain LaunchDaemon, whose
 # session context is not the console user's Aqua session. If a grant appears in
 # the database but calls still fail, the fix is to run the bundled executable
-# as a per-user LaunchAgent, not to rebuild the bundle. The detection tool is
-# the thing that tells these two situations apart.
+# as a per-user LaunchAgent, not to rebuild the bundle. The probe is the thing
+# that tells these two situations apart.
 #
 # USAGE
 #   util/build_app_bundle.sh              build + sign (idempotent)
@@ -189,5 +195,7 @@ verify_bundle || die "post-sign verification failed — Info.plist did not bind;
 
 codesign -dv --verbose=2 "$BUNDLE_EXEC" 2>&1 | sed 's/^/    /'
 say "OK: $BUNDLE_DIR"
-say "    grantable identity now exists for bundle-keyed services (Bluetooth)."
-say "    Location is still a separate principal (CoreLocationCLI) — see util/earu_tcc.py"
+say "    grantable identity now exists for bundle-keyed services:"
+say "      Bluetooth, and the Location authorization that gates CoreWLAN SSIDs."
+say "    The COORDINATE principal is still CoreLocationCLI (unbundled, not
+    grantable as shipped) — probed by util/earu_tcc.py."
