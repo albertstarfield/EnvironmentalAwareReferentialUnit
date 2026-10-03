@@ -19,17 +19,27 @@ as time parked in a timed wait. This module is the missing detector.
 
 SCOPE AND LIMITS (read before trusting a "clean" result)
 --------------------------------------------------------
-Detection is per-principal, and EARU does not have ONE principal:
+Detection is per-principal, and EARU does not have ONE principal. Getting this
+wrong in either direction produces a wrong answer, so the split is spelled out:
 
-  * Bluetooth  — in-process (src/bluetooth_scanner.h, CBCentralManager).
-    The daemon's OWN bundle identity governs. The .app conduit fixes this one.
-  * Location   — NOT in-process. CoreLocation is absent from the link line and
-    there are zero CLLocationManager references in the Ada. Location is fetched
-    by spawning /opt/homebrew/bin/CoreLocationCLI through
-    `launchctl asuser <uid>`, so **CoreLocationCLI is the TCC principal** and
-    a bundle around earu_daemon does NOT grant it. This is reported
-    separately rather than folded into the daemon's own row, because bundling
-    the daemon does not move this row.
+  * Bluetooth — in-process (src/bluetooth_scanner.h, CBCentralManager).
+    The daemon's OWN bundle identity governs, and the .app conduit fixes it.
+    THIS TOOL IS NOT THE AUTHORITY HERE: CBManager.authorization is a
+    PROCESS-SCOPED answer, so only the daemon can answer for itself. That is
+    done in src/tcc_auth.mm and reported by Report_Privacy_Authorization in
+    earu_daemon.adb. A database row is a weaker proxy that has already been
+    observed to disagree with the framework (DB "absent", framework "allowed").
+  * Location, COORDINATE fetch — NOT in-process. Location values come from
+    spawning /opt/homebrew/bin/CoreLocationCLI via `launchctl asuser`, so
+    CoreLocationCLI is the TCC principal. This tool is the only thing that can
+    probe it, because no in-process query can speak for that other process.
+  * Location, WiFi SSID gate — a SEPARATE question from the coordinate fetch.
+    WiFi_Scan_Task scans with CoreWLAN in-process (src/corewlan_scanner.mm),
+    and on macOS the SSID portion of a scan is gated behind Location Services,
+    so the DAEMON's own location authorization is what decides whether network
+    names resolve or read "<Hidden SSID>". That one is answered in-process by
+    src/tcc_auth.mm, not here. Conflating it with the coordinate fetch is the
+    specific mistake this separation exists to prevent.
   * Full Disk Access — the exception: keyed to a client PATH
     (kTCCServiceSystemPolicyAllFiles), so a bare binary can be granted it with
     no bundle at all. Checked against the path, not a bundle id.
@@ -37,7 +47,8 @@ Detection is per-principal, and EARU does not have ONE principal:
 A row reported as granted here means the TCC database holds an allow for that
 client. It does NOT prove the runtime call succeeds: a session-scoped grant
 still has to be reachable from the calling process's session, and this tool
-cannot verify that. Treat it as necessary, not sufficient.
+cannot verify that. Treat every row as necessary, not sufficient, and treat the
+in-process rows as belonging to src/tcc_auth.mm rather than to this file.
 
 EXIT STATUS
 -----------
@@ -305,10 +316,17 @@ def build_report() -> Report:
 
     if any(r.principal.startswith("external:") for r in rep.rows):
         rep.notes.append(
-            "Location is fetched by spawning CoreLocationCLI, so CoreLocationCLI "
-            "is the TCC principal there. Wrapping earu_daemon in a bundle does "
-            "not grant it; CoreLocationCLI needs its own grant (it is an "
-            "unbundled Homebrew binary and is not grantable as shipped)."
+            "The coordinate fetch is a separate principal: CoreLocationCLI, "
+            "spawned via `launchctl asuser`, is what TCC keys on there. It is "
+            "an unbundled Homebrew binary and is not grantable as shipped, so "
+            "this row may stay unsatisfiable; the functional probe below is the "
+            "only trustworthy signal for it."
+        )
+    if rep.bundle_present:
+        rep.notes.append(
+            "For Bluetooth and for the WiFi SSID gate, this file's rows are a "
+            "proxy only. Those are answered in-process by src/tcc_auth.mm and "
+            "reported at daemon startup; see Report_Privacy_Authorization."
         )
 
     probe_location_functional(rep)
