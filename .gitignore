@@ -78,6 +78,9 @@ EARU_daemon/src/proofs/*
 # Machine-specific build state, exactly like .bt_hash and .source_hash: it
 # describes this checkout's compiled binary, and is regenerated on first run.
 .app_hash
+# start.sh step 4c: source hash for the TCC authorization probe .mm object.
+# Same category as .bt_hash/.app_hash -- machine-specific build state.
+.tcc_hash
 .tmp/
 .earu_ramdisk_dev
 
