@@ -605,6 +605,52 @@ else
     echo "    to the daemon; continuing with the bare binary."
 fi
 
+# 5b-bis. Make BOTH bundles self-installing, so nothing depends on a human
+# having run lsregister by hand after a reboot.
+#
+# Found missing while verifying the boot path: registration appeared in ZERO
+# scripts (it had only ever been run manually), and the monitor bundle was not
+# built by the pipeline at all. So after a fresh boot EARU.app existed but was
+# invisible to LaunchServices, and EARU_Monitor.app did not exist.
+#
+# lsregister is referenced by absolute path rather than via PATH: launchd runs
+# start.sh with a minimal environment, so a PATH lookup would be unreliable.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+register_bundle() {
+    # $1 = bundle path, $2 = human label
+    local b="$1" label="$2"
+    if [ ! -d "$b" ]; then
+        echo "[!] $label not present at $b; skipping LaunchServices registration."
+        return 0
+    fi
+    if [ ! -x "$LSREGISTER" ]; then
+        echo "[!] lsregister not found; $label will not be registered this boot."
+        return 0
+    fi
+    if "$LSREGISTER" -f "$b" >/dev/null 2>&1; then
+        echo "[*] $label registered with LaunchServices."
+    else
+        # Never fatal: an unregistered bundle still runs, it is just not
+        # offered in LaunchServices/Spotlight and cannot be surfaced by the
+        # Privacy panes.
+        echo "[!] WARNING: LaunchServices registration failed for $label."
+    fi
+}
+
+# The monitor bundle is built here so it also self-installs at boot. The build
+# is hash-gated inside its script, so this costs nothing when already current.
+if [ -f "$PROJECT_ROOT/util/build_monitor_bundle.sh" ]; then
+    bash "$PROJECT_ROOT/util/build_monitor_bundle.sh" >/dev/null 2>&1 \
+        && echo "[*] EARU_Monitor.app is current." \
+        || echo "[!] WARNING: EARU_Monitor.app build failed; monitor bundle may be stale."
+else
+    echo "[!] util/build_monitor_bundle.sh missing; skipping monitor bundle."
+fi
+
+register_bundle "$BUNDLE_DIR" "EARU.app (daemon)"
+register_bundle "$PROJECT_ROOT/EARU_Monitor.app" "EARU_Monitor.app (monitor)"
+
 # 5c. Report which privacy grants are actually present.
 # A missing grant used to be entirely silent: the polling task failed, slept,
 # and retried identically, which is indistinguishable from idleness in a CPU
