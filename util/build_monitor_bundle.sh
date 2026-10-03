@@ -180,27 +180,59 @@ if [ ! -f "\$ROOT/SensorTerminalMonitor.py" ]; then
     fi
 fi
 
-# Visible error reporting. osascript is the macOS equivalent of zenity (zenity
-# is a Linux/GUI toolkit and does not exist here). Used for failures only.
-fail() {
-    local msg="\$1" one_line
-    printf '[!] EARU_Monitor: %s\n' "\$msg" >&2
-    # AppleScript string literals passed via -e must be a SINGLE line. Feeding
-    # it a raw multi-line "tail" output produces a syntax error in the -e
-    # argument, the alert silently never appears, and "|| true" hides that --
-    # which is exactly the "nothing happens" failure this function exists to
-    # prevent. So: flatten newlines, truncate, escape backslashes and double
-    # quotes, and only then discard stderr.
+# Visible error reporting.
+#
+# Two mechanisms, because neither is dependable alone on this machine.
+#
+# NOTE FOR FUTURE EDITS: this text is written into the launcher by a heredoc
+# with an UNQUOTED delimiter, so a backtick anywhere in these comments is
+# command-substituted at generation time. That already happened once and
+# spliced the output of a version command into the launcher, producing a
+# syntax error at runtime. Use plain quotes, never backticks, in this block.
+#
+#   * zenity IS installed (/opt/homebrew/bin/zenity -> Cellar/zenity/4.2.2).
+#     An earlier claim that it "does not exist on macOS" was simply wrong.
+#     But it is a GTK tool and its behaviour here is inconsistent: the --error
+#     dialog never displays, --width/--height make it exit silently with no
+#     dialog, combining --text with --info is rejected outright, and the plain
+#     --info --title --text form was observed both persisting and exiting on
+#     repeated identical calls.
+#   * osascript "display alert" has been observed displaying reliably, with the
+#     full message, but exits immediately in a headless context.
+#
+# So zenity is tried first with a liveness probe rather than trusted: if it is
+# still alive after a few seconds a dialog really is up, and if it has already
+# exited then it displayed nothing and osascript takes over. Nothing here
+# reports success it has not confirmed.
+notify_failure() {
+    local msg="\$1" one_line probe
     one_line=\$(printf '%s' "\$msg" | tr '\n' ' ' | cut -c1-400)
     one_line=\$(printf '%s' "\$one_line" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g')
-    if ! /usr/bin/osascript \\
+
+    if command -v zenity >/dev/null 2>&1; then
+        # Exactly one content flag (--text with --info is rejected by zenity),
+        # and deliberately no --width/--height (they suppress the dialog).
+        zenity --info --title="EARU Monitor - could not start" \\
+               --text="\$one_line" >/dev/null 2>&1 &
+        probe=\$!
+        sleep 3
+        if kill -0 "\$probe" 2>/dev/null; then
+            return 0   # still waiting on input => the dialog is genuinely up
+        fi
+        wait "\$probe" 2>/dev/null || true
+    fi
+
+    # Fallback: osascript. Message passed as an argv element because AppleScript
+    # string literals passed via -e must be a single line.
+    /usr/bin/osascript \\
         -e 'on run argv' \\
         -e 'display alert "EARU Monitor could not start" message (item 1 of argv) as critical' \\
-        -e 'end run' "\$one_line" >/dev/null 2>&1; then
-        # osascript refused (headless session, or Automation denied). The log
-        # is then the only channel, so say so plainly instead of pretending.
-        printf '[!] EARU_Monitor: could not show an alert dialog; see %s\n' "\$LOG_FILE" >&2
-    fi
+        -e 'end run' "\$one_line" >/dev/null 2>&1 || true
+}
+
+fail() {
+    printf '[!] EARU_Monitor: %s\n' "\$1" >&2
+    notify_failure "\$1" || printf '[!] EARU_Monitor: could not show a dialog; see %s\n' "\$LOG_FILE" >&2
     exit 1
 }
 
