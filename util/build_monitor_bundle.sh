@@ -162,10 +162,11 @@ write_launcher() {
 # makes a copy in /Applications work identically to the in-tree one.
 PROJECT_ROOT="${PROJECT_ROOT}"
 PYTHON="${py}"
+LOG_FILE="\${PROJECT_ROOT}/EARU_Monitor.log"
 
 # Fall back to PATH if the pinned interpreter has gone (e.g. .venv_pfd removed).
 [ -x "\$PYTHON" ] || PYTHON="\$(command -v python3)"
-[ -n "\$PYTHON" ] || { echo "[!] EARU_Monitor: no python3 interpreter found" >&2; exit 1; }
+[ -n "\$PYTHON" ] || { fail "no python3 interpreter found"; }
 
 ROOT="\$PROJECT_ROOT"
 if [ ! -f "\$ROOT/SensorTerminalMonitor.py" ]; then
@@ -175,15 +176,77 @@ if [ ! -f "\$ROOT/SensorTerminalMonitor.py" ]; then
     if [ -n "\$CANDIDATE" ] && [ -f "\$CANDIDATE/SensorTerminalMonitor.py" ]; then
         ROOT="\$CANDIDATE"
     else
-        echo "[!] EARU_Monitor: SensorTerminalMonitor.py not found under \$PROJECT_ROOT" >&2
-        exit 1
+        fail "SensorTerminalMonitor.py not found under \$PROJECT_ROOT"
     fi
 fi
 
-# Run from the project root: the monitor resolves .venv_pfd and the telemetry
-# paths relative to its own directory.
-cd "\$ROOT" || exit 1
-exec "\$PYTHON" "\$ROOT/SensorTerminalMonitor.py" "\$@"
+# Visible error reporting. osascript is the macOS equivalent of zenity (zenity
+# is a Linux/GUI toolkit and does not exist here). Used for failures only.
+fail() {
+    local msg="\$1" one_line
+    printf '[!] EARU_Monitor: %s\n' "\$msg" >&2
+    # AppleScript string literals passed via -e must be a SINGLE line. Feeding
+    # it a raw multi-line "tail" output produces a syntax error in the -e
+    # argument, the alert silently never appears, and "|| true" hides that --
+    # which is exactly the "nothing happens" failure this function exists to
+    # prevent. So: flatten newlines, truncate, escape backslashes and double
+    # quotes, and only then discard stderr.
+    one_line=\$(printf '%s' "\$msg" | tr '\n' ' ' | cut -c1-400)
+    one_line=\$(printf '%s' "\$one_line" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g')
+    if ! /usr/bin/osascript \\
+        -e 'on run argv' \\
+        -e 'display alert "EARU Monitor could not start" message (item 1 of argv) as critical' \\
+        -e 'end run' "\$one_line" >/dev/null 2>&1; then
+        # osascript refused (headless session, or Automation denied). The log
+        # is then the only channel, so say so plainly instead of pretending.
+        printf '[!] EARU_Monitor: could not show an alert dialog; see %s\n' "\$LOG_FILE" >&2
+    fi
+    exit 1
+}
+
+# Log to a file: a Finder-launched .app has no terminal, so stdout/stderr
+# otherwise vanish and a failure is completely invisible.
+cd "\$ROOT" || fail "cannot enter \$ROOT"
+: > "\$LOG_FILE" 2>/dev/null || true
+echo "[\$(date '+%Y-%m-%d %H:%M:%S')] launching: \$PYTHON \$ROOT/SensorTerminalMonitor.py" >> "\$LOG_FILE" 2>/dev/null || true
+
+\$PYTHON "\$ROOT/SensorTerminalMonitor.py" "\$@" >> "\$LOG_FILE" 2>&1 &
+CHILD=\$!
+
+# Raise the window. Without this the app starts with its window buried behind
+# whatever was in front, and since the process is exec'd from a launcher the
+# Dock/Finder show "python" -- so there is nothing obvious to click. Verified
+# by sampling the app: Tk sits in a healthy mainloop at position {3,466}
+# size {1200,832}, it is simply never activated.
+#
+# The activation is retried inside the wait window rather than placed after it:
+# the window does not exist for the first second or two of start-up, so a single
+# attempt issued later would be the only one that could ever succeed, and any
+# early attempt would find no process yet.
+(
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 2
+        kill -0 "\$CHILD" 2>/dev/null || exit 0
+        /usr/bin/osascript -e 'tell application "System Events" to set frontmost of every process whose unix id is '"\$CHILD"' to true' \\
+            >/dev/null 2>&1 || true
+    done
+) &
+
+wait "\$CHILD"
+rc=\$?
+# A child killed by a signal reports 128+signum. That is a NORMAL termination
+# (pkill, Cmd-Q, logout), not a crash, so it must not raise a critical alert --
+# otherwise quitting the app looks like a failure. Only a genuine non-zero exit
+# status is worth reporting.
+if [ "\$rc" -ge 128 ]; then
+    printf '[*] EARU_Monitor: terminated by signal %s (normal shutdown).\n' "\$((rc - 128))" >> "\$LOG_FILE" 2>/dev/null || true
+    exit 0
+fi
+if [ "\$rc" -ne 0 ]; then
+    fail "exited with status \$rc. Last lines of \$LOG_FILE:
+\$(tail -n 12 "\$LOG_FILE" 2>/dev/null)"
+fi
+exit 0
 LAUNCH_EOF
     chmod 755 "$LAUNCHER"
     say "wrote launcher (root pinned to $PROJECT_ROOT, interpreter $py)"
