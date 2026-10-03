@@ -270,6 +270,56 @@ TILE_TIMEOUT = 10.0
 ROUTING_TIMEOUT = 8.0
 GEOCODE_TIMEOUT = 8.0
 
+# --- Bound requests.* calls made by tkintermapview ---------------------------
+#
+# WHY THIS EXISTS, and why it is not a timeout= argument on our own calls:
+# The map tile path does NOT go through TileManager._load_tile. The pre-cache
+# loop calls wself.request_image(...), which resolves to
+# tkintermapview/map_widget.py:465, and that implementation fetches with
+# requests.get(url, stream=True, headers={"User-Agent": "TkinterMapView"})
+# at lines 496 and 500 - with NO timeout. Unlike urllib, requests has no
+# implicit default: without an explicit timeout it can block indefinitely. Both
+# the base tile and the optional overlay tile are affected.
+#
+# Sampling the running monitor showed exactly that: the workers parked in
+# socket_getaddrinfo (272 + 270 samples across two threads) and
+# sock_connect/internal_connect (146 + 102). Because request_image is driven
+# from the pre-cache ring/disc passes, hung fetches accumulated without bound,
+# no tile ever completed into tile_image_cache, and the map stayed blank.
+#
+# tkintermapview is a third-party package, so it is NOT edited here - that would
+# be lost on the next reinstall and would diverge from upstream. The default is
+# injected at runtime instead, which is the supported way to bound a library
+# that omits one.
+def _bound_requests_defaults() -> None:
+    """Give every requests call a default timeout when the caller omits one.
+
+    An explicit timeout from any caller is always preserved; only the absent
+    case is filled in.
+    """
+    try:
+        import requests as _rq
+    except Exception:
+        return  # requests absent: nothing to bound, and nothing to break
+
+    if getattr(_rq.Session.request, "_earu_timeout_defaulted", False):
+        return  # already installed; do not double-wrap
+
+    _orig_request = _rq.Session.request
+
+    def _request_with_default(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Only supply a default when the caller passed neither the keyword nor a
+        # positional timeout. A caller-supplied timeout is honoured as-is.
+        if kwargs.get("timeout", None) is None and len(args) < 3:
+            kwargs["timeout"] = TILE_TIMEOUT
+        return _orig_request(self, *args, **kwargs)
+
+    _request_with_default._earu_timeout_defaulted = True  # type: ignore[attr-defined]
+    _rq.Session.request = _request_with_default  # type: ignore[method-assign]
+
+
+_bound_requests_defaults()
+
 # Throttled tile-failure reporter.
 #
 # Every tile fetch runs on its own daemon thread, so a naive print per failure
@@ -278,6 +328,40 @@ GEOCODE_TIMEOUT = 8.0
 # summarised, not silenced.
 _TILE_FAIL_COUNT = 0
 _TILE_FAIL_LOCK = threading.Lock()
+
+# Concurrency cap for asynchronous tile prefetch.
+#
+# WHY: tkintermapview's MapWidget.request_image is SYNCHRONOUS - it performs
+# requests.get() inline and contains no thread of its own (only this file's
+# TileManager.get_tile_texture spawns a worker). The enhanced pre-cache called it
+# directly, once per uncached tile, so the pre-cache thread performed up to 320
+# sequential blocking HTTP fetches while ramping radius 1..8 before it could
+# reach its own throttled status log. That is why the `cache=` line never
+# appeared at all: the loop was stuck inside the ramp doing network I/O.
+#
+# Dispatching each request to a worker keeps the pre-cache responsive so it can
+# report progress. The semaphore bounds concurrency so the fix cannot simply
+# trade a serial stall for 320 simultaneous sockets.
+_PREFETCH_SLOTS = threading.Semaphore(16)
+
+
+def _async_request(widget: Any, zoom: int, x: int, y: int, db_cursor: Any) -> None:
+    """Fetch one tile on a worker thread instead of blocking the caller.
+
+    request_image is synchronous and swallows its own download errors, so no
+    exception escapes; the semaphore is always released regardless of outcome.
+    """
+
+    def _run() -> None:
+        try:
+            widget.request_image(zoom, x, y, db_cursor=db_cursor)
+        except Exception as exc:
+            _note_tile_failure(exc)
+        finally:
+            _PREFETCH_SLOTS.release()
+
+    _PREFETCH_SLOTS.acquire()
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _note_tile_failure(exc):
@@ -1282,7 +1366,7 @@ class PrimaryFlightDisplay:
                                     ty = wself.pre_cache_position[1] + dy
                                     ky = f"{zoom}{tx}{ty}"
                                     if ky not in wself.tile_image_cache:
-                                        wself.request_image(zoom, tx, ty, db_cursor=db_cur)
+                                        _async_request(wself, zoom, tx, ty, db_cursor=db_cur)
                                         queued_current += 1
                         # Compute cone stats for display
                         deg_ap = _m.degrees(half_ap) * 2
@@ -1295,20 +1379,20 @@ class PrimaryFlightDisplay:
                             ky_p = f"{zoom}{x}{wself.pre_cache_position[1] + radius}"
                             ky_m = f"{zoom}{x}{wself.pre_cache_position[1] - radius}"
                             if ky_p not in wself.tile_image_cache:
-                                wself.request_image(zoom, x, wself.pre_cache_position[1] + radius, db_cursor=db_cur)
+                                _async_request(wself, zoom, x, wself.pre_cache_position[1] + radius, db_cursor=db_cur)
                                 queued_current += 1
                             if ky_m not in wself.tile_image_cache:
-                                wself.request_image(zoom, x, wself.pre_cache_position[1] - radius, db_cursor=db_cur)
+                                _async_request(wself, zoom, x, wself.pre_cache_position[1] - radius, db_cursor=db_cur)
                                 queued_current += 1
                         for y in range(wself.pre_cache_position[1] - radius,
                                         wself.pre_cache_position[1] + radius + 1):
                             ky_p = f"{zoom}{wself.pre_cache_position[0] + radius}{y}"
                             ky_m = f"{zoom}{wself.pre_cache_position[0] - radius}{y}"
                             if ky_p not in wself.tile_image_cache:
-                                wself.request_image(zoom, wself.pre_cache_position[0] + radius, y, db_cursor=db_cur)
+                                _async_request(wself, zoom, wself.pre_cache_position[0] + radius, y, db_cursor=db_cur)
                                 queued_current += 1
                             if ky_m not in wself.tile_image_cache:
-                                wself.request_image(zoom, wself.pre_cache_position[0] - radius, y, db_cursor=db_cur)
+                                _async_request(wself, zoom, wself.pre_cache_position[0] - radius, y, db_cursor=db_cur)
                                 queued_current += 1
                         bias_label = f'CIRCLE r={radius}'
 
@@ -1328,7 +1412,7 @@ class PrimaryFlightDisplay:
                                 tx = wself.pre_cache_position[0] + adx
                                 ty = wself.pre_cache_position[1] + ady
                                 if f"{adj_z}{tx}{ty}" not in wself.tile_image_cache:
-                                    wself.request_image(adj_z, tx, ty, db_cursor=db_cur)
+                                    _async_request(wself, adj_z, tx, ty, db_cursor=db_cur)
                                     queued_adj += 1
 
                 else:
@@ -1366,7 +1450,7 @@ class PrimaryFlightDisplay:
                             ty = cy + dy
                             ky = f"{off_z}{tx}{ty}"
                             if ky not in wself.tile_image_cache:
-                                wself.request_image(off_z, tx, ty, db_cursor=db_cur)
+                                _async_request(wself, off_z, tx, ty, db_cursor=db_cur)
                                 queued_off += 1
                     offline_100km_done = True
                     print(f"[APE-PATCH] 100km offline disc: z={off_z} r={off_r} "
