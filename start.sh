@@ -501,25 +501,82 @@ if [ -f "./bin/earu_daemon" ]; then
     install_name_tool -delete_rpath /Users/albertstarfield/.local/share/alire/toolchains/gnat_native_15.1.2_60748c54/lib ./bin/earu_daemon 2>/dev/null
 fi
 
-# 5b. Ad-hoc code sign the binary (required for macOS Location Services)
-# CoreWLAN SSID data is gated behind Location Services permission.
-# The binary must be signed (even ad-hoc) before macOS will allow the user
-# to grant Location Services in System Settings → Privacy & Security.
-if [ -f "./bin/earu_daemon" ]; then
-    echo "[*] Ad-hoc code signing binary for Location Services eligibility..."
+# 5b. Wrap the daemon in a signed .app bundle so TCC can grant it (REQUIRED).
+#
+# WHY A BUNDLE AND NOT JUST A SIGNED BINARY: macOS attaches consent to a
+# process identity. For the privacy services carrying usage descriptions
+# (Bluetooth, Location, Camera, Microphone) that identity is a bundle
+# identifier plus a code signature. TCC is enforced per-process through the
+# kernel sandbox layer, NOT per-uid: being root is not an exemption, and
+# inheriting root from a `sudo` shell conveys no consent.
+#
+# The ad-hoc `codesign --force --sign - ./bin/earu_daemon` that used to run
+# here was the right intent but the wrong shape: signing a bare binary yields
+# flags=adhoc,linker-signed with `Info.plist=not bound` and no usage strings,
+# so systempolicyd still had no identity to key a grant on.
+# util/build_app_bundle.sh supplies the missing half - Contents/Info.plist
+# carrying the usage descriptions, then the signature that binds it.
+#
+# This fixes the IN-PROCESS grantable services, chiefly Bluetooth
+# (src/bluetooth_scanner.h -> CBCentralManager), which the daemon calls itself.
+# It does NOT fix Location: CoreLocation is absent from the link line and there
+# are no CLLocationManager references in the Ada, so location is fetched by
+# spawning CoreLocationCLI, which is its own TCC principal. CoreLocationCLI is
+# an unbundled Homebrew binary and is not grantable as shipped.
+#
+# Full Disk Access is the exception and needs no bundle: it is keyed to a
+# client PATH (kTCCServiceSystemPolicyAllFiles).
+BUNDLE_DIR="$PROJECT_ROOT/EARU_daemon/EARU.app"
+BUNDLE_EXEC="$BUNDLE_DIR/Contents/MacOS/earu_daemon"
+
+echo "[*] Building signed .app bundle (TCC eligibility)..."
+if bash "$PROJECT_ROOT/util/build_app_bundle.sh"; then
+    echo "[*] Bundle ready. To grant privacy access, add the bundle under:"
+    echo "    System Settings > Privacy & Security > Bluetooth"
+else
+    # Never fatal: without the bundle the daemon still runs, it simply cannot
+    # be granted the bundle-keyed services.
+    echo "[!] WARNING: bundle build failed. Bluetooth/Location cannot be granted"
+    echo "    to the daemon; continuing with the bare binary."
+fi
+
+# 5c. Report which privacy grants are actually present.
+# A missing grant used to be entirely silent: the polling task failed, slept,
+# and retried identically, which is indistinguishable from idleness in a CPU
+# profile. Surface it at startup instead.
+echo "[*] Probing privacy (TCC) grants..."
+if python3 "$PROJECT_ROOT/util/earu_tcc.py"; then
+    echo "[*] All required privacy grants present."
+else
+    echo "[!] One or more required privacy grants are missing (see above)."
+    echo "    Missing grants are SILENT at runtime: the affected task retries"
+    echo "    forever without reporting. Location is fetched by CoreLocationCLI,"
+    echo "    which needs its own grant and is not grantable as installed."
+    echo "    This is a warning, not a startup failure."
+fi
+
+# 5d. Fallback path only: ad-hoc sign the bare binary so the un-bundled launch
+# path below still carries a signature. Signing a bare binary is NOT sufficient
+# for a TCC grant (see 5b) -- that is exactly why the bundle is preferred.
+if [ ! -x "$BUNDLE_EXEC" ] && [ -f "./bin/earu_daemon" ]; then
+    echo "[*] Bundle unavailable; ad-hoc signing the bare binary as a fallback..."
     if codesign --force --sign - ./bin/earu_daemon 2>/dev/null; then
-        echo "[*] Binary signed successfully. To enable WiFi SSID names:"
-        echo "    System Settings → Privacy & Security → Location Services → Enable"
+        echo "[*] Bare binary signed. Bundle-keyed services (Bluetooth) will"
+        echo "    remain UNGRANTABLE without the .app bundle."
     else
-        echo "[!] WARNING: codesign failed. WiFi SSIDs may show as <Hidden SSID>."
+        echo "[!] WARNING: codesign failed on the fallback binary."
     fi
 fi
 
-# 6. Run the daemon natively as root from project root (direct binary invocation for max speed)
+# 6. Run the daemon natively as root from project root (direct binary
+#    invocation for max speed). Prefer the bundled executable so it actually
+#    carries the TCC identity built in 5b; fall back to the bare binary.
 echo "[*] Launching EARU Daemon directly from project root..."
 cd "$PROJECT_ROOT" || { echo "[!] Failed to enter project root"; exit 1; }
 
-if [ -f "./EARU_daemon/bin/earu_daemon" ]; then
+if [ -x "$BUNDLE_EXEC" ]; then
+    nice -n -20 "$BUNDLE_EXEC"
+elif [ -f "./EARU_daemon/bin/earu_daemon" ]; then
     nice -n -20 ./EARU_daemon/bin/earu_daemon
 else
     echo "[!] Compiled binary not found at ./EARU_daemon/bin/earu_daemon. Attempting fallback..."
