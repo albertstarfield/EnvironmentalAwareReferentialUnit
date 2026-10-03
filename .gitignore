@@ -74,6 +74,10 @@ EARU_daemon/src/proofs/*
 .verifier_cache/
 .link_verification_cache.json
 .bt_hash
+# Records the source hash util/build_app_bundle.sh last staged into EARU.app.
+# Machine-specific build state, exactly like .bt_hash and .source_hash: it
+# describes this checkout's compiled binary, and is regenerated on first run.
+.app_hash
 .tmp/
 .earu_ramdisk_dev
 

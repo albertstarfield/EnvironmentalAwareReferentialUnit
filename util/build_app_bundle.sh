@@ -162,13 +162,29 @@ fi
 
 [ -x "$SRC_BIN" ] || die "source binary not found or not executable: $SRC_BIN (build first: alr build)"
 
-if [ "$MODE" = "build" ] && verify_bundle; then
-    # Refresh the copy anyway: the binary may have been relinked in place.
-    if cmp -s "$SRC_BIN" "$BUNDLE_EXEC"; then
-        say "bundle already up to date and signed: $BUNDLE_DIR"
-        exit 0
-    fi
-    say "binary changed since last build; refreshing bundle payload"
+#  CHANGE DETECTION — hash-based, NOT `cmp` against the bundled copy.
+#
+#  `cmp -s "$SRC_BIN" "$BUNDLE_EXEC"` can never succeed here, because
+#  codesign REWRITES the signature blob inside the bundled copy. The staged
+#  file is therefore never byte-identical to its source, so a cmp-based
+#  "already up to date" test is unreachable dead code: it re-staged and
+#  re-signed on every single start even when nothing had changed.
+#
+#  Hash the SOURCE binary together with this script, which is what actually
+#  determines the staged content (the binary) and the generated content (the
+#  Info.plist template). This is the same shasum-then-store-a-hash-file
+#  approach start.sh already uses for corewlan_scanner and bluetooth_scanner
+#  (.mm_hash / .bt_hash), kept consistent with it deliberately.
+HASH_FILE="$DAEMON_DIR/.app_hash"
+NEW_HASH=$(shasum -a 256 "$SRC_BIN" "$SCRIPT_DIR/build_app_bundle.sh" 2>/dev/null \
+           | shasum -a 256 | awk '{print $1}')
+OLD_HASH=""
+[ -f "$HASH_FILE" ] && OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || true)
+
+if [ "$MODE" = "build" ] && [ -n "$NEW_HASH" ] \
+   && [ "$NEW_HASH" = "$OLD_HASH" ] && verify_bundle; then
+    say "bundle up to date and signed (source unchanged): $BUNDLE_DIR"
+    exit 0
 fi
 
 mkdir -p "$MACOS_DIR" "$RES_DIR"
@@ -194,6 +210,10 @@ say "verifying signature"
 verify_bundle || die "post-sign verification failed — Info.plist did not bind; the bundle would still be ungrantable"
 
 codesign -dv --verbose=2 "$BUNDLE_EXEC" 2>&1 | sed 's/^/    /'
+if [ -n "$NEW_HASH" ]; then
+    printf '%s' "$NEW_HASH" > "$HASH_FILE" 2>/dev/null || true
+fi
+
 say "OK: $BUNDLE_DIR"
 say "    grantable identity now exists for bundle-keyed services:"
 say "      Bluetooth, and the Location authorization that gates CoreWLAN SSIDs."
