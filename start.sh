@@ -437,6 +437,65 @@ else
     fi
 fi
 
+# 4c. Authoritative privacy-authorization probe (.mm -> .o).
+#
+# Compiled here for the same reason as the two scanners above: it is
+# Objective-C++ and the GPR language set is Ada + C, so it must be built
+# out-of-band and handed to the linker as a prebuilt object.
+#
+# Why this exists at all: util/earu_tcc.py reads the TCC database, which is a
+# PROXY. CBManager.authorization is a PROCESS-SCOPED answer -- only the process
+# that would call CoreBluetooth can report whether it is authorized. A separate
+# interpreter reading the same database cannot answer that, however carefully it
+# parses, and has already been observed to disagree: the database showed no
+# Bluetooth row while the framework reported the grant as allowed.
+#
+# Same hashing/ownership handling as the scanners, because obj/release may have
+# been recreated by root above.
+TCC_SRC="$DAEMON_DIR/src/tcc_auth.mm"
+TCC_HDR="$DAEMON_DIR/src/tcc_auth.h"
+TCC_OBJ="$DAEMON_DIR/obj/release/tcc_auth.o"
+TCC_HASH_FILE="$DAEMON_DIR/.tcc_hash"
+
+if [ -f "$TCC_OBJ" ]; then
+    chown "$MM_OWNER" "$TCC_OBJ" 2>/dev/null
+fi
+
+TCC_CURRENT_HASH=""
+if [ -f "$TCC_SRC" ]; then
+    TCC_CURRENT_HASH=$(shasum -a 256 "$TCC_SRC" "$TCC_HDR" 2>/dev/null | shasum -a 256 | awk '{print $1}')
+fi
+TCC_OLD_HASH=""
+if [ -f "$TCC_HASH_FILE" ]; then
+    TCC_OLD_HASH=$(cat "$TCC_HASH_FILE")
+fi
+
+if [ -f "$TCC_SRC" ] && { [ "$TCC_CURRENT_HASH" != "$TCC_OLD_HASH" ] || [ ! -f "$TCC_OBJ" ] || [ "$FORCE_CLEAN" = true ]; }; then
+    echo "[*] Compiling TCC authorization probe (.mm → .o)..."
+    TCC_SDK_PATH=$(xcrun --show-sdk-path)
+    # BUILD_PATH: see FIX #5 — force /usr/bin/ld-safe toolchain resolution.
+    if run_as_user --build-path clang++ -ObjC++ -c "$TCC_SRC" \
+        -o "$TCC_OBJ" \
+        -isysroot "$TCC_SDK_PATH" \
+        -framework CoreBluetooth \
+        -framework Foundation \
+        -std=c++17 -O2 -g \
+        -I "$DAEMON_DIR/src"; then
+        echo "$TCC_CURRENT_HASH" > "$TCC_HASH_FILE"
+        echo "[*] TCC authorization probe compiled successfully."
+    else
+        echo "[!] WARNING: TCC authorization probe compilation failed."
+        echo "    Privacy grants will still be reported by util/earu_tcc.py, but"
+        echo "    that is the database proxy, not the framework's own answer."
+    fi
+else
+    if [ -f "$TCC_OBJ" ]; then
+        echo "[*] TCC authorization probe unchanged, skipping .mm compilation."
+    else
+        echo "[!] tcc_auth.mm not found, skipping."
+    fi
+fi
+
 # 5. Build or Skip
 FAIL_COUNT_FILE="$DAEMON_DIR/.build_fail_count"
 MAX_FAILS=5

@@ -9,7 +9,7 @@ project Earu_Daemon is
       --  test_earu_math_elem_funcs.adb was missing here, so its 24 checks
       --  (Sqrt/Sin/Cos/Exp/Log/Arctan incl. the asymmetric two-argument
       --  atan2 order anchors) were never compiled or executed by `alr build`.
-      for Main use ("earu_daemon.adb", "print_offsets.adb", "test_gravity_nav.adb", "test_earu_math.adb", "test_earu_math_elem_funcs.adb", "test_location_bridge.adb", "test_weather_shm_task.adb");
+      for Main use ("earu_daemon.adb", "print_offsets.adb", "test_gravity_nav.adb", "test_earu_math.adb", "test_earu_math_elem_funcs.adb", "test_location_bridge.adb", "test_weather_shm_task.adb", "test_tcc_auth.adb");
 
    for Archive_Builder use ("/usr/bin/ar", "cr");
    for Archive_Indexer use ("/usr/bin/ranlib");
@@ -87,7 +87,15 @@ project Earu_Daemon is
           "-framework", "Foundation",
           "-lstdc++",
           "obj/release/corewlan_scanner.o",
-          "obj/release/bluetooth_scanner.o"
+          "obj/release/bluetooth_scanner.o",
+          --  Authoritative privacy-authorization probe. Built separately by
+          --  start.sh like the two scanners above, because it is Objective-C++
+          --  (CBManager.authorization) and the GPR language set is Ada + C.
+          --  Linked in so Earu.Tcc_Auth's pragma Import resolves in-process:
+          --  CBManager.authorization is a PROCESS-SCOPED answer, so only the
+          --  daemon itself can report its own Bluetooth authorization. A
+          --  separate helper reading the TCC database cannot answer that.
+          "obj/release/tcc_auth.o"
        );
    end Linker;
 

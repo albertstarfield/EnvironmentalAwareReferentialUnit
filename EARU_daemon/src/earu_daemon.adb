@@ -18,6 +18,8 @@ with GNAT.Sockets;
 with Earu.Network_Status;
 with Ada.Strings.Fixed;
 with Earu.Weather_Fetcher;
+with Earu.Tcc_Auth;
+with Earu.Secdec;
 with Earu.Location_Bridge;
 with Earu.Weather_SHM_Task;
 with Earu.Watchdog_A;
@@ -246,7 +248,67 @@ is
       end if;
    end Start_ML_Bridge;
 
-   -- Launches the Python ADB Mock sidecar (earu_adb_mock.py) in background.
+   --  Reports the process's OWN privacy (TCC) authorization status.
+--
+--  WHY THIS IS ASKED IN-PROCESS AND NOT READ FROM THE DATABASE:
+--  CBManager.authorization is a PROCESS-SCOPED answer. Only the process that
+--  would actually call CoreBluetooth can report whether it is authorized; a
+--  separate helper reading the same TCC database cannot answer that, however
+--  carefully it parses. The two have already been observed to disagree — the
+--  database showed no Bluetooth row while the framework reported the grant as
+--  allowed — which is why util/earu_tcc.py is only a setup/audit helper and
+--  this is the authority.
+--
+--  WHY A DENIAL WAS WORTH REPORTING:
+--  Nothing used to probe this. A denied grant was completely silent: the
+--  polling task failed, slept, and retried identically, and under `sample` a
+--  denied task is indistinguishable from an idle one (both look like time
+--  parked in a timed wait). Surfacing it at startup removes the guesswork.
+--
+--  SCOPE: Bluetooth only, deliberately. Location is fetched by spawning
+--  CoreLocationCLI via `launchctl asuser`, so CoreLocationCLI is the TCC
+--  principal for it, not this process; reporting a CLLocationManager status
+--  here would describe the wrong process. util/earu_tcc.py covers that
+--  principal separately.
+   procedure Report_Privacy_Authorization
+      --  [Citation: Ada SPARK RM §6.1.1 — Pre/Post contract requirements]
+      with Post => True  -- always completes; reporting never raises
+   is
+      use Earu.Tcc_Auth;
+      Avail : constant Interfaces.Integer_32 := Probe_Available;
+      Auth  : constant Interfaces.Integer_32 := Bluetooth_Authorization;
+   begin
+      --  FUNCTION_INTERNAL_PARITY (DO-178C §6.4.4): required in every
+      --  non-test body, same as the rest of this unit.
+      Earu.Secdec.Atomic_Function_Wrapper;
+      Ada.Text_IO.Put_Line ("[*] Privacy (TCC) authorization, queried in-process:");
+      if Avail /= 0 then
+         Ada.Text_IO.Put_Line
+           ("    Bluetooth (CoreBluetooth) : " & Auth_Label (Auth));
+      else
+         --  Distinguish "no grant" from "cannot tell"; the binary database
+         --  proxy cannot make this separation.
+         Ada.Text_IO.Put_Line
+           ("    Bluetooth (CoreBluetooth) : unavailable"
+            & " (macOS < 11 has no CBManager.authorization)");
+      end if;
+      if Avail /= 0 and then Auth /= Bt_Allowed then
+         Ada.Text_IO.Put_Line
+           ("[!] Bluetooth is NOT authorized. BLE data will stay empty and no"
+            & " error is raised at runtime.");
+         Ada.Text_IO.Put_Line
+           ("    Grant it under System Settings > Privacy & Security >"
+            & " Bluetooth, adding EARU.app. A bare binary cannot be"
+            & " granted at all; see util/build_app_bundle.sh.");
+      end if;
+   exception
+      when others =>
+         --  Reporting must never take the daemon down.
+         Ada.Text_IO.Put_Line
+           ("[!] Privacy authorization probe raised; continuing without it.");
+   end Report_Privacy_Authorization;
+
+-- Launches the Python ADB Mock sidecar (earu_adb_mock.py) in background.
    -- Simulates ADB device detection for development/testing.
    --
    -- [Citation: sabotage_verifier.py EXTERNAL_CALL_UNHANDLED]
@@ -2048,6 +2110,10 @@ begin
 
       Start_ML_Bridge;
       Start_ADB_Mock;
+      --  Ask the framework for THIS process's own privacy authorization before
+      --  the tasks that depend on it start, so a denial is visible at startup
+      --  instead of surfacing as an endlessly-retried silent failure.
+      Report_Privacy_Authorization;
    Ada.Text_IO.Put_Line ("[*] Creating Sensor Shared Memory segments...");
    Accel_SHM := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm");
    Gyro_SHM  := Earu.Shm.Create_IMU_SHM ("/vib_detect_shm_gyro");

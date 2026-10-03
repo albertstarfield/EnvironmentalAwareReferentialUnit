@@ -74,6 +74,9 @@ project Earu_Daemon_Proof is
    --  MUST be identical.  The previous version duplicated this list in two
    --  packages, which is precisely how they drifted apart and produced the
    --  "file not found" abort above.  One variable, two consumers.
+   --  Shared with earu_daemon.gpr: same external override, same default.
+   Deployment_Target := External ("MACOSX_DEPLOYMENT_TARGET", "26.0");
+
    Non_Proof_Sources := (
       "earu_daemon.adb",
       "earu-bluetooth.ads",
@@ -135,7 +138,16 @@ project Earu_Daemon_Proof is
       "test_watchdog_a.adb",
       "test_watchdog_b.adb",
       "test_weather_fetcher.adb",
-      "test_weather_shm_task.adb"
+      "test_weather_shm_task.adb",
+      --  TCC authorization probe. Excluded for two independent reasons:
+      --  (a) its exported bodies are pure helpers, but the unit is an
+      --      interface to Objective-C++ (CBManager.authorization) reached by
+      --      `pragma Import`, and SPARK cannot analyse an imported body it
+      --      has no definition for;
+      --  (b) the test main is a harness, excluded like every other test_*.adb.
+      "test_tcc_auth.adb",
+      "earu-tcc_auth.ads",
+      "earu-tcc_auth.adb"
    );
 
    --  AXIOM: project-level Excluded_Source_Files is a valid GPRBUILD
@@ -150,10 +162,18 @@ project Earu_Daemon_Proof is
       --  detection/mood packages opt back in with `with SPARK_Mode => On`
       --  on their package declaration.  Keeping legacy units out of the
       --  closure is what lets gnatprove complete instead of aborting.
+      --
+      --  DEPLOYMENT TARGET: identical rationale and value to earu_daemon.gpr.
+      --  The GNAT 15.1.2 driver bakes in a stale "-mmacosx-version-min=18.0"
+      --  for C sources, which Apple clang now rejects outright, so every C
+      --  source failed and the proof project could not even be compiled.  A
+      --  later -mmacosx-version-min on the command line wins.  Shared
+      --  variable name and default so the two projects cannot drift.
       for Default_Switches ("Ada") use (
          "-g",
          "-gnatwa",
          "-gnatW8",
+         "-mmacosx-version-min=" & Deployment_Target,
          "-gnatec=" & Earu_Daemon_Proof'Project_Dir & "/config/earu_spark.adc"
       );
    end Compiler;
