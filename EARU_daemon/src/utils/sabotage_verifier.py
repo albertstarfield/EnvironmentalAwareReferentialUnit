@@ -633,7 +633,7 @@ class PatternRegistry:
 
     def count(self) -> int:
         """Return number of registered patterns.
-        
+
         Pre: true
         Post: result >= 0
         """
@@ -2979,12 +2979,12 @@ def _build_coq_proof_patterns() -> list[Pattern]:
 
 def _check_coq_compilation(src_dir: str) -> list["Violation"]:
     """ACTUALLY compile .v files with coqc — not just text pattern checking.
-    
+
     Every .v file MUST compile without errors. If coqc is not installed,
     this is a CRITICAL violation.
     """
     violations = []
-    
+
     # Check if coqc is available
     coqc_path = None
     for candidate in ["coqc", "opam exec -- coqc"]:
@@ -2998,7 +2998,7 @@ def _check_coq_compilation(src_dir: str) -> list["Violation"]:
                 break
         except (FileNotFoundError, subprocess.TimeoutExpired):
             continue
-    
+
     if coqc_path is None:
         violations.append(Violation(
             severity=Severity.CRITICAL,
@@ -3011,7 +3011,7 @@ def _check_coq_compilation(src_dir: str) -> list["Violation"]:
             standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
         ))
         return violations
-    
+
     # Find all .v files
     v_files = []
     for root, _dirs, files in os.walk(src_dir):
@@ -3022,7 +3022,7 @@ def _check_coq_compilation(src_dir: str) -> list["Violation"]:
         for fname in files:
             if fname.endswith(".v"):
                 v_files.append(os.path.join(root, fname))
-    
+
     if not v_files:
         violations.append(Violation(
             severity=Severity.HIGH,
@@ -3035,7 +3035,7 @@ def _check_coq_compilation(src_dir: str) -> list["Violation"]:
             standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
         ))
         return violations
-    
+
     # Actually compile each .v file with coqc
     for v_file in v_files:
         try:
@@ -3072,7 +3072,7 @@ def _check_coq_compilation(src_dir: str) -> list["Violation"]:
                 message=f"Coq .v file compilation error: {e}",
                 standard="DO-178C §5.2.2",
             ))
-    
+
     return violations
 
 
@@ -3082,12 +3082,12 @@ def _check_coq_compilation(src_dir: str) -> list["Violation"]:
 
 def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
     """Verify source→Coq converter exists and works.
-    
+
     EVERY Ada/Python/C unit MUST have a Coq proof. The converter generates
     proof stubs from source contract annotations (Pre/Post/Priority).
     """
     violations = []
-    
+
     # Look for converter script — any source-to-Coq converter
     converter_candidates = [
         os.path.join(src_dir, "utils", "ada_to_coq.py"),
@@ -3101,13 +3101,13 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
         os.path.expanduser("~/.local/share/opencode/ada_to_coq.py"),
         os.path.expanduser("~/.local/share/opencode/source_to_coq.py"),
     ]
-    
+
     converter_path = None
     for candidate in converter_candidates:
         if os.path.exists(candidate):
             converter_path = candidate
             break
-    
+
     if converter_path is None:
         violations.append(Violation(
             severity=Severity.CRITICAL,
@@ -3126,7 +3126,7 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
             standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
         ))
         return violations
-    
+
     # Verify converter is executable and has required functions
     try:
         result = subprocess.run(
@@ -3154,7 +3154,7 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
             message=f"Source→Coq converter error when testing: {e}",
             standard="DO-178C §5.2.2",
         ))
-    
+
     # Check that EVERY Ada/Python/C unit has a corresponding .v file
     source_files = []
     for root, _dirs, files in os.walk(src_dir):
@@ -3164,14 +3164,14 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
         for fname in files:
             if fname.endswith((".adb", ".ads", ".py", ".c", ".h")):
                 source_files.append(os.path.join(root, fname))
-    
+
     proof_dirs = [
         os.path.join(src_dir, "proofs"),
         os.path.join(src_dir, "coq_proofs"),
         os.path.join(src_dir, "src", "proofs"),
         os.path.join(src_dir, "src", "coq_proofs"),
     ]
-    
+
     for src_file in source_files:
         unit_name = os.path.splitext(os.path.basename(src_file))[0]
         # Skip Ada specs (only check bodies) and test files
@@ -3179,7 +3179,7 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
             continue
         if "test" in unit_name.lower() or "spec" in unit_name.lower():
             continue
-        
+
         # Determine file type
         if src_file.endswith((".adb", ".ads")):
             file_type = "Ada"
@@ -3189,7 +3189,7 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
             file_type = "C"
         else:
             file_type = "Unknown"
-        
+
         found_proof = False
         for proof_dir in proof_dirs:
             for ext in ["_proof.v", ".v"]:
@@ -3199,7 +3199,7 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
                     break
             if found_proof:
                 break
-        
+
         if not found_proof:
             violations.append(Violation(
                 severity=Severity.CRITICAL,
@@ -3212,7 +3212,7 @@ def _check_ada_to_coq_converter(src_dir: str) -> list["Violation"]:
                 ),
                 standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
             ))
-    
+
     return violations
 
 
@@ -7296,6 +7296,22 @@ def _verify_ada_function_with_z3(func: dict) -> list[dict]:
                 if has_guard:
                     continue
 
+            # AXIOM: `has_guard` is READ at this indent-12 scope on every
+            # arithmetic op, but it is only BOUND inside the
+            # `if 0 <= line_idx < len(func["body_lines"]):` block above.
+            # When line_idx falls outside body_lines that block is skipped, and
+            # the read below raised
+            #   UnboundLocalError: cannot access local variable 'has_guard'
+            # (reproduced at runtime, then fixed by hoisting the binding here).
+            # SAFETY OF THE HOIST: reaching this point implies the guarded
+            # block either never ran (so no value was bound) or ran to
+            # completion with has_guard == False, because a True value
+            # `continue`s out of the `for ao` loop before this line.
+            # Therefore initialising to False here is semantically identical
+            # on every previously-working path and only converts the crash
+            # path into normal "no guard found" analysis.
+            has_guard = False
+
             # KEY INSIGHT: If one operand is literal 1, the other is a loop variable,
             # and the loop range is bounded, overflow is impossible.
             # e.g., I + 1 where I is in 1..100 → max is 101, safe.
@@ -10249,9 +10265,9 @@ def _build_python_audit_finding_patterns() -> list[Pattern]:
     - assert True (meaningless assertions)
     - subprocess.Popen without timeout
     - No atexit/signal cleanup for subprocess
-    
+
     AUDIT INCIDENTS (2026-08-09):
-    - INC-GC-001: gc.disable() found in sidecar_ui.py line ~22. 
+    - INC-GC-001: gc.disable() found in sidecar_ui.py line ~22.
       Incident: Global GC disable causes unbounded memory growth in long-running UI processes.
       Prevention: Removed gc.disable() and its comment. Added PATTERN_012 to detect future occurrences.
       File: AdelaideZephyrineSystem/src/ui/sidecar_ui.py
@@ -10503,7 +10519,7 @@ def create_default_registry() -> PatternRegistry:
 
 def detect_language(filepath: str) -> str:
     """Detect file language from extension.
-    
+
     Pre: true
     Post: result = "python" or result = "ada" or result = "c"
     """
@@ -12312,7 +12328,7 @@ def _check_no_assumptions(src_dir: str) -> list["Violation"]:
 
 def run_checklist_enforcement(src_dir: str) -> list["Violation"]:
     """Run ALL code-quality.md checklist enforcement checks.
-    
+
     Returns combined violations from every section.
     """
     all_violations: list[Violation] = []
@@ -12453,7 +12469,7 @@ def _check_dependency(name: str, check_cmd: list[str], pip_package: str | None =
 
 def enforce_dependencies() -> bool:
     """Check all required dependencies. Try to install missing ones.
-    
+
     Pre: true
     Post: result = true or result = false
     Returns True if all dependencies are available, False otherwise.
@@ -12462,19 +12478,19 @@ def enforce_dependencies() -> bool:
     print(f"{_BOLD}{'─'*70}{_RESET}")
     print(f"{_BOLD}  Dependency Enforcement Check{_RESET}")
     print(f"{_BOLD}{'─'*70}{_RESET}")
-    
+
     all_ok = True
     missing = []
 
     # === Python Dependencies ===
     print(f"\n{_BOLD}  [1/4] Python Dependencies{_RESET}")
-    
+
     python_deps = [
         ("pyrefly", [sys.executable, "-m", "pyrefly", "--version"], "pyrefly"),
         ("ruff", [sys.executable, "-m", "ruff", "--version"], "ruff"),
         ("coverage", [sys.executable, "-m", "coverage", "--version"], "coverage"),
     ]
-    
+
     for name, cmd, pip_pkg in python_deps:
         if not _check_dependency(name, cmd, pip_package=pip_pkg):
             all_ok = False
@@ -12482,20 +12498,20 @@ def enforce_dependencies() -> bool:
 
     # === Ada/SPARK Dependencies ===
     print(f"\n{_BOLD}  [2/4] Ada/SPARK Dependencies{_RESET}")
-    
+
     # Check if alr exists
     alr_found = _check_dependency("alr", ["alr", "--version"], required=True)
     if not alr_found:
         all_ok = False
         missing.append("alr")
-    
+
     # Check gnatprove (requires alr with gnatprove in project)
     gnatprove_found = _check_dependency(
-        "gnatprove", 
+        "gnatprove",
         ["alr", "exec", "--", "gnatprove", "--version"],
         required=False  # Only required when running formal verification
     )
-    
+
     # Check gnatcov (requires alr with gnatcov in project)
     _check_dependency(
         "gnatcov",
@@ -12505,13 +12521,13 @@ def enforce_dependencies() -> bool:
 
     # === SMT Solvers ===
     print(f"\n{_BOLD}  [3/4] SMT Solvers (for gnatprove){_RESET}")
-    
+
     solver_deps = [
         ("z3", ["z3", "--version"], None, "z3", "z3"),
         ("cvc5", ["cvc5", "--version"], None, "cvc5", "cvc5"),
         ("alt-ergo", ["alt-ergo", "--version"], None, "alt-ergo", "alt-ergo"),
     ]
-    
+
     for name, cmd, pip_pkg, brew_pkg, apt_pkg in solver_deps:
         if not _check_dependency(name, cmd, pip_package=pip_pkg, brew_package=brew_pkg, apt_package=apt_pkg):
             # Solvers are required for gnatprove
@@ -12521,10 +12537,10 @@ def enforce_dependencies() -> bool:
 
     # === sabotage_verifier.py ===
     print(f"\n{_BOLD}  [4/5] sabotage_verifier.py{_RESET}")
-    
+
     sabotage_py_path = os.path.join("src", "utils", "sabotage_verifier.py")
     sabotage_py_source = os.path.expanduser("~/.local/share/opencode/sabotage_verifier.py")
-    
+
     if os.path.exists(sabotage_py_path):
         print(f"  {_GREEN}[OK] sabotage_verifier.py found at {sabotage_py_path}{_RESET}")
     elif os.path.exists(sabotage_py_source):
@@ -12545,12 +12561,12 @@ def enforce_dependencies() -> bool:
 
     # === run.py Enforcement ===
     print(f"\n{_BOLD}  [5/5] run.py Pipeline Enforcement{_RESET}")
-    
+
     run_py_path = "run.py"
     if os.path.exists(run_py_path):
         with open(run_py_path, "r") as f:
             run_content = f.read()
-        
+
         # Check required pipeline components
         required_checks = [
             ("alr build", "Build step"),
@@ -12558,7 +12574,7 @@ def enforce_dependencies() -> bool:
             ("gnatcov", "Coverage step"),
             ("sabotage_verifier.py", "Sabotage audit step"),
         ]
-        
+
         for pattern, desc in required_checks:
             if pattern in run_content:
                 print(f"  {_GREEN}[OK] run.py contains {desc}: {pattern}{_RESET}")
@@ -12566,7 +12582,7 @@ def enforce_dependencies() -> bool:
                 print(f"  {_RED}[FAIL] run.py MISSING {desc}: {pattern}{_RESET}")
                 all_ok = False
                 missing.append(f"run.py:{pattern}")
-        
+
         # Check pipeline order (gnatcov before sabotage_verifier.py)
         gnatcov_pos = run_content.find("gnatcov")
         sabotage_pos = run_content.find("sabotage_verifier.py")
@@ -12586,7 +12602,7 @@ def enforce_dependencies() -> bool:
 
     # === Final Result ===
     print(f"\n{_BOLD}{'─'*70}{_RESET}")
-    
+
     if all_ok:
         print(f"  {_GREEN}{_BOLD}✅ ALL DEPENDENCIES SATISFIED — PROCEEDING WITH AUDIT{_RESET}")
         print(f"{_BOLD}{'─'*70}{_RESET}\n")
@@ -12761,7 +12777,7 @@ _ADA_TYPE_MAP = {
 
 def _parse_python_contracts(filepath: str) -> list[dict]:
     """Parse Python function signatures with type hints and docstrings.
-    
+
     Extracts: function name, parameter types, return type, pre/post conditions.
     Looks for:
       - Type hints: def foo(x: int, y: str) -> bool:
@@ -12780,7 +12796,7 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        
+
         # Match function definitions with type hints
         import re
         func_match = re.match(
@@ -12791,12 +12807,12 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
             func_name = func_match.group(1)
             params_str = func_match.group(2)
             return_type = func_match.group(3) or "None"
-            
+
             # Skip private/test functions
             if func_name.startswith("_") and not func_name.startswith("__"):
                 i += 1
                 continue
-            
+
             # Parse parameters
             params = []
             for param in params_str.split(","):
@@ -12809,12 +12825,12 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
                     params.append({"name": pname.strip(), "type": "any", "default": default.strip()})
                 elif param and param != "self":
                     params.append({"name": param.strip(), "type": "any"})
-            
+
             # Parse docstring for contracts
             docstring = ""
             preconditions = []
             postconditions = []
-            
+
             # Look for docstring
             j = i + 1
             while j < len(lines) and j < i + 5:
@@ -12834,7 +12850,7 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
                             doc_lines.append(lines[j].strip())
                             j += 1
                         docstring = "\n".join(doc_lines)
-                    
+
                     # Extract contracts from docstring
                     for doc_line in docstring.split("\n"):
                         doc_line = doc_line.strip()
@@ -12844,7 +12860,7 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
                             postconditions.append(doc_line.split(":", 1)[1].strip())
                     break
                 j += 1
-            
+
             # Look for assert statements as preconditions
             k = i + 1
             while k < len(lines) and k < i + 10:
@@ -12855,7 +12871,7 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
                     if not lines[k].strip().startswith((" ", "\t")):
                         break
                 k += 1
-            
+
             # Look for decorator contracts
             for d in range(max(0, i - 5), i):
                 deco = lines[d].strip()
@@ -12865,7 +12881,7 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
                 ens_match = re.match(r"@ensures\((.+)\)", deco)
                 if ens_match:
                     postconditions.append(ens_match.group(1))
-            
+
             functions.append({
                 "name": func_name,
                 "params": params,
@@ -12877,15 +12893,15 @@ def _parse_python_contracts(filepath: str) -> list[dict]:
                 "source_body": _parse_function_body(filepath, func_name, i),
                 "filepath": filepath,
             })
-        
+
         i += 1
-    
+
     return functions
 
 
 def _parse_typescript_contracts(filepath: str) -> list[dict]:
     """Parse TypeScript function signatures with type annotations.
-    
+
     Extracts: function name, parameter types, return type, pre/post conditions.
     Looks for:
       - Type annotations: function foo(x: number, y: string): boolean
@@ -12904,7 +12920,7 @@ def _parse_typescript_contracts(filepath: str) -> list[dict]:
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        
+
         import re
         # Match function declarations with type annotations
         func_match = re.match(
@@ -12919,12 +12935,12 @@ def _parse_typescript_contracts(filepath: str) -> list[dict]:
             )
             if arrow_match:
                 func_match = arrow_match
-        
+
         if func_match:
             func_name = func_match.group(1)
             params_str = func_match.group(2)
             return_type = func_match.group(3) or "void"
-            
+
             # Parse parameters
             params = []
             for param in params_str.split(","):
@@ -12937,11 +12953,11 @@ def _parse_typescript_contracts(filepath: str) -> list[dict]:
                     params.append({"name": pname.strip().lstrip("?"), "type": "any", "default": default.strip()})
                 elif param:
                     params.append({"name": param.strip().lstrip("?"), "type": "any"})
-            
+
             # Parse JSDoc for contracts
             preconditions = []
             postconditions = []
-            
+
             # Look backwards for JSDoc comment OR single-line // comments
             j = i - 1
             while j >= 0 and j > i - 20:
@@ -12973,7 +12989,7 @@ def _parse_typescript_contracts(filepath: str) -> list[dict]:
                 elif jsdoc_line == "" or jsdoc_line.startswith("export") or jsdoc_line.startswith("declare"):
                     break
                 j -= 1
-            
+
             # Look for throw statements as postconditions
             k = i + 1
             while k < len(lines) and k < i + 20:
@@ -12983,7 +12999,7 @@ def _parse_typescript_contracts(filepath: str) -> list[dict]:
                 if lines[k].strip() == "}" and k > i + 1:
                     break
                 k += 1
-            
+
             # Extract return expression from function body
             source_body = ""
             for k in range(i + 1, min(i + 30, len(lines))):
@@ -12996,7 +13012,7 @@ def _parse_typescript_contracts(filepath: str) -> list[dict]:
                 # Stop at next function
                 if re.match(r"(?:export\s+)?(?:async\s+)?function\s+", lines[k].strip()):
                     break
-            
+
             functions.append({
                 "name": func_name,
                 "params": params,
@@ -13007,15 +13023,15 @@ def _parse_typescript_contracts(filepath: str) -> list[dict]:
                 "source_body": source_body,
                 "filepath": filepath,
             })
-        
+
         i += 1
-    
+
     return functions
 
 
 def _parse_javascript_contracts(filepath: str) -> list[dict]:
     """Parse JavaScript function signatures — same as TypeScript but without type hints.
-    
+
     Extracts: function name, JSDoc contracts.
     Falls back to inferred types from usage patterns.
     """
@@ -13030,7 +13046,7 @@ def _parse_javascript_contracts(filepath: str) -> list[dict]:
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        
+
         import re
         func_match = re.match(
             r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*\{?",
@@ -13043,11 +13059,11 @@ def _parse_javascript_contracts(filepath: str) -> list[dict]:
             )
             if arrow_match:
                 func_match = arrow_match
-        
+
         if func_match:
             func_name = func_match.group(1)
             params_str = func_match.group(2)
-            
+
             params = []
             for param in params_str.split(","):
                 param = param.strip()
@@ -13056,7 +13072,7 @@ def _parse_javascript_contracts(filepath: str) -> list[dict]:
                     params.append({"name": pname.strip(), "type": "any", "default": default.strip()})
                 elif param:
                     params.append({"name": param.strip(), "type": "any"})
-            
+
             # Parse JSDoc
             preconditions = []
             postconditions = []
@@ -13095,7 +13111,7 @@ def _parse_javascript_contracts(filepath: str) -> list[dict]:
                 elif jsdoc_line.startswith("/**"):
                     break
                 j -= 1
-            
+
             # Extract return expression from function body
             source_body = ""
             for k in range(i + 1, min(i + 30, len(lines))):
@@ -13107,7 +13123,7 @@ def _parse_javascript_contracts(filepath: str) -> list[dict]:
                     break
                 if re.match(r"(?:export\s+)?function\s+", lines[k].strip()):
                     break
-            
+
             functions.append({
                 "name": func_name,
                 "params": params,
@@ -13118,15 +13134,15 @@ def _parse_javascript_contracts(filepath: str) -> list[dict]:
                 "source_body": source_body,
                 "filepath": filepath,
             })
-        
+
         i += 1
-    
+
     return functions
 
 
 def _parse_c_contracts(filepath: str) -> list[dict]:
     """Parse C function signatures with header comments.
-    
+
     Extracts: function name, parameter types, return type, pre/post conditions.
     Looks for:
       - Function signatures: int foo(int x, const char* y)
@@ -13145,7 +13161,7 @@ def _parse_c_contracts(filepath: str) -> list[dict]:
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        
+
         import re
         # Match C function definitions (return_type name(params) {)
         func_match = re.match(
@@ -13159,12 +13175,12 @@ def _parse_c_contracts(filepath: str) -> list[dict]:
             return_type = func_match.group(1).strip()
             func_name = func_match.group(2)
             params_str = func_match.group(3)
-            
+
             # Skip main and test functions
             if func_name in ("main",) or "test" in func_name.lower():
                 i += 1
                 continue
-            
+
             # Parse parameters
             params = []
             for param in params_str.split(","):
@@ -13180,11 +13196,11 @@ def _parse_c_contracts(filepath: str) -> list[dict]:
                     params.append({"name": pname, "type": ptype.strip()})
                 else:
                     params.append({"name": param, "type": "int"})
-            
+
             # Parse header comments for contracts
             preconditions = []
             postconditions = []
-            
+
             # Look backwards for comment block
             j = i - 1
             while j >= 0 and j > i - 30:
@@ -13212,7 +13228,7 @@ def _parse_c_contracts(filepath: str) -> list[dict]:
                 elif comment_line.startswith("/*") or comment_line.startswith("//"):
                     break
                 j -= 1
-            
+
             # Look for assert statements
             k = i + 1
             while k < len(lines) and k < i + 30:
@@ -13222,7 +13238,7 @@ def _parse_c_contracts(filepath: str) -> list[dict]:
                 if lines[k].strip() == "}" and k > i + 1:
                     break
                 k += 1
-            
+
             # Extract return expression from function body
             source_body = ""
             for k in range(i + 1, min(i + 30, len(lines))):
@@ -13232,7 +13248,7 @@ def _parse_c_contracts(filepath: str) -> list[dict]:
                     break
                 if re.match(r"^(?:static\s+)?(?:inline\s+)?\w+", lines[k].strip()) and "{" not in lines[k]:
                     break
-            
+
             functions.append({
                 "name": func_name,
                 "params": params,
@@ -13243,9 +13259,9 @@ def _parse_c_contracts(filepath: str) -> list[dict]:
                 "source_body": source_body,
                 "filepath": filepath,
             })
-        
+
         i += 1
-    
+
     return functions
 
 
@@ -13262,7 +13278,7 @@ def _parse_ada_contracts(filepath: str) -> list[dict]:
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        
+
         import re
         # Match Ada procedure/function declarations
         proc_match = re.match(
@@ -13272,7 +13288,7 @@ def _parse_ada_contracts(filepath: str) -> list[dict]:
         if proc_match:
             func_name = proc_match.group(1)
             params_str = proc_match.group(2) or ""
-            
+
             # Parse parameters
             params = []
             if params_str:
@@ -13299,33 +13315,33 @@ def _parse_ada_contracts(filepath: str) -> list[dict]:
                     elif group.strip():
                         # Single name without type — shouldn't happen in valid Ada, skip
                         pass
-            
+
             # Look for contracts after declaration
             preconditions = []
             postconditions = []
             priority = None
-            
+
             # Scan forward for contracts (Pre =>, Post =>, etc.)
             j = i
             while j < len(lines) and j < i + 20:
                 contract_line = lines[j].strip()
-                
+
                 pre_match = re.search(r"Pre\s*=>\s*(.+)", contract_line)
                 if pre_match:
                     preconditions.append(pre_match.group(1).rstrip(","))
-                
+
                 post_match = re.search(r"Post\s*=>\s*(.+)", contract_line)
                 if post_match:
                     postconditions.append(post_match.group(1).rstrip(","))
-                
+
                 prio_match = re.search(r"Priority\s*=>\s*(\d+)", contract_line)
                 if prio_match:
                     priority = int(prio_match.group(1))
-                
+
                 if ";" in contract_line and (preconditions or postconditions):
                     break
                 j += 1
-            
+
             # Extract return expression from Ada function body
             source_body = ""
             if line.startswith("function"):
@@ -13336,7 +13352,7 @@ def _parse_ada_contracts(filepath: str) -> list[dict]:
                         break
                     if lines[k].strip() == "end" and k > i + 1:
                         break
-            
+
             functions.append({
                 "name": func_name,
                 "params": params,
@@ -13348,9 +13364,9 @@ def _parse_ada_contracts(filepath: str) -> list[dict]:
                 "source_body": source_body,
                 "filepath": filepath,
             })
-        
+
         i += 1
-    
+
     return functions
 
 
@@ -13361,7 +13377,7 @@ def _parse_ada_contracts(filepath: str) -> list[dict]:
 def _type_to_why3(type_name: str, lang: str) -> str:
     """Convert source language type to Why3 type."""
     type_lower = type_name.lower().strip()
-    
+
     if lang == "python":
         return _PYTHON_TYPE_MAP.get(type_lower, "any")
     elif lang in ("typescript", "javascript"):
@@ -13393,7 +13409,7 @@ def _why3_default_value(why3_type: str) -> str:
 
 def _parse_function_body(filepath: str, func_name: str, start_line: int) -> str:
     """Extract the return expression from a function body.
-    
+
     Looks for 'return <expr>' statements and returns the expression.
     Handles simple expressions: a + b, x > 0, a * b, etc.
     Returns empty string if body is complex (if/else, loops).
@@ -13403,31 +13419,29 @@ def _parse_function_body(filepath: str, func_name: str, start_line: int) -> str:
             lines = f.readlines()
     except OSError:
         return ""
-    
+
     # Find the function body (indented lines after def)
     in_body = False
-    body_indent = 0
     return_exprs = []
-    
+
     for i in range(start_line, min(start_line + 50, len(lines))):
         line = lines[i]
         stripped = line.strip()
-        
+
         if i == start_line:
             # This is the def line — body starts at next line
             continue
-        
+
         if not in_body:
             if stripped and not stripped.startswith("#"):
                 # First non-empty, non-comment line after def
                 in_body = True
-                body_indent = len(line) - len(line.lstrip())
             continue
-        
+
         # Check if we've left the function body
         if stripped and not line[0].isspace() and not stripped.startswith("#"):
             break
-        
+
         # Look for return statements
         return_match = re.match(r"\s+return\s+(.+)", line)
         if return_match:
@@ -13436,27 +13450,27 @@ def _parse_function_body(filepath: str, func_name: str, start_line: int) -> str:
             if "#" in expr:
                 expr = expr[:expr.index("#")].strip()
             return_exprs.append(expr)
-    
+
     # Return the first return expression (most functions have one)
     return return_exprs[0] if return_exprs else ""
 
 
 def _translate_expr_to_why3(expr: str, params: list[dict], lang: str) -> str:
     """Translate a source language expression to a Why3 expression.
-    
+
     Handles: arithmetic, comparisons, boolean ops, function calls.
     Returns Why3 expression string.
     """
     import re
-    
+
     result = expr
-    
+
     # Python/TS arithmetic → Why3 (mostly same, but need parens for complex)
     # a + b → a + b (same)
     # a * b → a * b (same)
     # a ** b → a * b (power needs loop, use multiplication)
     result = re.sub(r"\*\*", "*", result)
-    
+
     # Boolean operators — Why3 formula syntax: /\ for logical and, \/ for or
     # Use a lambda to avoid regex replacement string escape issues
     result = re.sub(r'\band\b', lambda m: '/\\ ', result)
@@ -13464,58 +13478,58 @@ def _translate_expr_to_why3(expr: str, params: list[dict], lang: str) -> str:
     result = re.sub(r'\bnot\b', 'not ', result)
     result = re.sub(r'&&', '/\\ ', result)
     result = re.sub(r'\|\|', '\\/ ', result)
-    
+
     # True/False
     result = re.sub(r"\bTrue\b", "true", result)
     result = re.sub(r"\bFalse\b", "false", result)
-    
+
     # Equality
     result = re.sub(r"==", "=", result)
     result = re.sub(r"!=", "<>", result)
-    
+
     # len() → length
     result = re.sub(r"len\(([^)]+)\)", r"length \1", result)
-    
+
     # abs() → Why3 doesn't have abs directly, use if
     abs_match = re.match(r"abs\(([^)]+)\)", result)
     if abs_match:
         arg = abs_match.group(1)
         result = f"if {arg} >= 0 then {arg} else -{arg}"
-    
+
     # Python-style ternary: x if cond else y → if cond then x else y
     ternary_match = re.match(r"(.+?)\s+if\s+(.+?)\s+else\s+(.+)", result)
     if ternary_match:
         val_if, cond, val_else = ternary_match.groups()
         result = f"if {cond.strip()} then {val_if.strip()} else {val_else.strip()}"
-    
+
     # min(a, b) → if a <= b then a else b
     min_match = re.match(r"min\(([^,]+),\s*([^)]+)\)", result)
     if min_match:
         a, b = min_match.group(1).strip(), min_match.group(2).strip()
         result = f"if {a} <= {b} then {a} else {b}"
-    
+
     # max(a, b) → if a >= b then a else b
     max_match = re.match(r"max\(([^,]+),\s*([^)]+)\)", result)
     if max_match:
         a, b = max_match.group(1).strip(), max_match.group(2).strip()
         result = f"if {a} >= {b} then {a} else {b}"
-    
+
     # String literals (keep as-is for Why3)
     # Ensure param names are preserved (they're already Why3-compatible if lowercase)
-    
+
     # Strip trailing semicolons from C/TS/JS return statements
     result = result.rstrip(";").strip()
-    
+
     return result.strip()
 
 
 def _generate_mlw_module(func: dict, lang: str, module_name: str) -> str:
     """Generate a Why3 .mlw module from a parsed function.
-    
+
     Generates REAL function bodies by parsing the source code return expressions
     and translating them to Why3. Falls back to provable stubs only when
     the body is too complex (if/else chains, loops, I/O).
-    
+
     Every function MUST have at least 1 proof obligation.
     """
     import re
@@ -13524,29 +13538,29 @@ def _generate_mlw_module(func: dict, lang: str, module_name: str) -> str:
     lines.append("")
     lines.append("  use int.Int")
     lines.append("")
-    
+
     # Collect all types used in this function
     all_types = set()
     all_types.add(_type_to_why3(func.get("return_type", "int"), lang))
     for p in func.get("params", []):
         all_types.add(_type_to_why3(p.get("type", "int"), lang))
-    
+
     # Add required imports based on types used
     if "string" in all_types:
         lines.append("  use string.String")
     if "bool" in all_types:
         lines.append("  use bool.Bool")
     lines.append("")
-    
+
     lines.append("")
-    
+
     preconditions = func.get("preconditions", [])
     postconditions = func.get("postconditions", [])
     source_body = func.get("source_body", "")
-    
+
     # Why3 function names must start with lowercase (lident)
     func_name_lower = func['name'][0].lower() + func['name'][1:] if func['name'] else "f"
-    
+
     # ── Lowercase Ada param names for Why3 ──
     # Ada uses uppercase params (A, B) but Why3 needs lowercase (a, b)
     param_name_map = {}
@@ -13556,7 +13570,7 @@ def _generate_mlw_module(func: dict, lang: str, module_name: str) -> str:
         if old_name != new_name:
             param_name_map[old_name] = new_name
             p["name"] = new_name
-    
+
     # Remap param names in preconditions/postconditions
     if param_name_map:
         remapped_pre = []
@@ -13565,23 +13579,23 @@ def _generate_mlw_module(func: dict, lang: str, module_name: str) -> str:
                 pre = re.sub(r'\b' + re.escape(old) + r'\b', new, pre)
             remapped_pre.append(pre)
         preconditions = remapped_pre
-        
+
         remapped_post = []
         for post in postconditions:
             for old, new in param_name_map.items():
                 post = re.sub(r'\b' + re.escape(old) + r'\b', new, post)
             remapped_post.append(post)
         postconditions = remapped_post
-    
+
     # Function signature (AFTER lowercasing params)
     params_why3 = []
     for p in func.get("params", []):
         wtype = _type_to_why3(p.get("type", "int"), lang)
         params_why3.append(f"({p['name']}: {wtype})")
-    
+
     return_type = _type_to_why3(func.get("return_type", "int"), lang)
     param_str = " ".join(params_why3) if params_why3 else "()"
-    
+
     # ── MANDATORY INVARIANTS: if no user contracts, add sensible defaults ──
     if not preconditions and not postconditions:
         if return_type == "int":
@@ -13600,30 +13614,30 @@ def _generate_mlw_module(func: dict, lang: str, module_name: str) -> str:
             postconditions = ["true"]
         else:
             postconditions = ["true"]
-    
+
     if not preconditions:
         preconditions = ["true"]
-    
+
     # ── Generate module ──
     lines.append(f"  let {func_name_lower} {param_str} : {return_type}")
-    
+
     for pre in preconditions:
         why3_pre = _translate_contract(pre, lang)
         lines.append(f"    requires {{ {why3_pre} }}")
-    
+
     for post in postconditions:
         why3_post = _translate_contract(post, lang)
         lines.append(f"    ensures {{ {why3_post} }}")
-    
+
     # ── REAL BODY: try to translate source expression, fallback to provable stub ──
     body_expr = None
-    
+
     if source_body:
         # Try to translate the actual source expression to Why3
         why3_expr = _translate_expr_to_why3(source_body, func.get("params", []), lang)
         if why3_expr:
             body_expr = why3_expr
-    
+
     # Fallback: generate a provable stub based on return type and params
     if body_expr is None:
         if return_type == "int" and func.get("params"):
@@ -13645,64 +13659,64 @@ def _generate_mlw_module(func: dict, lang: str, module_name: str) -> str:
             body_expr = "()"
         else:
             body_expr = "0"
-    
+
     # ── Lowercase Ada param names in body expression ──
     if param_name_map and body_expr:
         for old, new in param_name_map.items():
             body_expr = re.sub(r'\b' + re.escape(old) + r'\b', new, body_expr)
-    
+
     lines.append(f"    = {body_expr}")
     lines.append("")
     lines.append("end")
-    
+
     return "\n".join(lines)
 
 
 def _translate_contract(contract: str, lang: str) -> str:
     """Translate a source language contract to Why3 syntax."""
     import re
-    
+
     result = contract
-    
+
     # Common translations
     # Python/TS: x > 0 → x > 0 (same in Why3)
     # Python: x is not None → x <> null
     result = re.sub(r"\bis\s+not\s+None\b", "<> null", result)
     result = re.sub(r"\bis\s+None\b", "= null", result)
     result = re.sub(r"\bNone\b", "null", result)
-    
+
     # Python: and/or/not → /\ /\/ not (Why3 formula operators)
     # These must be converted BEFORE the general &&/|| rules
     result = re.sub(r"\band\b", r"/\\", result)
     result = re.sub(r"\bor\b", r"\\/", result)
     result = re.sub(r"\bnot\b", "not ", result)
-    
+
     # TypeScript/C: && → /\, || → \/
     result = re.sub(r"&&", r"/\\", result)
     result = re.sub(r"\|\|", r"\\/", result)
-    
+
     # Python: True/False → true/false
     result = re.sub(r"\bTrue\b", "true", result)
     result = re.sub(r"\bFalse\b", "false", result)
-    
+
     # Equality: == → = (Why3 uses = for equality)
     result = re.sub(r"==", "=", result)
     # Inequality: != → <>
     result = re.sub(r"!=", "<>", result)
-    
+
     # length(x) → length x (Why3)
     result = re.sub(r"len\(([^)]+)\)", r"length \1", result)
     result = re.sub(r"length\(([^)]+)\)", r"length \1", result)
-    
+
     # Python: x in list → mem x list
     result = re.sub(r"(\w+)\s+in\s+(\w+)", r"mem \1 \2", result)
-    
+
     # Ada: Func'Result → result (Ada return value syntax)
     result = re.sub(r"\w+'Result", "result", result)
-    
+
     # Ada: trailing semicolons in contracts
     result = result.rstrip(";").strip()
-    
+
     return result.strip()
 
 
@@ -13715,29 +13729,29 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
         "javascript": {"files": [], "functions": 0},
         "c": {"files": [], "functions": 0},
     }
-    
+
     proofs_dir = os.path.join(project_dir, "proofs")
     os.makedirs(proofs_dir, exist_ok=True)
-    
+
     skip_dirs = {"vendor", "node_modules", "__pycache__", ".git", "build",
                  "proofs", "coq_proofs", "__tests__", "test", "tests"}
-    
+
     # Ada: merge .ads contracts with .adb bodies
     # First pass: collect all Ada functions from both .ads and .adb
     ada_functions = {}  # (package_name, func_name) -> merged func dict
-    
+
     # Ada: merge .ads contracts with .adb bodies
     # First pass: collect all Ada functions from both .ads and .adb
     ada_functions = {}  # (package_name, func_name) -> merged func dict
     ada_packages = {}   # package_name -> directory
-    
+
     for root, dirs, files in os.walk(project_dir):
         # Skip directories
         dirs[:] = [d for d in dirs if d not in skip_dirs]
-        
+
         for fname in files:
             filepath = os.path.join(root, fname)
-            
+
             if fname.endswith((".adb", ".ads")):
                 package_name = fname[:-4]  # Remove .adb/.ads
                 ada_packages[package_name] = root
@@ -13757,7 +13771,7 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
                             existing["source_body"] = func["source_body"]
                         if func.get("params"):
                             existing["params"] = func["params"]
-    
+
     # Generate .mlw for merged Ada functions
     _PRIMITIVE_TYPES = {"int", "bool", "real", "string", "unit", "any"}
     for (package_name, func_name), func in ada_functions.items():
@@ -13765,13 +13779,13 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
         param_types = [_type_to_why3(p.get("type", "int"), "ada") for p in func.get("params", [])]
         if rt not in _PRIMITIVE_TYPES or any(pt not in _PRIMITIVE_TYPES for pt in param_types):
             continue
-        
+
         module_name = f"{package_name}_{func_name}"
         module_name = module_name.replace("-", "_").replace(".", "_")
         module_name = module_name[0].upper() + module_name[1:] if module_name else "Module"
-        
+
         mlw_content = _generate_mlw_module(func, "ada", module_name)
-        
+
         mlw_path = os.path.join(proofs_dir, f"{module_name}.mlw")
         try:
             with open(mlw_path, "w") as f:
@@ -13780,24 +13794,23 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
             result["ada"]["functions"] += 1
         except OSError:
             pass
-    
+
     # Process non-Ada files
     for root, dirs, files in os.walk(project_dir):
         # Skip directories
         dirs[:] = [d for d in dirs if d not in skip_dirs]
-        
+
         for fname in files:
             filepath = os.path.join(root, fname)
-            rel_path = os.path.relpath(filepath, project_dir)
-            
+
             # Skip Ada files (already handled)
             if fname.endswith((".adb", ".ads")):
                 continue
-            
+
             # Determine language and parse
             functions = []
             lang = None
-            
+
             if fname.endswith(".py") and not fname.startswith("test_"):
                 lang = "python"
                 functions = _parse_python_contracts(filepath)
@@ -13810,7 +13823,7 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
             elif fname.endswith((".c", ".h")) and not fname.endswith(".h"):
                 lang = "c"
                 functions = _parse_c_contracts(filepath)
-            
+
             if lang and functions:
                 # Generate .mlw for each function
                 _PRIMITIVE_TYPES = {"int", "bool", "real", "string", "unit", "any"}
@@ -13821,14 +13834,14 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
                     param_types = [_type_to_why3(p.get("type", "int"), lang) for p in func.get("params", [])]
                     if rt not in _PRIMITIVE_TYPES or any(pt not in _PRIMITIVE_TYPES for pt in param_types):
                         continue
-                    
+
                     module_name = f"{Path(fname).stem}_{func['name']}"
                     module_name = module_name.replace("-", "_").replace(".", "_")
                     # Why3 requires module names to start with uppercase
                     module_name = module_name[0].upper() + module_name[1:] if module_name else "Module"
-                    
+
                     mlw_content = _generate_mlw_module(func, lang, module_name)
-                    
+
                     # Write .mlw file
                     mlw_path = os.path.join(proofs_dir, f"{module_name}.mlw")
                     try:
@@ -13838,13 +13851,13 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
                         result[lang]["functions"] += 1
                     except OSError:
                         pass
-    
+
     # ── Generate SECDED/TED verification module ──
     secded_path = _generate_secded_mlw(proofs_dir)
     if secded_path:
         result["c"]["files"].append(secded_path)
         result["c"]["functions"] += 1
-    
+
     return result
 
 
@@ -13854,13 +13867,13 @@ def _generate_all_mlw_files(project_dir: str) -> dict:
 
 def _generate_secded_mlw(proofs_dir: str) -> str | None:
     """Generate a complete SECDED (8,4) Hamming code verification module in Why3.
-    
+
     SECDED = Single Error Correction, Double Error Detection
     Uses (8,4) extended Hamming code: 4 data bits + 4 parity bits
-    
+
     Module includes:
     - Parity bit computation
-    - Syndrome computation  
+    - Syndrome computation
     - Single-bit error correction
     - Double-bit error detection
     - Round-trip encode→decode verification
@@ -14028,7 +14041,7 @@ def _generate_secded_mlw(proofs_dir: str) -> str | None:
 
 def _run_why3_proofs(proofs_dir: str) -> dict:
     """Run why3 on all .mlw files, discharge with solvers, extract counterexamples.
-    
+
     Pipeline:
       1. why3 prove --json --check-ce <file.mlw> → generates proof obligations
       2. z3/cvc5/colibri2 discharge obligations automatically
@@ -14036,7 +14049,7 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
       4. All results → .v files (proved: real proof, unproved: obligation stub)
     """
     import json
-    
+
     result = {
         "total_obligations": 0,
         "discharged": 0,
@@ -14045,7 +14058,7 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
         "v_files_generated": [],
         "errors": [],
     }
-    
+
     # Find why3
     why3 = None
     for candidate in ["why3", "opam exec -- why3"]:
@@ -14056,11 +14069,11 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
                 break
         except Exception:
             continue
-    
+
     if not why3:
         result["errors"].append("why3 NOT FOUND — install: opam install why3")
         return result
-    
+
     # Find solvers — use exact why3 prover IDs (shortcuts)
     solvers = []
     ce_solvers = []
@@ -14083,29 +14096,28 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
                 ce_solvers.append(solver_name)
             else:
                 solvers.append(solver_name)
-    
+
     if not solvers:
         result["errors"].append("No SMT solvers found — install: brew install z3 cvc5 alt-ergo")
         return result
-    
-    all_solvers = solvers + ce_solvers
+
     print(f"  Solvers: {', '.join(solvers)}")
     if ce_solvers:
         print(f"  CE solvers: {', '.join(ce_solvers)}")
-    
+
     # Process each .mlw file
     mlw_files = sorted(Path(proofs_dir).glob("*.mlw"))
     # Skip test files
     mlw_files = [f for f in mlw_files if not f.name.startswith("_test_")]
-    
+
     for mlw_file in mlw_files:
         print(f"  Processing {mlw_file.name}...")
         result["total_obligations"] += 1
-        
+
         # Step 1: Try SMT solvers with JSON output + counterexample checking
         proved = False
         ce_models = []
-        
+
         # Try standard solvers first for proving
         for solver in solvers:
             # Use --json for structured output, --check-ce for counterexample validation
@@ -14113,13 +14125,13 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
                 why3.split() + ["prove", str(mlw_file), "-P", solver, "--json", "--check-ce"],
                 timeout=60
             )
-            
+
             if rc == 0 and stdout.strip():
                 try:
                     data = json.loads(stdout)
                     answer = data.get("prover-result", {}).get("answer", "")
                     ce = data.get("prover-result", {}).get("ce-models", [])
-                    
+
                     if "Valid" in answer or "valid" in answer.lower():
                         proved = True
                         result["discharged"] += 1
@@ -14166,7 +14178,7 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
                     result["discharged"] += 1
                     print(f"    ✅ PROVED by {solver}")
                     break
-        
+
         # If not proved and no CE models yet, try CE-specific solvers
         if not proved and not ce_models:
             print(f"    Trying CE solvers ({', '.join(ce_solvers)})...")
@@ -14220,7 +14232,7 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
                             result["discharged"] += 1
                             print(f"    ✅ PROVED by {solver}")
                             break
-        
+
         if not proved:
             result["remaining"] += 1
             if ce_models:
@@ -14231,31 +14243,31 @@ def _run_why3_proofs(proofs_dir: str) -> dict:
                     if vals:
                         print(f"       Model: {vals}")
             else:
-                print(f"    ❌ Unproved — no counterexample model available")
-        
+                print("    ❌ Unproved — no counterexample model available")
+
         # Step 2: Generate .v file
         v_file = mlw_file.with_suffix(".v")
         _generate_coq_v_file(mlw_file, v_file, proved)
         if v_file.exists():
             result["v_files_generated"].append(str(v_file))
-    
+
     return result
 
 
 def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
     """Generate a Coq .v file from a Why3 .mlw module with REAL bodies and proofs.
-    
+
     Extracts the actual Why3 function body, translates to Coq, and generates
     real theorems proved by lia/reflexivity when possible.
     For goals that can't be auto-proved, uses Admitted with the real body.
     """
     module_name = mlw_file.stem
     coq_name = module_name.replace('-', '_').replace('.', '_')
-    
+
     mlw_content = mlw_file.read_text() if mlw_file.exists() else ""
-    
+
     import re
-    
+
     # ── Parse .mlw to extract function sections ──
     # Each function section: from "let fname" to next "let" or "end"
     func_sections = []
@@ -14263,14 +14275,14 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
     # NOT body-level "let x = expr" which has more indentation
     let_positions = [(m.start(), m.group(1)) for m in re.finditer(r"^  (?! )let\s+(\w+)", mlw_content, re.MULTILINE)]
     end_pos = mlw_content.rfind("\nend")
-    
+
     for idx, (pos, fname) in enumerate(let_positions):
         next_pos = let_positions[idx + 1][0] if idx + 1 < len(let_positions) else end_pos
         if next_pos < 0:
             next_pos = len(mlw_content)
         section = mlw_content[pos:next_pos]
         func_sections.append((fname, section))
-    
+
     if not func_sections:
         # No functions found — write empty module
         v_content = f"(* No functions found in {module_name} *)\n"
@@ -14279,27 +14291,27 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
         except OSError:
             pass
         return
-    
+
     # ── Detect types needed ──
     all_text = mlw_content
     has_bool = "bool" in all_text and "use bool.Bool" in all_text
     has_string = "string" in all_text and "use string.String" in all_text
-    
+
     imports = "Require Import ZArith.\nRequire Import Lia.\n"
     if has_bool:
         imports += "Require Import Bool.\n"
     if has_string:
         imports += "Require Import String.\nOpen Scope string_scope.\n"
     imports += "Open Scope Z_scope.\n"
-    
+
     status = "PROVED by SMT solver" if proved else "UNPROVED — obligation stub"
-    
+
     v_content = f"(* Auto-generated Coq verification certificate for {module_name} *)\n"
     v_content += f"(* {status} — generated by sabotage_verifier.py *)\n"
-    v_content += f"(* Real Why3 proofs in .mlw; Coq theorems below match real bodies *)\n"
+    v_content += "(* Real Why3 proofs in .mlw; Coq theorems below match real bodies *)\n"
     v_content += f"\n{imports}\n\n"
     v_content += f"Module {coq_name}.\n\n"
-    
+
     for fname, section in func_sections:
         # ── Parse function signature ──
         # Handle: let f (a: int) (b: int) : int
@@ -14316,24 +14328,24 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
         sig_match = re.match(r"let\s+\w+\s+(.*)", sig_line)
         if not sig_match:
             continue
-        
+
         remainder = sig_match.group(1).strip()
-        
+
         # Extract params using regex: find all (name: type) groups
         param_groups = re.findall(r'\((\w+)\s*:\s*(\w+)\)', remainder)
         params_str = ", ".join(f"{name}: {ptype}" for name, ptype in param_groups)
-        
+
         # Extract return type: last ": type" pattern
         rtype_match = re.search(r':\s*(\w+)\s*$', remainder)
         if not rtype_match:
             continue
         rtype = rtype_match.group(1)
-        
+
         coq_rtype_map = {"int": "Z", "bool": "bool", "real": "R", "string": "string"}
         coq_rtype = coq_rtype_map.get(rtype, "Z")
         coq_default = {"Z": "0%Z", "bool": "false", "R": "0%R", "string": "EmptyString"}
         default_val = coq_default.get(coq_rtype, "0%Z")
-        
+
         # ── Parse params ──
         param_parts = [p.strip() for p in params_str.split(",") if p.strip()]
         coq_params = ""
@@ -14349,17 +14361,17 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
             else:
                 coq_params += f" ({pp.strip()}: Z)"
                 coq_args.append(pp.strip())
-        
+
         if not coq_params:
             coq_params = " (n: Z)"
             coq_args = ["n"]
-        
+
         first_param = coq_args[0] if coq_args else "n"
-        
+
         # ── Extract pre/post conditions from section ──
         func_pre = re.findall(r"requires\s*\{\s*(.+?)\s*\}", section)
         func_post = re.findall(r"ensures\s*\{\s*(.+?)\s*\}", section)
-        
+
         # ── Extract body expression ──
         # Body is always "    = <expr>" on its own line, after all requires/ensures
         # Stop at function-level "  let" (exactly 2 spaces, no more) or "end" only
@@ -14372,10 +14384,10 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
             why3_body = re.sub(r"\(\*.*?\*\)", "", why3_body).strip()
             # Strip trailing closing braces
             why3_body = why3_body.rstrip("}").strip()
-        
+
         # ── Translate Why3 body to Coq ──
         coq_body = _why3_body_to_coq(why3_body, coq_rtype) if why3_body else default_val
-        
+
         # ── Build Coq precondition ──
         if func_pre:
             coq_pre_parts = []
@@ -14384,7 +14396,7 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
             coq_pre = " /\\ ".join(coq_pre_parts)
         else:
             coq_pre = "True"
-        
+
         # ── Build Coq postcondition ──
         all_params_str = " ".join(coq_args)
         if func_post:
@@ -14394,7 +14406,7 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
             coq_post = " /\\ ".join(coq_post_parts)
         else:
             coq_post = "True"
-        
+
         # ── Generate Definition ──
         # Complex = compound boolean ops (&&, ||) that break Coq translation
         # Simple if-chains and let-chains work fine in Coq
@@ -14408,39 +14420,39 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
             v_content += f"  (* Function {fname} — {status} *)\n"
             v_content += f"  Definition {fname}{coq_params} : {coq_rtype} :=\n"
             v_content += f"    {coq_body}.\n\n"
-        
+
         # ── Detect complex bodies that can't be proved with simple tactics ──
         # A body is "simple" only if it's pure arithmetic on params (no function calls)
         has_func_calls = bool(re.search(r'\b[a-z_]\w*\s+\w+', why3_body or "")) if why3_body else False
         is_simple_body = not is_complex_body and why3_body and why3_body.count("\n") == 0 and not has_func_calls
-        
+
         # ── Generate Theorem ──
         v_content += f"  Theorem {fname}_correct : forall{coq_params},\n"
         v_content += f"    ({coq_pre}) -> ({coq_post}).\n"
-        v_content += f"  Proof.\n"
-        v_content += f"    intros.\n"
-        
+        v_content += "  Proof.\n"
+        v_content += "    intros.\n"
+
         if proved and is_simple_body:
             # Proved by z3, simple body: unfold + lia
             v_content += f"    unfold {fname}.\n"
             if coq_rtype == "Z" and ("+" in coq_body or "*" in coq_body or "-" in coq_body):
-                v_content += f"    lia.\n"
+                v_content += "    lia.\n"
             elif coq_rtype == "bool":
-                v_content += f"    lia.\n"
+                v_content += "    lia.\n"
             else:
-                v_content += f"    lia.\n"
-            v_content += f"  Qed.\n\n"
+                v_content += "    lia.\n"
+            v_content += "  Qed.\n\n"
         elif proved:
             # Proved by z3, complex body: use omega since unfold doesn't work with let/if
-            v_content += f"    admit. (* proved by z3, complex body needs manual proof *)\n"
-            v_content += f"  Admitted.\n\n"
+            v_content += "    admit. (* proved by z3, complex body needs manual proof *)\n"
+            v_content += "  Admitted.\n\n"
         else:
             # Unproved: real body but obligation not discharged
-            v_content += f"    admit. (* obligation not discharged by SMT solver *)\n"
-            v_content += f"  Admitted.\n\n"
-    
+            v_content += "    admit. (* obligation not discharged by SMT solver *)\n"
+            v_content += "  Admitted.\n\n"
+
     v_content += f"End {coq_name}.\n"
-    
+
     try:
         v_file.write_text(v_content)
     except OSError:
@@ -14449,35 +14461,35 @@ def _generate_coq_v_file(mlw_file: Path, v_file: Path, proved: bool) -> None:
 
 def _why3_body_to_coq(why3_body: str, coq_type: str) -> str:
     """Convert a Why3 body expression to a Coq expression.
-    
+
     Handles: arithmetic, comparisons, if-then-else, let bindings,
     boolean ops, div/mod, literals.
     """
     import re
-    
+
     body = why3_body.strip()
-    
+
     # Strip trailing comments
     body = re.sub(r"\(\*.*?\*\)", "", body).strip()
-    
+
     # Strip trailing semicolons (from TS/JS source)
     body = body.rstrip(";").strip()
-    
+
     # ── Why3-specific → Coq translations ──
-    
+
     # Why3 "let x = expr in" → Coq "let x := expr in"
     body = re.sub(r'\blet\s+(\w+)\s*=\s*', r'let \1 := ', body)
-    
+
     # Why3 "div a b" → Coq "Z.div a b"
     body = re.sub(r'\bdiv\s+', 'Z.div ', body)
-    
+
     # Why3 "mod a b" → Coq "Z.modulo a b"
     body = re.sub(r'\bmod\s+', 'Z.modulo ', body)
-    
+
     # Why3 "&&" (boolean and) → Coq "Bool.eqb (... && ...) true" → just "andb"
     # Actually in Why3, && on ints is bitwise AND. In Coq context, keep as &&
     # but for bool context, use Bool.eqb
-    
+
     if coq_type == "Z":
         # Integer expressions
         # In if-then-else contexts, = must be Z.eqb (bool, not Prop)
@@ -14515,24 +14527,23 @@ def _why3_body_to_coq(why3_body: str, coq_type: str) -> str:
 
 def _why3_contract_to_coq(contract: str, fname: str = "", param: str = "n") -> str:
     """Convert a Why3 contract to a Coq proposition."""
-    import re
-    
+
     c = contract.strip()
-    
+
     # Why3 true/false → Coq True/False
     if c.strip() == "true":
         return "True"
     elif c.strip() == "false":
         return "False"
-    
+
     # String literals not valid Coq — wrap as True
     if '"' in c:
-        return f"True"
-    
+        return "True"
+
     # Replace result with function application
     if fname:
         c = c.replace("result", f"{fname} {param}")
-    
+
     # Bool comparisons: result = (x > 0) is bool = Prop, invalid in Coq
     # Since we use Admitted anyway, simplify to True
     if fname and "=" in c:
@@ -14541,7 +14552,7 @@ def _why3_contract_to_coq(contract: str, fname: str = "", param: str = "n") -> s
             rhs = parts[1].strip()
             if any(op in rhs for op in ["> ", "< ", ">=", "<="]):
                 return "True"
-    
+
     return c
 
 
@@ -14561,7 +14572,7 @@ def _run_cmd(cmd: list[str], timeout: int = 120, cwd: str | None = None) -> tupl
 def _compile_v_files(v_files: list[str]) -> dict:
     """Compile all .v files with coqc."""
     result = {"total": len(v_files), "compiled": 0, "failed": 0, "errors": []}
-    
+
     coqc = None
     for candidate in ["coqc", "opam exec -- coqc"]:
         try:
@@ -14571,11 +14582,11 @@ def _compile_v_files(v_files: list[str]) -> dict:
                 break
         except Exception:
             continue
-    
+
     if not coqc:
         result["errors"].append("coqc NOT FOUND — install: opam install coq")
         return result
-    
+
     for v_file in v_files:
         rc, stdout, stderr = _run_cmd(coqc.split() + [v_file], timeout=120)
         if rc == 0:
@@ -14583,7 +14594,7 @@ def _compile_v_files(v_files: list[str]) -> dict:
         else:
             result["failed"] += 1
             result["errors"].append(f"{v_file}: {stderr.strip()[:200]}")
-    
+
     return result
 
 
@@ -14593,37 +14604,37 @@ def _compile_v_files(v_files: list[str]) -> dict:
 
 def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
     """Run the complete verification pipeline for ALL languages:
-    
+
     1. Parse contracts from Ada/Python/C/TypeScript/JavaScript
     2. Generate Why3 .mlw modules
     3. Run why3 proof obligations
     4. Discharge with z3/cvc5/alt-ergo
     5. Generate .v files from unproved obligations
     6. Compile .v files with coqc
-    
+
     Returns violations for anything that fails.
     """
     violations = []
-    
+
     print("=" * 60)
     print("  WHY3 MULTI-LANGUAGE VERIFICATION PIPELINE")
     print("=" * 60)
     print()
-    
+
     # Step 1: Parse all source files
     print("[1/5] Parsing contracts from all source files...")
     parse_result = _generate_all_mlw_files(project_dir)
-    
+
     total_funcs = sum(lang["functions"] for lang in parse_result.values())
     total_files = sum(len(lang["files"]) for lang in parse_result.values())
-    
+
     for lang, data in parse_result.items():
         if data["functions"] > 0:
             print(f"  {lang}: {data['functions']} functions in {len(data['files'])} files")
-    
+
     print(f"  Total: {total_funcs} functions, {total_files} .mlw files")
     print()
-    
+
     if total_funcs == 0:
         violations.append(Violation(
             severity=Severity.HIGH,
@@ -14633,7 +14644,7 @@ def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
             standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
         ))
         return violations
-    
+
     # Step 2: Run Why3 proofs
     print("[2/5] Running Why3 proof obligations with counterexample extraction...")
     proofs_dir = os.path.join(project_dir, "proofs")
@@ -14647,36 +14658,36 @@ def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
             for ce in ces:
                 print(f"    {fname}: {ce['goal']} ({ce['solver']})")
     print()
-    
+
     # Step 3: Compile .v files
     print("[3/5] Compiling .v files with coqc...")
     v_files = why3_result.get("v_files_generated", [])
-    
+
     # Also find existing .v files
     for v in Path(proofs_dir).glob("*.v"):
         if str(v) not in v_files:
             v_files.append(str(v))
-    
+
     compile_result = _compile_v_files(v_files) if v_files else {"total": 0, "compiled": 0, "failed": 0, "errors": ["No .v files"]}
     print(f"  Total: {compile_result['total']}")
     print(f"  Compiled: {compile_result['compiled']}")
     print(f"  Failed: {compile_result['failed']}")
     print()
-    
+
     # Step 4: Check for gaps
     print("[4/5] Checking for proof gaps...")
-    
+
     # Find source files without .v proofs
     source_files = []
     skip_dirs = {"vendor", "node_modules", "__pycache__", ".git", "build",
                  "proofs", "coq_proofs", "__tests__", "test", "tests"}
-    
+
     for root, dirs, files in os.walk(project_dir):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
         for fname in files:
             if fname.endswith((".adb", ".ads", ".py", ".ts", ".js", ".c", ".h")):
                 source_files.append(os.path.join(root, fname))
-    
+
     for src_file in source_files:
         unit_name = Path(src_file).stem.lower()
         has_proof = False
@@ -14684,7 +14695,7 @@ def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
             if unit_name in Path(v_file).stem.lower():
                 has_proof = True
                 break
-        
+
         if not has_proof:
             # Determine language
             if src_file.endswith((".adb", ".ads")):
@@ -14699,7 +14710,7 @@ def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
                 lang = "C"
             else:
                 lang = "Unknown"
-            
+
             violations.append(Violation(
                 severity=Severity.CRITICAL,
                 category="NO_COQ_PROOF",
@@ -14710,14 +14721,14 @@ def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
                 ),
                 standard="DO-178C §5.2.2, ECSS-Q-ST-80C §6.3",
             ))
-    
+
     # Step 5: Generate report
     print("[5/5] Generating verification report...")
     print()
     print("=" * 60)
     print("  VERIFICATION SUMMARY")
     print("=" * 60)
-    print(f"  Languages parsed: {sum(1 for l in parse_result.values() if l['functions'] > 0)}")
+    print(f"  Languages parsed: {sum(1 for lang_stats in parse_result.values() if lang_stats['functions'] > 0)}")
     print(f"  Total functions: {total_funcs}")
     print(f"  .mlw files generated: {total_files}")
     print(f"  .v files generated: {len(v_files)}")
@@ -14725,7 +14736,7 @@ def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
     print(f"  .v files failed: {compile_result.get('failed', 0)}")
     print(f"  Proof violations: {len(violations)}")
     print("=" * 60)
-    
+
     return violations
 
 
@@ -14735,7 +14746,7 @@ def run_full_verification_pipeline(project_dir: str) -> list[Violation]:
 
 def _check_full_verification_pipeline(src_dir: str) -> list[Violation]:
     """Check that the full verification pipeline runs for ALL languages.
-    
+
     This replaces the old stub checks with real Why3-based verification.
     """
     return run_full_verification_pipeline(src_dir)

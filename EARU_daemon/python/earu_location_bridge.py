@@ -80,6 +80,33 @@ def fetch_topo_altitude(lat: float, lon: float) -> float | None:
 
 def check_core_location_bg() -> None:
     """Poll CoreLocationCLI in a background thread, update global_location."""
+    # -- WHY THE osascript HOP (and why it is NOT a dialog) ------------------
+    # Parity: earu-location_bridge.adb Build_CL_Command (TCC-A..TCC-3).
+    #
+    # TCC consent for the privacy services that carry usage descriptions
+    # (Location, Camera, Microphone, Bluetooth) is keyed to a bundle identifier
+    # plus a code signature. A bare executable -- including a root one -- has
+    # no bundle identity for systempolicyd to attach a grant to, and TCC is
+    # enforced per-process rather than per-uid, so root is not an exemption.
+    # The consent that matters therefore belongs to the console user, which is
+    # why this hops into their session via `launchctl asuser`.
+    #
+    # `osascript` is only the transport for issuing a shell command in that
+    # session; it displays nothing here. Any consent alert seen would be
+    # emitted by macOS itself, not requested by this code.
+    #
+    # KNOWN GAP: nothing in this project probes authorizationStatus or
+    # kTCCService*, and nothing raises a dialog on a missing grant. A denial is
+    # silent -- the poll fails, the thread sleeps, and the next cycle retries
+    # the same way. That is indistinguishable from idleness in a CPU profile,
+    # because both look like time parked in a timed wait. Diagnose a denial
+    # from the error path (kCLErrorDenied / -25293) or the TCC database.
+    #
+    # Full Disk Access is the exception: it is keyed to a client PATH
+    # (kTCCServiceSystemPolicyAllFiles), so a bare binary can be granted it
+    # with no bundle. Do not generalise the bundle requirement to FDA.
+    # [Reference: Apple Platform Deployment -- Controlling app access to user
+    #  data; TCC service identifiers and responsible-process attribution]
     global_location.cl_running = True
     try:
         user_res = subprocess.run(

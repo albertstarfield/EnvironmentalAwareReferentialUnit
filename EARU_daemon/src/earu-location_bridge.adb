@@ -773,6 +773,39 @@ package body Earu.Location_Bridge is
    --   launchctl asuser UID osascript -e 'do shell script "CMD"'; else CMD.
    -- WCET: O(1) — string concatenation.
    -- [Timing: DO-178C §6.4.4 WCET analysis]
+   --
+   -- -- WHY THE osascript HOP (and why it is NOT a dialog) ------------------
+   -- AXIOM (TCC-A): TCC consent on macOS is keyed to a bundle identifier plus
+   --   a code signature for the privacy services that carry usage
+   --   descriptions (Location, Camera, Microphone, Bluetooth). A bare
+   --   executable has no bundle identity for systempolicyd to attach a grant
+   --   to, so a root binary cannot obtain a Location grant for itself.
+   -- AXIOM (TCC-B): TCC is enforced per-process by systempolicyd through the
+   --   kernel sandbox layer, NOT per-uid. Being root is NOT an exemption: a
+   --   root process with no grant of its own is denied exactly like any other.
+   --   Inheriting root from a `sudo` shell conveys no consent.
+   -- THEOREM (TCC-1): The consent that matters for this call belongs to the
+   --   console user, not to this daemon. Hence the hop: `launchctl asuser UID`
+   --   re-enters that user's session so the query is evaluated against the
+   --   user's TCC identity. `osascript` is only the transport used to issue a
+   --   shell command in that session — it displays NOTHING here. A consent
+   --   alert, if one ever appears, is emitted by macOS itself and would be
+   --   incidental, not requested by this code.
+   -- KNOWN GAP (TCC-2): Nothing in this unit — or anywhere in the project —
+   --   probes authorizationStatus / kTCCService*, and no code raises a dialog
+   --   on a missing grant. A denial is therefore SILENT: the poll fails, the
+   --   task sleeps, and the next cycle retries identically. That failure mode
+   --   is indistinguishable from idleness under `sample`, because both appear
+   --   as time parked in a timed wait. Diagnose a denial from the error path
+   --   (kCLErrorDenied / -25293) or the TCC database, never from a CPU profile.
+   --   System_Log_Watcher_Task does not cover this: it watches bridge.log and
+   --   adb_mock.log, not the system log where TCC denials land.
+   -- NOTE (TCC-3): Full Disk Access is the exception to TCC-A — it is keyed
+   --   to a client PATH (kTCCServiceSystemPolicyAllFiles), so a bare binary
+   --   such as EARU_daemon/bin/earu_daemon can be granted it with no bundle
+   --   at all. Do not generalise TCC-A to FDA.
+   -- [Reference: Apple Platform Deployment — Controlling app access to user
+   --  data; TCC service identifiers and responsible-process attribution]
    -- @test: Test_Location_Bridge — Register_Routine ("Build_CL_Command", Test_Location_Bridge'Access);
    function Build_CL_Command
      (CL_Path, Console_UID, Console_User : String) return String
