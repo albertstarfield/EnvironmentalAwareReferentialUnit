@@ -251,8 +251,54 @@ except ImportError:
 # [Citation: WMO-No. 8 - 16-point compass rose convention, degrees true]
 _COMPASS_LABELS: tuple[str, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 
+# Network budgets, in seconds.
+#
+# WHY BOUNDED: every outbound call in this file previously used a bare
+# urlopen() with no timeout, so a stalled resolver or an unreachable host
+# blocked the calling thread for as long as the OS cared to wait. The tile path
+# is the damaging one because get_tile_texture spawns a fresh thread per tile:
+# hung fetches piled up without limit and the map never filled in, which
+# presented as "the app shows nothing".
+#
+# 10 s for tiles is generous for a CDN-backed PNG yet bounded, so one bad host
+# cannot consume the whole worker pool. Routing and geocoding are interactive
+# lookups, so they are tighter.
+#
+# Defined here rather than on TileManager so they can be referenced by
+# module-level helpers defined before the class.
+TILE_TIMEOUT = 10.0
+ROUTING_TIMEOUT = 8.0
+GEOCODE_TIMEOUT = 8.0
+
+# Throttled tile-failure reporter.
+#
+# Every tile fetch runs on its own daemon thread, so a naive print per failure
+# would flood the log (and the monitor log file) during an outage. Counting
+# instead keeps the signal visible without the noise: a run of failures is
+# summarised, not silenced.
+_TILE_FAIL_COUNT = 0
+_TILE_FAIL_LOCK = threading.Lock()
+
+
+def _note_tile_failure(exc):
+    """Record a tile fetch failure and print a throttled summary.
+
+    Before this existed a failed fetch was discarded with a bare
+    `except Exception: pass`, so an entirely unreachable tile server looked
+    identical to a slow one - the map simply stayed blank with no clue why.
+    """
+    global _TILE_FAIL_COUNT
+    with _TILE_FAIL_LOCK:
+        _TILE_FAIL_COUNT += 1
+        n = _TILE_FAIL_COUNT
+    if n <= 3 or n % 50 == 0:
+        print(f"[TILE] fetch failed ({n} so far): {type(exc).__name__}: {exc}",
+              flush=True)
+
+
 class TileManager:
     """Manages map tiles, downloads, and OpenGL texture creation."""
+
     def __init__(self):
         self.textures = {} # (z, x, y) -> texture_id
         self.loading = set()
@@ -277,10 +323,22 @@ class TileManager:
             url = f"https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0'})
-                with urllib.request.urlopen(req) as resp:
+                # BOUNDED: this call previously had no timeout. Sampling the
+                # live process showed the tile workers parked in
+                # socket_getaddrinfo (272 + 270 samples across two threads) and
+                # sock_connect/internal_connect (146 + 102), i.e. DNS and TCP
+                # connect hanging indefinitely. Because request_image spawns one
+                # fresh thread per tile, hung fetches accumulated without bound
+                # and no tile ever reached tile_image_cache -- which is what
+                # presented as "the app shows nothing". A per-request timeout
+                # turns a permanent hang into a retryable failure.
+                with urllib.request.urlopen(req, timeout=TILE_TIMEOUT) as resp:
                     with open(tile_path, "wb") as f: f.write(resp.read())
-            except Exception:
-                with self.lock: self.loading.remove((z, x, y))
+            except Exception as exc:
+                # Previously swallowed with no trace, so a wholly unreachable
+                # tile server was indistinguishable from a slow one.
+                _note_tile_failure(exc)
+                with self.lock: self.loading.discard((z, x, y))
                 return
 
         # Load into memory and schedule GL upload
@@ -1486,7 +1544,10 @@ class PrimaryFlightDisplay:
             url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=jsonv2&limit=10&viewbox={viewbox}&bounded=1"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0 (contact: albertstarfield)'})
 
-            with urllib.request.urlopen(req) as response:
+            # Bounded: this call had no timeout, so an unresponsive Nominatim
+            # would pin its worker thread indefinitely. Interactive lookup, so
+            # bounded tightly; see GEOCODE_TIMEOUT.
+            with urllib.request.urlopen(req, timeout=GEOCODE_TIMEOUT) as response:
                 data = json.loads(response.read().decode())
                 if data:
                     for item in data:
@@ -1617,7 +1678,9 @@ class PrimaryFlightDisplay:
             coords_str = ";".join(coords_list)
             url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
             req = urllib.request.Request(url, headers={'User-Agent': 'EARU_PFD_Viz/1.0'})
-            with urllib.request.urlopen(req) as response:
+            # Bounded: same reasoning as the geocoder call above — a stalled
+            # OSRM must not hold its thread forever.
+            with urllib.request.urlopen(req, timeout=ROUTING_TIMEOUT) as response:
                 data = json.loads(response.read().decode())
                 if data and 'routes' in data and data['routes']:
                     geom = data['routes'][0]['geometry']['coordinates']
