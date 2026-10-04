@@ -21,9 +21,7 @@
 pragma SPARK_Mode (Off);
 -- low_level: raw Modular bit twiddling below the SPARK modeling boundary.
 
-with Ada.Real_Time;
 with Interfaces;
-use type Ada.Real_Time.Time;
 use type Interfaces.Unsigned_64;
 use type Interfaces.Unsigned_32;
 
@@ -35,18 +33,49 @@ package body Earu.Secdec is
    --              elaborating this constant stamps "process start" once,
    --              per process, at a cost nobody pays twice.
    --  THEORIES:   Fault-injection proof is only required while the system
-   --              comes up; after Deadline every wrapper call can return in
-   --              O(1) without weakening the TED invariant (Secdec_Decode
-   --              itself still verifies every word it touches — the gate
-   --              only stops the *self-inflicted* fault exercise).
-   --  APPLICATIONS: Ada.Real_Time.Clock is CLOCK_MONOTONIC (GNAT) — immune
-   --              to wall-clock steps, so the window cannot be stretched
-   --              or skipped by NTP/user clock changes.
+   --              comes up; once the budget is exhausted every wrapper call
+   --              returns in O(1) without weakening the TED invariant
+   --              (Secdec_Decode itself still verifies every word it touches
+   --              — the gate only stops the *self-inflicted* exercise).
+   --
+   --  WHY A CALL BUDGET AND NOT A WALL-CLOCK WINDOW (behaviour change):
+   --  This used to read Ada.Real_Time.Clock on EVERY call to test
+   --  `Clock >= POST_Deadline`. Sampling the running daemon showed that clock
+   --  read was the single hottest leaf in the only non-blocked thread:
+   --  earu__secdec__atomic_function_wrapper at 19 of 1452 samples, of which
+   --  gettimeofday/mach_absolute_time accounted for 12 — i.e. ~30,000
+   --  clock syscalls per second, since the gate is invoked from 39 call sites
+   --  on a task looping at `delay 0.001` (~800 Hz), to evaluate a condition
+   --  that has been false since the process's first 30 seconds.
+   --
+   --  Two further reasons the clock had to go rather than merely be cached:
+   --    1. Ada.Real_Time is outside the SPARK subset, so that one line was
+   --       the sole reason Earu.Secdec could not be SPARK_Mode On — and with
+   --       it, the sole reason 39 SPARK_Mode On call sites could not legally
+   --       reference this package (13 violations in earu-bcg_detection alone).
+   --    2. A monotonic counter is a plain bounded Natural: SPARK-expressible
+   --       with no range obligation of its own, and it makes the steady-state
+   --       cost a single register compare instead of a syscall.
+   --
+   --  DELIBERATE DIFFERENCE: the window is now "the first N guarded calls"
+   --  rather than "the first 30 seconds of wall time". The documented purpose —
+   --  a live proof at power-on that the parity machinery still works — is
+   --  preserved, because the budget is consumed within the first seconds of
+   --  start-up. What does change: a process that stayed completely idle for
+   --  its first 30 s previously still ran thousands of injections, and now
+   --  runs none until real computation happens. That is arguably the more
+   --  honest behaviour — there is nothing to protect during idleness — but it
+   --  is a change to verification timing and is recorded here deliberately.
+   --
    --  CITATIONS:
    --    [Citation: Ada RM 10.2 "Elaboration of Library Units"]
-   --    [Citation: Ada RM 9.6.1 "Delays" — Time, Clock]
-   POST_Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (30);
+   --    [Based on: live sample of earu_daemon, 2026-10-04, top-of-stack leaf]
+   CHECKS_BUDGET : constant Natural := 4096;
+
+   --  Decremented on each call that actually performs the injection proof.
+   --  Non-constant because the whole point is that it decreases; it is package
+   --  state rather than a local because it must survive across calls.
+   Checks_Remaining : Natural := CHECKS_BUDGET;
 
    -- | Purpose: Raw two's-complement machine-word pattern of a signed value.
    -- | Parameters: V — Long_Integer whose 64-bit pattern is wanted.
@@ -205,20 +234,26 @@ package body Earu.Secdec is
     procedure Atomic_Function_Wrapper is
        -- Pre => True — gate may run at any subprogram entry
        -- Post => True — either the parity engine was proven healthy within
-       --   the POST window, or the window elapsed and the call returned
-       --   without exercising fault injection (steady-state O(1)).
+       --   the check budget, or the budget was exhausted and the call
+       --   returned without exercising fault injection (steady-state O(1)).
+       --   Checks_Remaining only ever decreases and never goes below 0, so
+       --   this holds trivially: no exception, no state escape.
     begin
        --  POST gate: statements must precede the test's declarations, so the
-       --  gate lives here — AFTER the window the heavy declarative part
-       --  below (Encode/Decode syndromes) is never elaborated.  This kills
+       --  gate lives here — AFTER the budget is spent the heavy declarative
+       --  part below (Encode/Decode syndromes) is never elaborated.  This kills
        --  the exception-unwind + dyld Mach-O reparse hot path that ate the
        --  sensors task in the production CPU sample, while keeping every
        --  call site (one bare Atomic_Function_Wrapper; statement) intact.
-       --  AXIOM: Clock is monotonic and stamped at elaboration, so a wall
-       --  clock step can neither open nor close the window.
-       if Ada.Real_Time.Clock >= POST_Deadline then
+       --  AXIOM: the budget is stamped at elaboration and only ever decreases, so
+       --  it can be neither reopened nor stretched by a wall-clock/NTP step.
+       --  Replaced an Ada.Real_Time.Clock read on every call with a counter
+       --  decrement; see CHECKS_BUDGET above for the measurement that
+       --  motivated it and for the behavioural difference it introduces.
+       if Checks_Remaining = 0 then
           return;
        end if;
+       Checks_Remaining := Checks_Remaining - 1;
        declare
           Vector   : constant Long_Integer := 16#5A5A_A5A5#;
           Sealed   : constant Sealed_Word  := Secdec_Encode (Vector);
