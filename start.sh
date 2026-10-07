@@ -497,6 +497,72 @@ else
     fi
 fi
 
+# 4d. Python CoreLocationCLI conduit (cffi embedding -> libearu_location.dylib).
+#
+# AXIOM: Ada cannot import Python; it imports C. The velocity-adaptive poll
+# cadence (Earu.Location_Bridge.Scan_Interval_Sec, exponential 7-60 s) lives in
+# Ada, and the CoreLocationCLI fix cycle itself is executed by this Python
+# library, so one owner decides WHEN and one implementation does WHAT. The
+# former Python scheduler (np.interp + `killall -9 locationd`) was deleted:
+# two schedulers for one resource was the bug.
+#
+# Built here for the same reason as the .mm scanners above: the GPR language set
+# is Ada + C, so a Python shared library must be produced out-of-band. cffi's
+# EMBEDDING mode compiles the implementation source into the dylib and links
+# libpython; the embedded interpreter starts lazily on the first exported call,
+# so the Ada side never calls Py_Initialize.
+# [Citation: cffi embedding mode -
+#  https://cffi.readthedocs.io/en/latest/embedding.html]
+#
+# NON-FATAL BY DESIGN: Earu.Location_Bridge resolves this dylib with
+# dlopen/dlsym and falls back to its native popen fix cycle when it is absent,
+# so a build failure degrades cadence ownership but never stops the daemon.
+#
+# Same hashing/ownership handling as the scanners, because lib/ may have been
+# recreated by root above.
+FFI_BUILDER="$DAEMON_DIR/python/earu_location_ffi.py"
+FFI_IMPL="$DAEMON_DIR/python/earu_location_impl.py"
+FFI_LIB="$DAEMON_DIR/lib/libearu_location.dylib"
+FFI_HASH_FILE="$DAEMON_DIR/.ffi_hash"
+
+if [ -f "$FFI_LIB" ]; then
+    chown "$MM_OWNER" "$FFI_LIB" 2>/dev/null
+fi
+
+FFI_CURRENT_HASH=""
+if [ -f "$FFI_BUILDER" ]; then
+    FFI_CURRENT_HASH=$(shasum -a 256 "$FFI_BUILDER" "$FFI_IMPL" 2>/dev/null | shasum -a 256 | awk '{print $1}')
+fi
+FFI_OLD_HASH=""
+if [ -f "$FFI_HASH_FILE" ]; then
+    FFI_OLD_HASH=$(cat "$FFI_HASH_FILE")
+fi
+
+if [ -f "$FFI_BUILDER" ] && { [ "$FFI_CURRENT_HASH" != "$FFI_OLD_HASH" ] || [ ! -f "$FFI_LIB" ] || [ "$FORCE_CLEAN" = true ]; }; then
+    echo "[*] Building Python CoreLocation conduit (libearu_location.dylib)..."
+    # The interpreter is resolved from PATH (never a hardcoded prefix, per the
+    # no_platform_hardcoding rule) and must be probed for cffi: only an
+    # interpreter that can import cffi can build an embedding-mode library.
+    # EARU_FFI_PYTHON overrides the search.
+    FFI_PYTHON="${EARU_FFI_PYTHON:-python3}"
+    if ! run_as_user --build-path "$FFI_PYTHON" -c "import cffi" >/dev/null 2>&1; then
+        echo "[!] WARNING: '$FFI_PYTHON' cannot import cffi - skipping conduit build."
+        echo "    Set EARU_FFI_PYTHON to an interpreter that has cffi."
+    elif run_as_user --build-path "$FFI_PYTHON" python/earu_location_ffi.py "$DAEMON_DIR/lib"; then
+        echo "$FFI_CURRENT_HASH" > "$FFI_HASH_FILE"
+        echo "[*] Python CoreLocation conduit compiled successfully."
+    else
+        echo "[!] WARNING: Python conduit build failed."
+        echo "    The daemon will use its native popen fix cycle instead."
+    fi
+else
+    if [ -f "$FFI_LIB" ]; then
+        echo "[*] Python conduit unchanged, skipping dylib build."
+    else
+        echo "[!] earu_location_ffi.py not found, skipping."
+    fi
+fi
+
 # 5. Build or Skip
 FAIL_COUNT_FILE="$DAEMON_DIR/.build_fail_count"
 MAX_FAILS=5

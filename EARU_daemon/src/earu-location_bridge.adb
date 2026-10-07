@@ -36,6 +36,7 @@ with Ada.Text_IO;
 with Interfaces.C;
 
 with Earu.IO;
+with Earu.Location_FFI;
 with Earu.Secdec;
 with Earu.Weather_Fetcher;
 
@@ -156,33 +157,54 @@ package body Earu.Location_Bridge is
          return 0.0;  -- Safe_Fallback (Python parity, line 161-162)
    end ISA_Pressure;
 
-   -- | Purpose: Scan_Interval_Sec — AXIOM A5 cadence interpolation.
+   -- | Purpose: Scan_Interval_Sec — AXIOM A5 exponential cadence (revised).
    -- | Parameters: V_Mag — ground speed m/s.
-   -- | Returns: seconds until next CL attempt (clamped 4.0 .. 30.0).
+   -- | Returns: seconds until next CL attempt (7.0 .. 60.0).
    -- | CSI: DO-178C §6.4.4
-   -- AXIOM A5: np.interp(v, [0,1,2], [30,15,4]) with linear segments
-   --   V≤0 → 30; 0<V<1 → 30 − 15V; 1≤V<2 → 15 − 11(V−1); V≥2 → 4.
-   -- WCET: O(1) — four comparisons, two multiplies.
+   -- AXIOM A5 (REVISED): v_norm = (clamp(V,0.6,20.0) - 0.6) / 19.4, and
+   --   interval = 7.0 + 53.0 * exp(-5.0 * v_norm).
+   --   V ≤ 0.6 m/s ⇒ v_norm = 0 ⇒ 60.0 s (stationary, maximum interval).
+   --   V ≥ 20.0 m/s ⇒ v_norm = 1 ⇒ 7.0 + 53.0*exp(-5) ≈ 7.36 s (fastest).
+   -- WCET: O(1) — two comparisons, one divide, one libm exp.
    -- [Timing: DO-178C §6.4.4 WCET analysis]
    -- @test: Test_Location_Bridge — Register_Routine ("Scan_Interval_Sec", Test_Location_Bridge'Access);
    function Scan_Interval_Sec (V_Mag : Real) return Real is
+      V_Lo    : constant Real := 0.6;    -- m/s: at/below ⇒ stationary
+      V_Hi    : constant Real := 20.0;   -- m/s: at/above ⇒ fastest transport
+      Decay_K : constant Real := 5.0;    -- curve steepness
+      I_Min   : constant Real := 7.0;    -- s: asymptotic floor
+      I_Span  : constant Real := 53.0;   -- s: I_Min + I_Span = 60.0 ceiling
+      V       : Real;
+      V_Norm  : Real;
    begin
       Earu.Secdec.Atomic_Function_Wrapper;
-      if V_Mag <= 0.0 then
-         return 30.0;
+
+      --  APPLICATION STEP 1: reject NaN before clamping.  Every comparison
+      --  with a NaN is False, so without this guard a NaN would survive both
+      --  clamps and poison exp(), violating the postcondition.  `V /= V` is
+      --  the IEEE-754 NaN test (a NaN is the only value not equal to itself).
+      --  [Reference: IEEE 754-2019 — NaN comparisons are unordered]
+      V := V_Mag;
+      if V /= V then
+         return I_Min + I_Span;  -- 60.0 s: most conservative cadence
       end if;
-      if V_Mag < 1.0 then
-         return 30.0 - 15.0 * V_Mag;
+
+      --  APPLICATION STEP 2: clamp to the velocity band (AXIOM A5).
+      if V < V_Lo then
+         V := V_Lo;
       end if;
-      if V_Mag < 2.0 then
-         return 15.0 - 11.0 * (V_Mag - 1.0);
+      if V > V_Hi then
+         V := V_Hi;
       end if;
-      return 4.0;
+
+      --  APPLICATION STEP 3: normalise to [0,1] and apply the exponential.
+      V_Norm := (V - V_Lo) / (V_Hi - V_Lo);
+      return I_Min + I_Span * F_Math.Exp (-Decay_K * V_Norm);
    exception
       when others =>
-         --  Safe_Fallback: NaN comparisons are False ⇒ falls to 4.0 branch;
-         --  an exception here would only be a non-number V_Mag.
-         return 30.0;  -- slowest cadence = most conservative
+         --  Safe_Fallback: any arithmetic fault yields the slowest cadence,
+         --  which costs at most battery, never correctness.
+         return I_Min + I_Span;  -- 60.0 s
    end Scan_Interval_Sec;
 
    -- | Purpose: To_Fixed_4 — Python f"{v:.4f}" byte-compatible formatter.
@@ -983,6 +1005,12 @@ package body Earu.Location_Bridge is
       Terrain_Time : Real := 0.0;
       Terrain_Val  : Real := 0.0;
 
+      --  FFI conduit flag (AXIOM A6-FFI).  Declared here because Ada forbids
+      --  declarations after the first statement of a task body; the actual
+      --  Load call happens in the statement part so the dlopen latency is
+      --  paid once, deliberately, after the settle delay.
+      Ffi_Available : Boolean := False;
+
       --  Cadence anchor (parity: weather_worker last_cl_check = 0.0 ⇒ the
       --  first attempt fires immediately after the settle delay).
       Last_Check : Real := 0.0;
@@ -1238,6 +1266,21 @@ package body Earu.Location_Bridge is
         ("[LocationBridge] Task started, first fix attempt in 5 s...");
       delay 5.0;  -- network/LocationServices settle (Weather_Fetcher parity)
 
+      --  AXIOM A6-FFI: resolve the Python conduit ONCE, before the cadence
+      --  loop.  Load is total and idempotent; on failure the loop keeps using
+      --  the native popen cycle, so the daemon never depends on the dylib.
+      Ffi_Available :=
+        Earu.Location_FFI.Load
+          (Script_Dir => Earu.IO.Project_Root & "/EARU_daemon/python");
+      if Ffi_Available then
+         Ada.Text_IO.Put_Line
+           ("[LocationBridge] fix cycle = Python conduit (libearu_location)");
+      else
+         Ada.Text_IO.Put_Line
+           ("[!] LocationBridge: Python conduit unavailable - " &
+            "using native fix cycle: " & Earu.Location_FFI.Last_Error);
+      end if;
+
       while Running loop
          begin
             pragma Loop_Invariant (Standard.True);
@@ -1270,7 +1313,42 @@ package body Earu.Location_Bridge is
                         " (parity with Python bridge)");
                   end if;
 
-                  Run_Fix_Cycle;
+                  --  AXIOM A6-FFI: when the Python conduit is loaded it owns
+                  --  the fix cycle (it also computes terrain and writes
+                  --  sensor_terrain_alt.dat itself); otherwise the native
+                  --  popen cycle runs, unchanged.
+                  if Ffi_Available then
+                     declare
+                        R        : constant Earu.Location_FFI.Fix_Result :=
+                          Earu.Location_FFI.Execute_Fix;
+                        New_Snap : Location_Snapshot := Shared.Snapshot;
+                     begin
+                        if R.Ok then
+                           New_Snap.Lat          := R.Lat;
+                           New_Snap.Lon          := R.Lon;
+                           New_Snap.Alt          := R.Alt;
+                           New_Snap.Pressure_HPa := R.Pressure_HPa;
+                           New_Snap.Terrain_Alt  := R.Terrain_Alt;
+                           New_Snap.Has_Fix      := True;
+                           New_Snap.Fix_Time     := Now_Sec;
+                           Shared.Publish (New_Snap);
+                           Ada.Text_IO.Put_Line
+                             ("[LocationBridge] FFI fix published: lat=" &
+                              Real'Image (New_Snap.Lat) & " lon=" &
+                              Real'Image (New_Snap.Lon) & " alt=" &
+                              Real'Image (New_Snap.Alt) & " p=" &
+                              Real'Image (New_Snap.Pressure_HPa) &
+                              " terrain=" &
+                              Real'Image (New_Snap.Terrain_Alt));
+                        else
+                           Ada.Text_IO.Put_Line
+                             ("[!] LocationBridge: FFI fix failed: " &
+                              R.Error_Msg (1 .. R.Error_Len));
+                        end if;
+                     end;
+                  else
+                     Run_Fix_Cycle;
+                  end if;
                end if;
             end;
          exception

@@ -119,18 +119,24 @@ package Earu.Location_Bridge is
    function ISA_Pressure (Alt_M : Real) return Real
      with Pre => True, Post => ISA_Pressure'Result >= 0.0;
 
-   -- | Purpose: Scan_Interval_Sec — np.interp(v_mag, [0,1,2], [30,15,4]).
-   -- | Parameters: V_Mag — current ground speed (m/s), typically 0.0 (A7).
-   -- | Returns: seconds until the next CoreLocation attempt (4.0 .. 30.0).
+   -- | Purpose: Scan_Interval_Sec — velocity-adaptive CoreLocation cadence.
+   -- | Parameters: V_Mag — current ground speed (m/s).
+   -- | Returns: seconds until the next CoreLocation attempt (7.0 .. 60.0).
    -- | CSI: DO-178C §6.4.4
-   -- AXIOM A5. Piecewise-linear: V≤0→30; 0<V<1→30−15V; 1≤V<2→15−11(V−1);
-   -- V≥2→4 (np.interp clamps outside the knot range).
-   -- WCET: O(1) — 4 comparisons.
+   -- AXIOM A5 (REVISED). The poll interval decays exponentially with speed:
+   --   v_norm   = (clamp(V_Mag, 0.6, 20.0) - 0.6) / 19.4        ∈ [0, 1]
+   --   interval = 7.0 + 53.0 * exp(-5.0 * v_norm)               ∈ [7.36, 60]
+   -- Stationary (V_Mag ≤ 0.6 m/s) ⇒ 60.0 s (maximum interval).  Fast transport
+   -- (V_Mag ≥ 20.0 m/s) ⇒ 7.36 s, approaching the 7.0 s infimum asymptotically.
+   -- Replaces the former np.interp piecewise-linear form (30 / 15 / 4 s).
+   -- NaN input ⇒ 60.0 s (most conservative cadence), because every NaN
+   -- comparison is False and would otherwise poison the exponential.
+   -- WCET: O(1) — one clamp pair, one divide, one libm exp.
    -- [Timing: DO-178C §6.4.4 WCET analysis]
    -- @test: Test_Location_Bridge — Register_Routine ("Scan_Interval_Sec", Test_Location_Bridge'Access);
    function Scan_Interval_Sec (V_Mag : Real) return Real
-     with Pre => True, Post => Scan_Interval_Sec'Result >= 4.0
-                                and Scan_Interval_Sec'Result <= 30.0;
+     with Pre => True, Post => Scan_Interval_Sec'Result >= 7.0
+                                and Scan_Interval_Sec'Result <= 60.0;
 
    -- | Purpose: To_Fixed_4 — format like Python f"{v:.4f}" (terrain file).
    -- | Parameters: V — value to format.

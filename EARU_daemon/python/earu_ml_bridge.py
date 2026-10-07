@@ -28,7 +28,6 @@ import numpy as np  # pyrefly: ignore
 # ---------------------------------------------------------------------------
 from earu_location_bridge import (  # noqa: E402  # pyrefly: ignore [missing-import]
     LocationState,
-    check_core_location_bg,
     geodetic_distance,
     get_terrain_anchor,
     global_location,
@@ -244,24 +243,17 @@ def weather_worker(sig_loc_q: Any = None) -> None:
         shm = shared_memory.SharedMemory(name=WEATHER_SHM_NAME, create=True, size=273408)
 
     update_count = 0
-    last_cl_check = 0.0
     while True:
         try:
             now = time.time()
-            # pyrefly: ignore [bad-argument-type]
-            v_mag_val: float = float(getattr(global_location, "v_mag", LocationState.DEFAULTS["v_mag"]))
-            scan_interval = float(np.interp(v_mag_val, [0.0, 1.0, 2.0], [30.0, 15.0, 4.0]))
-            if now - last_cl_check >= scan_interval and not global_location.cl_running:
-                last_cl_check = now
-                if v_mag_val > 0.5:
-                    # Anchor: nuke locationd to force CoreLocation to re-triangulate.
-                    # Nuclear is the only way to make it conform to us.
-                    try:
-                        subprocess.run(["killall", "-9", "locationd"], capture_output=True)
-                    except Exception:
-                        pass
-                import threading
-                threading.Thread(target=check_core_location_bg, daemon=True).start()
+            #  AXIOM A5 (REVISED) ownership: the CoreLocation poll cadence
+            #  (exponential 7-60 s from velocity) and the fix cycle itself are
+            #  owned by the Ada daemon -- Earu.Location_Bridge.Scan_Interval_Sec
+            #  decides WHEN, and Earu.Location_FFI executes it through
+            #  libearu_location.dylib.  The former Python scheduler here
+            #  (np.interp(v, [0,1,2], [30,15,4]) plus `killall -9 locationd`)
+            #  is therefore deleted: two schedulers for one resource was the
+            #  bug.  `now` is still required below as `t_stamp`.
 
             # Build grid wind map — spatially-varying wind field derived from
             # GPS ground speed, thermal gradients, and turbulence.

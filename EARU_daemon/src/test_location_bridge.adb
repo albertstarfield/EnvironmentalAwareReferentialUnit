@@ -5,7 +5,7 @@
 --  earu-location_bridge.ads:
 --    T1  default snapshot == Python LocationState.DEFAULTS
 --    A2  ISA pressure formula (ISO 2533:1977)
---    A5  np.interp scan-interval cadence
+--    A5  exponential scan-interval cadence (7 s .. 60 s)
 --    "%.4f" terrain file formatting (golden-vector parity)
 --    A4  OpenTopoData JSON parse (OK / error / null / negative)
 --    A1  CoreLocationCLI CSV parse + Python retry/break mapping
@@ -135,19 +135,37 @@ begin
    Run_Test ("ISA: P(-500 m) > 1013.25",
              ISA_Pressure (-500.0) > 1013.25);
 
-   --  ── A5: Scan_Interval_Sec = np.interp(v,[0,1,2],[30,15,4]) ────────
-   Run_Test ("cadence: v=0 -> 30 s (A7 live branch)",
-             Near (Scan_Interval_Sec (0.0), 30.0, 1.0E-9));
-   Run_Test ("cadence: v=1 -> 15 s",
-             Near (Scan_Interval_Sec (1.0), 15.0, 1.0E-9));
-   Run_Test ("cadence: v=2 -> 4 s",
-             Near (Scan_Interval_Sec (2.0), 4.0, 1.0E-9));
-   Run_Test ("cadence: v=0.5 -> 22.5 s (linear segment)",
-             Near (Scan_Interval_Sec (0.5), 22.5, 1.0E-9));
-   Run_Test ("cadence: v=1.5 -> 9.5 s (linear segment)",
-             Near (Scan_Interval_Sec (1.5), 9.5, 1.0E-9));
-   Run_Test ("cadence: v=5 -> 4 s (clamped)", Near (Scan_Interval_Sec (5.0), 4.0, 1.0E-9));
-   Run_Test ("cadence: v=-1 -> 30 s (clamped)", Near (Scan_Interval_Sec (-1.0), 30.0, 1.0E-9));
+   --  ── A5 (REVISED): Scan_Interval_Sec = 7 + 53*exp(-5*v_norm) ────────
+   --  v_norm = (clamp(v, 0.6, 20.0) - 0.6) / 19.4.
+   --  Stationary (v <= 0.6 m/s) => 60 s; fastest (v >= 20 m/s) =>
+   --  7 + 53*exp(-5) = 7.3571112 s.  Golden values computed from the
+   --  closed form (IEEE-754 double), tolerance 1.0E-6.
+   Run_Test ("cadence: v=0 -> 60 s (stationary, clamped to 0.6)",
+             Near (Scan_Interval_Sec (0.0), 60.0, 1.0E-9));
+   Run_Test ("cadence: v=0.6 -> 60 s (band lower edge)",
+             Near (Scan_Interval_Sec (0.6), 60.0, 1.0E-9));
+   Run_Test ("cadence: v=0.5 -> 60 s (below band, clamped)",
+             Near (Scan_Interval_Sec (0.5), 60.0, 1.0E-9));
+   Run_Test ("cadence: v=-1 -> 60 s (below band, clamped)",
+             Near (Scan_Interval_Sec (-1.0), 60.0, 1.0E-9));
+   Run_Test ("cadence: v=1 -> 54.8082936 s",
+             Near (Scan_Interval_Sec (1.0), 54.8082936, 1.0E-6));
+   Run_Test ("cadence: v=1.5 -> 49.0278776 s",
+             Near (Scan_Interval_Sec (1.5), 49.0278776, 1.0E-6));
+   Run_Test ("cadence: v=2 -> 43.9463615 s",
+             Near (Scan_Interval_Sec (2.0), 43.9463615, 1.0E-6));
+   Run_Test ("cadence: v=5 -> 24.0520647 s",
+             Near (Scan_Interval_Sec (5.0), 24.0520647, 1.0E-6));
+   Run_Test ("cadence: v=10 -> 11.7002303 s",
+             Near (Scan_Interval_Sec (10.0), 11.7002303, 1.0E-6));
+   Run_Test ("cadence: v=20 -> 7.3571112 s (band upper edge)",
+             Near (Scan_Interval_Sec (20.0), 7.3571112, 1.0E-6));
+   Run_Test ("cadence: v=100 -> 7.3571112 s (above band, clamped)",
+             Near (Scan_Interval_Sec (100.0), 7.3571112, 1.0E-6));
+   --  Monotone decreasing across the band (AXIOM A5 shape invariant).
+   Run_Test ("cadence: strictly decreasing over the band",
+             Scan_Interval_Sec (0.6) > Scan_Interval_Sec (5.0)
+             and then Scan_Interval_Sec (5.0) > Scan_Interval_Sec (20.0));
 
    --  ── "%.4f" formatter (golden-vector parity with Python) ────────────
    Run_Test ("fixed4: 17.0 -> ""17.0000""", To_Fixed_4 (17.0) = "17.0000");

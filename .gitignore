@@ -101,3 +101,6 @@ EARU_daemon/EARU.app/
 # by util/build_monitor_bundle.sh. Signed ad-hoc per machine, so not portable.
 EARU_Monitor.app/
 .monitor_app_hash
+
+# cffi-generated Python conduit artifacts (libearu_location.dylib + its C/obj)
+EARU_daemon/lib/

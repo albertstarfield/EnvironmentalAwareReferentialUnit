@@ -1,12 +1,23 @@
 /* ========================================================================== */
 /*  bluetooth_scanner.mm — CoreBluetooth BLE Scan for Ada (via C bridge)      */
 /* ========================================================================== */
-/*  Uses CBCentralManager on a dedicated pthread with NSRunLoop to scan for   */
-/*  BLE peripherals. Same architecture as corewlan_scanner.mm.               */
+/*  Uses CBCentralManager on a dedicated pthread to scan for BLE peripherals. */
+/*  Blocks on a condition variable between requests, exactly like the sibling */
+/*  corewlan_scanner.mm — which is the pattern this file used to diverge from.*/
 /*                                                                            */
 /*  AXIOMS:                                                                   */
-/*    1. CBCentralManager MUST be created and used on a thread with an        */
-/*       active NSRunLoop (Apple requirement for delegate callbacks).          */
+/*    1. CORRECTED 2026-10-04. This file previously asserted: "CBCentralManager*/
+/*       MUST be created and used on a thread with an active NSRunLoop (Apple */
+/*       requirement for delegate callbacks)." THAT WAS FALSE. It is true only */
+/*       of the legacy delegate-queue-less initialiser. This file creates the  */
+/*       manager with initWithDelegate:queue:, so every delegate callback is   */
+/*       delivered on the GCD queue "com.earu.ble.scanner" — the creating     */
+/*       thread needs no run loop at all. The file nevertheless spun an        */
+/*       NSRunLoop, and because NO input source was ever added to it,          */
+/*       -runMode:beforeDate: returned immediately instead of waiting out its */
+/*       0.5s beforeDate. With no other rate limit in the loop, that burned    */
+/*       98% of one core forever. See the measured evidence in the commit that */
+/*       removed it.                                                          */
 /*    2. BLE does NOT expose MAC addresses — only UUID identifiers.           */
 /*    3. RSSI is real from centralManager:didDiscoverPeripheral:...            */
 /*    4. Device name may be nil (anonymous BLE devices).                       */
@@ -25,6 +36,12 @@
 
 static pthread_mutex_t g_ble_mutex  = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_ble_cond   = PTHREAD_COND_INITIALIZER;
+/* Separate condvar for the request handshake. One condvar cannot cleanly carry
+   two independent events (a waiter being told "scan requested" vs "results
+   ready") because a single pthread_cond_signal wakes only one waiter and
+   either could be the intended recipient. This mirrors g_request_cond /
+   g_result_cond in corewlan_scanner.mm. */
+static pthread_cond_t  g_ble_req_cond = PTHREAD_COND_INITIALIZER;
 
 /* Scan request/response protocol */
 static int32_t         g_ble_request = 0;   /* 1 = scan requested            */
@@ -141,26 +158,38 @@ static void *ble_scanner_thread(void *arg) {
         g_central_manager =
             [[CBCentralManager alloc] initWithDelegate:g_ble_delegate queue:queue];
 
-        /* Poll for scan requests */
+        /* Wait for scan requests. This condition wait IS the rate limiter:
+           with no work to do the thread is descheduled instead of spinning. */
         while (g_ble_thread_running) {
             @autoreleasepool {
-                /* Drive NSRunLoop to receive delegate callbacks */
-                [[NSRunLoop currentRunLoop]
-                    runMode:NSDefaultRunLoopMode
-                    beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
-
+                /* Claim the request, or block until one arrives / we are told
+                   to exit. The predicate is re-tested under the lock because
+                   pthread_cond_wait may return spuriously. */
                 pthread_mutex_lock(&g_ble_mutex);
-                int32_t do_scan = g_ble_request;
-                pthread_mutex_unlock(&g_ble_mutex);
-
-                if (!do_scan || !g_central_ready) continue;
-
-                /* Clear request */
-                pthread_mutex_lock(&g_ble_mutex);
+                while (g_ble_thread_running && !g_ble_request) {
+                    pthread_cond_wait(&g_ble_req_cond, &g_ble_mutex);
+                }
+                if (!g_ble_thread_running) {
+                    pthread_mutex_unlock(&g_ble_mutex);
+                    break;
+                }
                 g_ble_request = 0;
                 g_ble_result.count = 0;
                 g_ble_result.error_code = 0;
+                int32_t central_ready = g_central_ready;
                 pthread_mutex_unlock(&g_ble_mutex);
+
+                /* Publish a failure rather than silently dropping the request:
+                   bluetooth_scan_perform would otherwise block for its full
+                   15s timeout on every call while Bluetooth is unavailable. */
+                if (!central_ready) {
+                    pthread_mutex_lock(&g_ble_mutex);
+                    g_ble_result.error_code = -1;
+                    g_ble_ready = 1;
+                    pthread_cond_signal(&g_ble_cond);
+                    pthread_mutex_unlock(&g_ble_mutex);
+                    continue;
+                }
 
                 /* Start BLE scan — discover all peripherals (no service filter) */
                 [g_central_manager
@@ -230,6 +259,7 @@ void bluetooth_scan_perform(BLE_Scan_Result *result) {
     pthread_mutex_lock(&g_ble_mutex);
     g_ble_ready = 0;
     g_ble_request = 1;   /* Signal scanner thread to start BLE scan */
+    pthread_cond_signal(&g_ble_req_cond);  /* Wake the scanner from its wait */
     pthread_mutex_unlock(&g_ble_mutex);
 
     /* Wait for scanner thread to finish (up to 15 seconds) */
@@ -248,7 +278,15 @@ void bluetooth_scan_perform(BLE_Scan_Result *result) {
 
 void bluetooth_scan_cleanup(void) {
     if (!g_ble_thread_running) return;
+    /* Clear the flag under the mutex AND wake the thread. Without the broadcast
+       the scanner would still be blocked in pthread_cond_wait and the
+       pthread_join below would never return — this is a deadlock the previous
+       spin-loop implementation could not hit, and therefore had no reason to
+       handle. Ordering: flag, broadcast, join. */
+    pthread_mutex_lock(&g_ble_mutex);
     g_ble_thread_running = NO;
+    pthread_cond_broadcast(&g_ble_req_cond);
+    pthread_mutex_unlock(&g_ble_mutex);
     pthread_join(g_ble_thread, NULL);
 }
 
