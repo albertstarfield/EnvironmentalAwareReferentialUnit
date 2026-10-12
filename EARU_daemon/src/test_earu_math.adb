@@ -382,6 +382,50 @@ begin
       Run_Test ("T13 bound does not trip instantly (> 60 s)", Hit_Sec > 60.0);
    end;
 
+   --  T14: COORDINATE relock bound rationale (earu_daemon.adb Stage 1).
+   --
+   --  Fix 3a4e1e9 bounded only Pos.Z.  The user correctly identified that
+   --  the COORDINATE path was left unprotected: Pos.X/Pos.Y had no drift
+   --  bound, and the lat/lon legs of the relock gate were still CHANGE
+   --  tests against Start_Lat/Start_Lon assigned from the same fix one
+   --  branch below (earu_daemon.adb R1).  Stage 1 adds
+   --    Abs (L.Pos.X) > 100.0  or  Abs (L.Pos.Y) > 100.0
+   --  plus a non-zero validity test, since 0.0/0.0 is the invalid-fix
+   --  sentinel Location_Bridge publishes on a CoreLocationCLI miss
+   --  (earu-location_bridge.adb:403/436/451).
+   --
+   --  DESIGN INVARIANT asserted here: the coordinate bound must be
+   --  STRICTLY TIGHTER than the vertical bound.  Terrain elevation is a
+   --  function of (lat, lon) — Fetch_Topo_Altitude is called with the
+   --  locked coordinate — so a horizontal error returns ANOTHER SITE'S
+   --  terrain and corrupts the altitude anchor, while a vertical error
+   --  cannot corrupt the coordinate.  Coordinate-first therefore requires
+   --  the coordinate leash to be the shorter one.
+   --
+   --  Also asserted: both bounds sit inside the 430.0 m Altitude INOP
+   --  threshold at earu-math.adb:2392, so the relock always wins the race
+   --  against the net that demonstrably failed to arm on 2026-10-12.
+   declare
+      Horiz_Bound_M : constant Real := 100.0;   -- Stage 1, per-axis
+      Vert_Bound_M  : constant Real := 150.0;   -- Stage 2 / fix 3a4e1e9
+      INOP_M        : constant Real := 430.0;   -- earu-math.adb:2392
+      Observed_V    : constant Real := 312.224; -- measured 2026-10-12
+   begin
+      Run_Test ("T14 C3: coordinate bound is tighter than vertical",
+                Horiz_Bound_M < Vert_Bound_M);
+      Run_Test ("T14 coordinate bound trips before INOP 430 m",
+                Horiz_Bound_M < INOP_M);
+      Run_Test ("T14 vertical bound still trips before INOP 430 m",
+                Vert_Bound_M < INOP_M);
+      Run_Test ("T14 vertical bound still inside the observed -312 m failure",
+                Vert_Bound_M < Observed_V);
+      --  The ordering that motivated Stage 1: the coordinate leash must
+      --  fire on a strictly smaller excursion than the altitude leash, so
+      --  the coordinate is locked before the altitude is re-derived from it.
+      Run_Test ("T14 coordinate leash fires first on equal excursion",
+                Horiz_Bound_M * 1.5 = Vert_Bound_M);
+   end;
+
    Put_Line ("");
    Put_Line ("=== Summary ===");
    Put_Line ("Passed:" & Passed'Image & "  Failed:" & Failed'Image);

@@ -1261,10 +1261,57 @@ is
                   --  meant to be the safety net.
                   --  [Citation: ISO 2533:1975 — International Standard
                   --   Atmosphere; earu-location_bridge.ads AXIOM A4/A6]
-                  if Abs (Real (Weather_SHM.Lat) - L.Start_Lat) > 1.0E-6 or
-                     Abs (Real (Weather_SHM.Lon) - L.Start_Lon) > 1.0E-6 or
-                     Abs (Real (Weather_SHM.Alt) - L.Start_Alt) > 1.0E-3 or
-                     Abs (L.Pos.Z) > 150.0
+                  --  ── STAGE 1: COORDINATE RELOCK (altitude NOT involved) ──
+                  --  AXIOM R5: the caller already passed the freshness gate
+                  --  `Weather_SHM.Header.Update_Count /= Last_W`
+                  --  (earu_daemon.adb:1176, closed at :1315), so a fresh fix
+                  --  is AVAILABLE right now.  Relock must therefore key on
+                  --  availability plus a drift bound, never on value CHANGE
+                  --  alone — which is what R1 above shows was broken.
+                  --
+                  --  VALIDITY R6: 0.0/0.0 is the invalid-fix sentinel that
+                  --  Location_Bridge publishes when CoreLocationCLI returns
+                  --  nothing (earu-location_bridge.adb:403 / :436 / :451 all
+                  --  reset Lat/Lon/Alt to 0.0).  A non-zero pair is therefore
+                  --  the availability test, and it is the ONE discriminator
+                  --  this source can always supply.
+                  --
+                  --  HORIZONTAL BOUND R7: Pos.X/Pos.Y previously had NO drift
+                  --  bound at all — only Pos.Z did.  The horizontal
+                  --  integrator is subject to the same uncorrected
+                  --  accelerometer/attitude residual as the vertical one,
+                  --  with strictly less protection: ZUPT at
+                  --  earu-math.adb:1986-1987 kills Raw_Vel.X/Y but, exactly
+                  --  as with Z, never feeds back into Pos.X/Y (:2322-:2323).
+                  --  100.0 m is tested per-axis (Abs on X and on Y) rather
+                  --  than as an Euclidean radius, to avoid a Sqrt on the
+                  --  800 Hz sensors path.  It is deliberately HALF the
+                  --  150.0 m vertical bound, because horizontal position
+                  --  error is the one that corrupts the altitude anchor:
+                  --  terrain elevation is a function of (lat, lon), so a
+                  --  horizontal error returns ANOTHER SITE'S terrain, while
+                  --  a vertical error cannot corrupt the coordinate.
+                  --  Coordinate therefore gets the tighter leash, which is
+                  --  the required ordering — fix the coordinate FIRST, then
+                  --  relock altitude from the terrain API keyed to that
+                  --  locked coordinate.
+                  --  [Citation: ISO 2533:1975 — International Standard
+                  --   Atmosphere]
+                  --
+                  --  ── STAGE 2: ALTITUDE RELOCK ──────────────────────────
+                  --  Runs after Stage 1 on purpose: Fetch_Topo_Altitude
+                  --  (earu-location_bridge.adb:613) is a function of
+                  --  (Lat, Lon), so querying it against an unlocked
+                  --  coordinate yields a different site's terrain.  The
+                  --  150.0 m leg is the R2/R4 vertical discriminator.
+                  if Real (Weather_SHM.Lat) /= 0.0
+                    and then Real (Weather_SHM.Lon) /= 0.0
+                    and then
+                      (Abs (Real (Weather_SHM.Lat) - L.Start_Lat) > 1.0E-6
+                       or Abs (Real (Weather_SHM.Lon) - L.Start_Lon) > 1.0E-6
+                       or Abs (L.Pos.X) > 100.0
+                       or Abs (L.Pos.Y) > 100.0
+                       or Abs (L.Pos.Z) > 150.0)
                   then
                      declare
                         GPS_Time : Real;
