@@ -57,11 +57,12 @@ with Interfaces.C.Strings;
 with Ada.Text_IO;
 with Ada.Exceptions;
 with Ada.Directories;
+with Ada.Real_Time; use Ada.Real_Time; use type Ada.Real_Time.Time;
+   -- [Citation: Ada 2012 RM 9.6.1 monotonic clock; RM D.8(18) To_Duration]
 with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 
 with Earu.State_Store; use Earu.State_Store;
-with Earu.Types;       use Earu.Types;
 with Earu.IO;
 
 --  SECDED TED parity gate: every guarded body below calls
@@ -522,11 +523,6 @@ package body Earu.Weather_Fetcher is
                    end if;
              end;
        end;
-    exception
-       when others =>
-          --  Safe_Fallback: both paths already attempted above; propagate
-          --  the original fault loudly so the fetch loop logs it (no swallow).
-          raise;
     end Write_Weather_Pressure;
 
     --  ── Fetcher task body ───────────────────────────────────────────────
@@ -537,6 +533,24 @@ package body Earu.Weather_Fetcher is
        --  from the fetch loop (Ada RM §C.6 shared-variable annotation).
        Running : Boolean := False; pragma Volatile (Running);
        C_Cmd   : Interfaces.C.Strings.chars_ptr; pragma Volatile (C_Cmd);
+
+      --  ---------------------------------------------------------------
+      --  Warning rate-limit state (AXIOM A1/A4)
+      --  ---------------------------------------------------------------
+      --  A fetch warning that repeats verbatim on every 1800 s cycle is
+      --  indistinguishable from silence, so identical occurrences are
+      --  collapsed and counted; the emission reports how many were
+      --  suppressed, so the throttle never hides an ongoing fault.
+      --  [Timing: DO-178C §6.4.4 -- two comparisons per emission]
+      Warn_Interval   : constant Duration := 3600.0;
+      Warn_Last       : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Warn_Suppressed : Natural := 0;
+
+      --  Last request URL, captured so the response-side warning can
+      --  name the endpoint that answered without the JSON field (A6).
+      --  Fixed-size: no heap allocation on a 30-minute cadence.
+      Last_Fetch_URL     : String (1 .. 300) := (others => ' ');
+      Last_Fetch_URL_Len : Natural := 0;
     begin
        --  THREAD_SAFETY (ARM §9.5.1, CWE-833): bounded rendezvous — Start
        --  is called immediately at daemon startup; `or terminate` prevents
@@ -574,10 +588,22 @@ package body Earu.Weather_Fetcher is
                 URL   : constant String :=
                    Forecast_Base & Lat_S & Lon_Params & Lon_S & Forecast_Query;
                 Cmd   : constant String := Curl_Prefix & URL & Curl_Suffix;
+
              begin
                 Ada.Text_IO.Put_Line
                    ("[WeatherFetcher] Fetching for lat=" & Lat_S &
                     " lon=" & Lon_S);
+
+                --  Capture the request URL for the response-side
+                --  warning below (AXIOM A6). Bounds-guarded.
+                if URL'Length <= Last_Fetch_URL'Length then
+                   Last_Fetch_URL (1 .. URL'Length) := URL;
+                   Last_Fetch_URL_Len := URL'Length;
+                else
+                   Last_Fetch_URL :=
+                      URL (1 .. Last_Fetch_URL'Length);
+                   Last_Fetch_URL_Len := Last_Fetch_URL'Length;
+                end if;
 
                 --  Execute curl subprocess.
                 C_Cmd := Interfaces.C.Strings.New_String (Cmd);
@@ -622,8 +648,37 @@ package body Earu.Weather_Fetcher is
                               Float'Image (P_MSL) & " hPa to " &
                               Weather_Pressure_File);
                        else
-                          Ada.Text_IO.Put_Line
-                             ("[WeatherFetcher] WARNING: pressure_msl not found in JSON");
+                          --  Rate-limited so a persistent fault is one
+                          --  line per hour carrying the suppressed count,
+                          --  and so the line names the URL plus a prefix
+                          --  of the body that actually arrived (A3).
+                          if Ada.Real_Time.To_Duration
+                                (Ada.Real_Time.Clock - Warn_Last)
+                              >= Warn_Interval
+                          then
+                             declare
+                                Url_S : constant String :=
+                                   Last_Fetch_URL
+                                      (1 .. Last_Fetch_URL_Len);
+                                Snippet : constant String :=
+                                   (if Body_Str'Length <= 96
+                                    then Body_Str
+                                    else Body_Str (1 .. 96) & "...");
+                             begin
+                                Ada.Text_IO.Put_Line
+                                   ("[WeatherFetcher] WARNING: pressure_msl"
+                                    & " not found in JSON (url=" & Url_S
+                                    & ") body=[" & Snippet & "]"
+                                    & " [+"
+                                    & Natural'Image (Warn_Suppressed)
+                                    & " suppressed]");
+                             end;
+                             Warn_Last := Ada.Real_Time.Clock;
+                             Warn_Suppressed := 0;
+                          else
+                             Warn_Suppressed :=
+                                Warn_Suppressed + 1;
+                          end if;
                        end if;
                     end;
                  end if;
@@ -667,11 +722,6 @@ package body Earu.Weather_Fetcher is
          Earu.Secdec.Atomic_Function_Wrapper;
          Data (1 .. N) := JSON (JSON'First .. JSON'First + N - 1);
          Len := N;
-      exception
-         when others =>
-            --  Safe_Fallback: slice bounds are guarded by N <= Data'Length;
-            --  on unexpected fault keep the previous buffer (stale > empty).
-            raise;
       end Store;
 
       --  [Citation: sabotage_verifier.py ADA_FUNCTION_COVERAGE — DO-178C §6.4.4]
@@ -718,10 +768,6 @@ package body Earu.Weather_Fetcher is
       begin
          Earu.Secdec.Atomic_Function_Wrapper;
          return Len;
-      exception
-         when others =>
-            --  Safe_Fallback: plain field load; unexpected exception propagates.
-            raise;
       end Length;
 
    end Meteo_Buffer;

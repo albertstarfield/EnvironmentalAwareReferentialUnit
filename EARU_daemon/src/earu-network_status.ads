@@ -2,8 +2,6 @@
 --          messaging and email services. Provides a protected (thread-safe)
 --          status registry that the network monitor task updates and the
 --          telemetry logger reads.
-with Ada.Text_IO;
-with Ada.Exceptions;
 package Earu.Network_Status is
 
    -- Purpose: Enumeration of possible service reachability states.

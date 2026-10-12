@@ -1,11 +1,7 @@
-with Ada.Text_IO;
 with Interfaces.C;
 -- [Citation: Ada RM 10.1.5 — use type makes primitive operators of
 --  Interfaces.C.int directly visible for the Sig = 11 Pre contract.]
 use type Interfaces.C.int;
-with Earu.IO;
-with Ada.Calendar;
-with Ada.Calendar.Formatting;
 
 -- AXIOMS: SIGSEGV handler captures crash context for post-mortem analysis.
 -- THEORIES: On segmentation fault, write crash dump to RAM disk and allow

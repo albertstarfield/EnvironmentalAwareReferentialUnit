@@ -17,7 +17,6 @@
 --   }
 -- ]
 
-with Earu.IO;
 package Earu.Sig_Loc_Store is
 
    -- Purpose: Return the filesystem path to the significant_locations JSON file.

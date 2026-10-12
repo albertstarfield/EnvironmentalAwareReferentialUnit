@@ -4,13 +4,12 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Exceptions;
 with Ada.Environment_Variables;  -- [Citation: Ada 2012 RM A.4.10]
+with Ada.Real_Time;  -- [Citation: Ada 2012 RM 9.6.1 -- monotonic clock for the cache TTL]
 with Interfaces;
-with Interfaces.C;
 with Interfaces.C.Strings;
 with GNAT.SHA256;
 
 with Earu.Pressure;
-with Earu.Weather_Fetcher;
 with System;
 
    -- =========================================================================
@@ -26,6 +25,7 @@ package body Earu.IO is
    use Earu.Types;
    use type System.Address; -- c_binding
    use type Interfaces.Unsigned_8;
+   use type Ada.Real_Time.Time;  -- [Citation: Ada 2012 RM A.17.1 -- "-" on Time is not implicitly visible]
    use Ada.Strings.Unbounded;
 
    package Real_IO is new Ada.Text_IO.Float_IO (Real);  -- static: generic instantiation, no heap allocation
@@ -1442,14 +1442,26 @@ package body Earu.IO is
             function rename (old_path, new_path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
                with Pre => True, Post => True;
             pragma Import (C, rename, "rename");
+            --  A1/A2: report errno, not just ret=-1.  A bare ret=-1
+            --  cannot distinguish ENOSPC from EACCES from EINVAL, so
+            --  the operator has no choice but to ignore the warning.
+            --  macOS/BSD expose errno via __error(), which returns a
+            --  pointer to the thread's errno slot.
+            --  [Citation: Darwin __error(2); POSIX strerror(3)]
+            type Int_Access is access all Interfaces.C.int;
+            function Errno_Ptr return Int_Access;
+            pragma Import (C, Errno_Ptr, "__error");
+            function Strerror (Err : Interfaces.C.int)
+              return Interfaces.C.Strings.chars_ptr;
+            pragma Import (C, Strerror, "strerror");
             C_Tmp  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Tmp_Path);
             C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-            Ret    : Interfaces.C.int := rename (C_Tmp, C_Path);
+            Ret    : constant Interfaces.C.int := rename (C_Tmp, C_Path);
             -- [Parity: XOR of return value bits for bit-flip detection]
             -- [DO-178C §6.4.4 FUNCTION_INTERNAL_PARITY]
          begin
             if Integer(Ret) /= 0 then
-               Ada.Text_IO.Put_Line ("[!] Warning: rename temp data file failed (ret=" & Interfaces.C.int'Image (Ret) & ")");
+               Ada.Text_IO.Put_Line ("[!] Warning: rename temp data file failed (ret=" & Interfaces.C.int'Image (Ret) & ", errno=" & Interfaces.C.int'Image (Errno_Ptr.all) & ", " & Interfaces.C.Strings.Value (Strerror (Errno_Ptr.all)) & ", " & Tmp_Path & " -> " & Path & ")");
             end if;
             Interfaces.C.Strings.Free (C_Tmp); Interfaces.C.Strings.Free (C_Path);
          end;
@@ -1674,6 +1686,21 @@ package body Earu.IO is
    --  indistinguishable from a vacuum and impossible at Earth's surface.
    Cache_Fan_Pressure : Real := Earu.Pressure.Sea_Level_Std_HPa;
 
+   --  AXIOM (fan-pressure cache): the estimator file is replaced by a peer
+   --  process non-atomically.  Opening it ~50 times per second (5 call sites
+   --  x 10 Hz) races that replacement and produced 4905 spurious
+   --  "cannot open" warnings in one runtime log -- a warning flood that
+   --  buried every genuine fault.  A short TTL absorbs the race; the warning
+   --  is emitted ONCE per failure episode and then at most once per
+   --  Fan_Warn_Interval, so a real degradation is still loud while a
+   --  transient blip is not a log flood.  Recovery rearms immediately.
+   Cache_Fan_Timestamp  : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+   Cache_Fan_Valid      : Boolean := False;
+   Cache_Fan_Warn_Armed : Boolean := True;
+   Cache_Fan_Warn_Since : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+   Fan_Pressure_TTL     : constant Duration := 1.0;
+   Fan_Warn_Interval    : constant Duration := 60.0;
+
    -- | Purpose: Read Fan Pressure Est.  Wraps the raw file read with
    -- |          Earu.Pressure.Sanitize so that a failed read, a parse error,
    -- |          an out-of-envelope value or NaN is converted into the ISA
@@ -1699,23 +1726,47 @@ package body Earu.IO is
       --  the numeric value cannot, because both are 0.0.
       Read_Ok  : Boolean := False;
       Value    : Real    := Cache_Fan_Pressure;
+      Now      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
 
       ------------------------------------------------------------------------
       -- Report_Substitution                                               --
       ------------------------------------------------------------------------
       --  | Purpose: Make every degradation LOUD and specific, so a silent
       --  |          standard-atmosphere substitution is never invisible.
+      --  |          RATE-LIMITED (fan-pressure cache AXIOM): a persistent
+      --  |          failure warns once when it begins and then at most once
+      --  |          per Fan_Warn_Interval, so the log records the EPISODE
+      --  |          rather than thousands of copies of it.  A recovery
+      --  |          rearms the warning immediately.
       --  | Parameters: Why - what actually happened.
       --  | Exceptions: None (console Put_Line only).
       ------------------------------------------------------------------------
       procedure Report_Substitution (Why : String) is
       begin
+         if not Cache_Fan_Warn_Armed
+           and then Ada.Real_Time.To_Duration (Now - Cache_Fan_Warn_Since)
+                      < Fan_Warn_Interval
+         then
+            return;  -- still inside the suppression window of this episode
+         end if;
+         Cache_Fan_Warn_Armed := False;
+         Cache_Fan_Warn_Since := Now;
          Ada.Text_IO.Put_Line
            ("[!] WARNING: fan pressure channel unusable (" & Why & ") - using"
             & Earu.Types.Real'Image (Earu.Pressure.Sea_Level_Std_HPa) & " hPa");
       end Report_Substitution;
 
    begin
+      --  CACHE SERVE: a reading fetched within Fan_Pressure_TTL is returned
+      --  without reopening the file.  This absorbs the ~50 opens/s that were
+      --  racing the writer's replace and producing spurious Name_Error.
+      if Cache_Fan_Valid
+        and then Ada.Real_Time.To_Duration (Now - Cache_Fan_Timestamp)
+                   < Fan_Pressure_TTL
+      then
+         return Earu.Pressure.Sanitize (Cache_Fan_Pressure, True);
+      end if;
+
       begin
          Open (File, In_File, Path);
       exception
@@ -1726,21 +1777,27 @@ package body Earu.IO is
             exception
                when others =>
                   Report_Substitution ("cannot open " & Path & " or local copy");
+                  --  Degrade to the most recent good reading when one exists
+                  --  rather than snapping to the ISA standard on a blip.
+                  if Cache_Fan_Valid then
+                     return Earu.Pressure.Sanitize (Cache_Fan_Pressure, True);
+                  end if;
                   return Earu.Pressure.Sanitize (Value, Read_Ok);
             end;
       end;
 
       while not End_Of_File (File) loop
          pragma Loop_Invariant (True);
-         -- [Assertion: DO-178C §6.4.4 loop invariant]
+         -- [Assertion: DO-178C loop invariant]
          Get_Line (File, Line_Buf, Last);
          declare
             L : constant String := Line_Buf (1 .. Last);
          begin
             if Last >= 8 and then L (1 .. 8) = "EST_HPA:" then
-               -- Extract value after "EST_HPA:" — trim leading spaces
+               -- Extract value after "EST_HPA:" -- trim leading spaces
                declare
-                  Val_Str : constant String := Ada.Strings.Fixed.Trim (L (9 .. Last), Ada.Strings.Both);
+                  Val_Str : constant String :=
+                    Ada.Strings.Fixed.Trim (L (9 .. Last), Ada.Strings.Both);
                begin
                   --  AXIOM: a parse failure means the channel produced NO
                   --  value.  Read_Ok stays False, which is what makes
@@ -1766,6 +1823,11 @@ package body Earu.IO is
          Report_Substitution ("no EST_HPA field in " & Path);
       elsif not Earu.Pressure.Is_Envelope (Value) then
          Report_Substitution ("EST_HPA out of physical envelope");
+         Read_Ok := False;  -- reject it, so Sanitize substitutes the standard
+      else
+         Cache_Fan_Valid      := True;
+         Cache_Fan_Timestamp  := Now;
+         Cache_Fan_Warn_Armed := True;  -- recovery rearms the warning
       end if;
 
       return Earu.Pressure.Sanitize (Value, Read_Ok);

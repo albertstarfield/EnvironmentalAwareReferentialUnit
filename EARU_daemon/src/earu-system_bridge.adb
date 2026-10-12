@@ -181,42 +181,6 @@ package body Earu.System_Bridge is
           raise;
     end Read_SMC_Key;
 
-   --  Convert Long_Long_Integer to Real.
-   --  AXIOM: Long_Long_Integer range exceeds Real's 53-bit mantissa precision,
-   --  but for sensor timestamps and epoch values the loss is acceptable (< 1ms).
-   --  THEOREM: Clamping to Real'Range prevents Constraint_Error on conversion.
-   --  FUNCTION_STABILITY: Post => True (conversion is total on clamped input).
-   -- | Purpose: To Real
-   -- | Parameters: See declaration
-   -- | Returns: See declaration
-   -- | CSI: DO-178C §6.4.4
-   -- [Documentation: DO-178C §6.4.4 function documentation]
-   -- WCET: O(1) — timing analysis
-   -- [Timing: DO-178C §6.4.4 WCET analysis]
-   function To_Real (V : Long_Long_Integer) return Real
-      with Pre => True, Post => True;
-   -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
-    function To_Real (V : Long_Long_Integer) return Real is
-       Clamped : Long_Long_Integer;
-    begin
-       Earu.Secdec.Atomic_Function_Wrapper;
-       --  Clamp to the range representable by Real (±2^53 exact integer range)
-       --  [Citation: IEEE 754 double-precision: 52-bit mantissa + implicit 1]
-       if V > 2**52 then
-          Clamped := 2**52;
-       elsif V < -(2**52) then
-          Clamped := -(2**52);
-       else
-          Clamped := V;
-       end if;
-       return Real (Clamped);  -- SMT_VERIFIED: Clamped is within Real representable integer range
-    exception
-       when E : others =>
-          Ada.Text_IO.Put_Line ("[EARU] To_Real failed: " &
-            Ada.Exceptions.Exception_Message (E));
-          raise;
-    end To_Real;
-
    --  -----------------------------------------------------------------------
    --  Battery computation procedures
    --  -----------------------------------------------------------------------
@@ -643,11 +607,9 @@ package body Earu.System_Bridge is
       Day_Wh        : in out Real;
       Month_Wh      : in out Real;
       Meter_Wh      : in out Real;
-      Last_PSTR     : in out Real;
       Last_Ordinal  : in out Integer;
       Last_Month    : in out Integer;
-      Last_Timestamp_S : in out Long_Long_Integer;
-      Update_Count  : Natural)
+      Last_Timestamp_S : in out Long_Long_Integer)
       with Pre => True, Post => True;
    -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Accumulate_Power
@@ -655,11 +617,9 @@ package body Earu.System_Bridge is
       Day_Wh        : in out Real;
       Month_Wh      : in out Real;
       Meter_Wh      : in out Real;
-      Last_PSTR     : in out Real;
       Last_Ordinal  : in out Integer;
       Last_Month    : in out Integer;
-      Last_Timestamp_S : in out Long_Long_Integer;
-      Update_Count  : Natural)
+      Last_Timestamp_S : in out Long_Long_Integer)
    is
       --  NOTE (audit INT-1/W8 fix): nested "pragma SPARK_Mode (On);" removed
       --  - illegal Off -> On transition; proof scoping lives project-wide in
@@ -833,16 +793,14 @@ package body Earu.System_Bridge is
      (S   : in out System_Stats_Type;
       SMC : in out SMC_Type;
       Power_History : in Power_History_Array;
-      History_Idx   : Natural;
-      Update_Count  : Natural)
+      History_Idx   : Natural)
       with Pre => True, Post => True;
    -- [Contract: DO-178C §6.4.4 Pre/Post — ADA_FUNCTION_COVERAGE]
    procedure Compute_Battery_Survival
      (S   : in out System_Stats_Type;
       SMC : in out SMC_Type;
       Power_History : in Power_History_Array;
-      History_Idx   : Natural;
-      Update_Count  : Natural)
+      History_Idx   : Natural)
    is
       --  NOTE (audit INT-1 fix): illegal nested SPARK_Mode pragma removed
       --  here too (same root cause as Solve_Pulsing_Numerically above).
@@ -1306,8 +1264,48 @@ package body Earu.System_Bridge is
        pragma Volatile (Next_Power_Track_Time);
        Next_SMC_Keys_Time    : Time := Clock + SMC_KEYS_INTERVAL;
        pragma Volatile (Next_SMC_Keys_Time);
-       Start_Time            : Time := Clock;
-       pragma Volatile (Start_Time);
+       --  [AXIOM A4] Unlike the three clocks above, Start_Time is written
+       --  exactly once at elaboration and never again, so there is no
+       --  second write for the scheduler to observe; Volatile would be
+       --  meaningless here (and is what -gnatwk flags).  Constant states
+       --  the truth.
+       Start_Time            : constant Time := Clock;
+
+       --  Diagnostic rate limiter.
+       --  [AXIOM A1] 2960 identical rpm0 lines were observed in a single
+       --  log, so the operator could not see the CPU or memory lines that
+       --  happened to be printed in the same window.  Noise at that
+       --  density is indistinguishable from silence, so the print is
+       --  throttled -- but only the print.
+       --  [AXIOM A2] The conditions are still evaluated every poll and the
+       --  readings are still written to the state store at Current_Step
+       --  19/20, so no measurement is lost by throttling this log.
+       --  [AXIOM A4] To_Duration yields a plain Duration, so the
+       --  comparison needs no additional use-type clause.
+       --  [Citation: Ada 2012 RM 9.6.1 -- Ada.Real_Time monotonic clock]
+       --  [Based on: 2960x SMT-RANGE-WARN rpm0 lines in EARUruntime.log]
+       SMT_WARN_INTERVAL : constant Time_Span := Seconds (30);
+       Last_SMT_Warn_Time : Time := Clock - SMT_WARN_INTERVAL;
+       pragma Volatile (Last_SMT_Warn_Time);
+       SMT_Warn_Suppressed : Natural := 0;
+
+       --  Emit a range warning at most once per SMT_WARN_INTERVAL, and say
+       --  so when it suppresses one, so a throttle is never a silence.
+       procedure SMT_Warn (Msg : String) is
+       begin
+          if Ada.Real_Time.To_Duration (Clock - Last_SMT_Warn_Time)
+               >= Ada.Real_Time.To_Duration (SMT_WARN_INTERVAL)
+          then
+             Ada.Text_IO.Put_Line (
+               Msg & " [+" & Natural'Image (SMT_Warn_Suppressed)
+               & " suppressed]");
+             Last_SMT_Warn_Time := Clock;
+             SMT_Warn_Suppressed := 0;
+          else
+             SMT_Warn_Suppressed := SMT_Warn_Suppressed + 1;
+          end if;
+       end SMT_Warn;
+
 
       --  Battery state variables
       Batt_Percent : aliased Interfaces.C.int;
@@ -1322,7 +1320,6 @@ package body Earu.System_Bridge is
       Day_Wh          : Real := 0.0;
       Month_Wh        : Real := 0.0;
       Meter_Wh        : Real := 0.0;
-      Last_PSTR       : Real := 0.0;
       Last_Ordinal    : Integer := 0;
       Last_Month      : Integer := 0;
       Last_Timestamp_S: Long_Long_Integer := 0;
@@ -1379,7 +1376,7 @@ package body Earu.System_Bridge is
                  "[SMT-DBG] Step 1 OK: cpu=" & Real'Image (S.CPU_Usage));
             end if;
             if S.CPU_Usage < 0.0 or else S.CPU_Usage > 100.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 1 cpu_usage=" & Real'Image (S.CPU_Usage) &
                  " EXPECTED 0.0..100.0 -- Mach API returned invalid value");
             end if;
@@ -1398,11 +1395,11 @@ package body Earu.System_Bridge is
                  "[SMT-DBG] Step 2 OK: mem=" & Real'Image (S.Mem_Usage));
             end if;
             if S.Mem_Usage <= 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 2 mem_usage=" & Real'Image (S.Mem_Usage) &
                  " EXPECTED > 0.0 -- task_info() likely failed");
             elsif S.Mem_Usage > 100.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 2 mem_usage=" & Real'Image (S.Mem_Usage) &
                  " EXPECTED 0.0..100.0 -- overflow or bad conversion");
             end if;
@@ -1424,7 +1421,7 @@ package body Earu.System_Bridge is
                  " la15=" & Real'Image (Real (LA_15)));
             end if;
             if Real (LA_1) < 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 3 la1=" & Real'Image (Real (LA_1)) &
                  " EXPECTED >= 0.0 -- getloadavg() failed");
             end if;
@@ -1442,7 +1439,7 @@ package body Earu.System_Bridge is
                  "[SMT-DBG] Step 4 OK: uptime_s=" & Real'Image (S.Uptime_System));
             end if;
             if S.Uptime_System <= 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 4 uptime=" & Real'Image (S.Uptime_System) &
                  " EXPECTED > 0.0 -- sysctl(KERN_BOOTTIME) failed");
             end if;
@@ -1459,7 +1456,7 @@ package body Earu.System_Bridge is
                  "[SMT-DBG] Step 5 OK: earu_uptime=" & Real'Image (S.Uptime_Earu));
             end if;
             if S.Uptime_Earu < 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 5 earu_uptime=" & Real'Image (S.Uptime_Earu) &
                  " EXPECTED >= 0.0 -- Clock() went backwards");
             end if;
@@ -1477,7 +1474,7 @@ package body Earu.System_Bridge is
                  "[SMT-DBG] Step 6 OK: hid_idle_ns=" & Real'Image (S.Non_Human_HID_Idle_ns));
             end if;
             if S.Non_Human_HID_Idle_ns < 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 6 hid_idle_ns=" & Real'Image (S.Non_Human_HID_Idle_ns) &
                  " EXPECTED >= 0.0 -- clock_gettime_nsec_np() failed");
             end if;
@@ -1501,12 +1498,12 @@ package body Earu.System_Bridge is
                  " state=" & Integer'Image (Integer (Batt_State)));
             end if;
             if Integer (Batt_Percent) < 0 or else Integer (Batt_Percent) > 100 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 7 batt_pct=" & Integer'Image (Integer (Batt_Percent)) &
                  " EXPECTED 0..100 -- pmset parse failed");
             end if;
             if Integer (Batt_State) < 0 or else Integer (Batt_State) > 4 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 7 batt_state=" & Integer'Image (Integer (Batt_State)) &
                  " EXPECTED 0..4 -- pmset parse failed");
             end if;
@@ -1539,7 +1536,7 @@ package body Earu.System_Bridge is
                  "[SMT-DBG] Step 9 OK: idle_ns=" & Real'Image (S.Non_Human_HID_Idle_ns));
             end if;
             if S.Non_Human_HID_Idle_ns < 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 9 idle_ns=" & Real'Image (S.Non_Human_HID_Idle_ns) &
                  " EXPECTED >= 0.0 -- time delta broken");
             end if;
@@ -1557,11 +1554,11 @@ package body Earu.System_Bridge is
                  "[SMT-DBG] Step 10 OK: pstr=" & Real'Image (SMC.Temps.PSTR));
             end if;
             if SMC.Temps.PSTR <= 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 10 pstr=" & Real'Image (SMC.Temps.PSTR) &
                  " EXPECTED 20.0..120.0 -- SMC sensor file missing or empty");
             elsif SMC.Temps.PSTR > 120.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 10 pstr=" & Real'Image (SMC.Temps.PSTR) &
                  " EXPECTED <= 120.0 -- parse error or hardware danger");
             end if;
@@ -1579,7 +1576,7 @@ package body Earu.System_Bridge is
                  " fan1=" & Real'Image (SMC.Fan_RPMs (2)));
             end if;
             if SMC.Fan_RPMs (1) < 0.0 or else SMC.Fan_RPMs (1) > 8000.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 11 rpm0=" & Real'Image (SMC.Fan_RPMs (1)) &
                  " EXPECTED 0..8000 -- fan sensor file parse error");
             end if;
@@ -1611,13 +1608,13 @@ package body Earu.System_Bridge is
                     " design=" & Real'Image (S.Battery_Design_Wh));
                end if;
                if S.Battery_Design_Wh <= 0.0 then
-                  Ada.Text_IO.Put_Line (
+                  SMT_Warn (
                     "[SMT-RANGE-WARN] Step 13 design_cap=" &
                     Real'Image (S.Battery_Design_Wh) &
                     " EXPECTED > 0 -- ioreg parse failed");
                end if;
                if S.Battery_Full_Wh <= 0.0 then
-                   Ada.Text_IO.Put_Line (
+                   SMT_Warn (
                      "[SMT-RANGE-WARN] Step 13 full_cap=" &
                      Real'Image (S.Battery_Full_Wh) &
                      " EXPECTED > 0 -- ioreg parse failed");
@@ -1639,8 +1636,8 @@ package body Earu.System_Bridge is
                  and then SMC.Accum_Power_Month_Wh = 0.0
                then
                   Accumulate_Power (SMC, Day_Wh, Month_Wh, Meter_Wh,
-                                    Last_PSTR, Last_Ordinal, Last_Month,
-                                    Last_Timestamp_S, Update_Count);
+                                    Last_Ordinal, Last_Month,
+                                    Last_Timestamp_S);
                else
                   --  smcDemandNow is running -- use its values
                   Day_Wh := SMC.Day_Power_Usage_Wh;
@@ -1676,12 +1673,12 @@ package body Earu.System_Bridge is
                     " power=" & Real'Image (SMC.Power));
                end if;
                if SMC.Power < 0.0 then
-                  Ada.Text_IO.Put_Line (
+                  SMT_Warn (
                     "[SMT-RANGE-WARN] Step 14 power=" & Real'Image (SMC.Power) &
                     " EXPECTED >= 0.0 -- sensor read or parse error");
                end if;
                if Day_Wh < 0.0 then
-                  Ada.Text_IO.Put_Line (
+                  SMT_Warn (
                     "[SMT-RANGE-WARN] Step 14 day_wh=" & Real'Image (Day_Wh) &
                     " EXPECTED >= 0.0 -- accumulation clock jump");
                end if;
@@ -1702,12 +1699,12 @@ package body Earu.System_Bridge is
                     " heatflux=" & Real'Image (SMC.Heatflux_J));
                end if;
                if SMC.Power < 0.0 then
-                  Ada.Text_IO.Put_Line (
+                  SMT_Warn (
                     "[SMT-RANGE-WARN] Step 15 power=" & Real'Image (SMC.Power) &
                     " EXPECTED >= 0.0 -- SMC power key parse error");
                end if;
                if SMC.Heatflux_J < 0.0 then
-                  Ada.Text_IO.Put_Line (
+                  SMT_Warn (
                     "[SMT-RANGE-WARN] Step 15 heatflux=" & Real'Image (SMC.Heatflux_J) &
                     " EXPECTED >= 0.0 -- SMC heatflux parse error");
                end if;
@@ -1730,17 +1727,17 @@ package body Earu.System_Bridge is
                  " spu_lat=" & Real'Image (ET.SPU_Lat_ms));
             end if;
             if ET.T_CPU_ns = 0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 16 t_cpu_ns=0 EXPECTED > 0" &
                  " -- mach_absolute_time() failed");
             end if;
             if ET.T_RTC_ns = 0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 16 t_rtc_ns=0 EXPECTED > 0" &
                  " -- clock_gettime(CLOCK_REALTIME) failed");
             end if;
             if ET.SPU_Lat_ms < 1.0 or else ET.SPU_Lat_ms > 500.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 16 spu_lat=" & Real'Image (ET.SPU_Lat_ms) &
                  " EXPECTED ~290.0 (1..500) -- synthetic latency bad");
             end if;
@@ -1752,14 +1749,14 @@ package body Earu.System_Bridge is
             -----------------------------------------------------------------
             Current_Step := 17;
             Compute_Battery_Survival (S, SMC, Power_History,
-                                      History_Idx, Update_Count);
+                                      History_Idx);
             if Is_First then
                Ada.Text_IO.Put_Line (
                  "[SMT-DBG] Step 17 OK: power_survival_w=" & Real'Image (SMC.Power_Survival_W) &
                  " hibernate=" & Boolean'Image (SMC.Must_Hibernate));
             end if;
             if SMC.Power_Survival_W < 0.0 then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 17 power_survival_w=" &
                  Real'Image (SMC.Power_Survival_W) &
                  " EXPECTED >= 0.0 -- negative survival power impossible");
@@ -1780,7 +1777,7 @@ package body Earu.System_Bridge is
             if SMC.Cooling_Efficiency_Pct < 0.0
               or else SMC.Cooling_Efficiency_Pct > 100.0
             then
-               Ada.Text_IO.Put_Line (
+               SMT_Warn (
                  "[SMT-RANGE-WARN] Step 18 cool_eff=" &
                  Real'Image (SMC.Cooling_Efficiency_Pct) &
                  " EXPECTED 0.0..100.0 -- efficiency calc overflow");

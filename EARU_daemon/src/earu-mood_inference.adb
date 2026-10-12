@@ -47,11 +47,6 @@ package body Earu.Mood_Inference is
       else
          return V;  --  NaN falls through; call sites pre-guarantee non-NaN.
       end if;
-   exception
-      when others =>
-         --  Safe_Fallback: total order over IEEE floats; nothing to repair —
-         --  propagate loudly (never swallowed).
-         raise;
    end Clamp;
 
    -- | Purpose: Infer Mood — map BPM/RMS/stress flags into the Russell circumplex.

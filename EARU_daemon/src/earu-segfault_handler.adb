@@ -1,5 +1,4 @@
 with Ada.Text_IO;
-with Interfaces.C;
 with Earu.IO;
 with Earu.Secdec;
 with Ada.Calendar;
@@ -194,7 +193,6 @@ package body Earu.Segfault_Handler is
       -- [DO-178C §6.4.4 FUNCTION_INTERNAL_PARITY]
       Parity_Bit := (Interfaces.Unsigned_64 (Raw_Ret) and 16#FFFF#)
                      xor Interfaces.Shift_Right (Interfaces.Unsigned_64 (Raw_Ret), 16);
-      pragma Unreferenced (Parity_Bit);
 
    end Handle_Segfault;
 

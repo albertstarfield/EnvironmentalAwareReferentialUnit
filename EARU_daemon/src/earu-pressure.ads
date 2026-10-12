@@ -8,21 +8,39 @@
 --         vacuum, the other is an absent sensor.  Collapsing the two into a
 --         single sentinel is the defect this unit exists to eliminate.
 --    [A2] NaN satisfies no ordering: for NaN, `P >= 0.0` is False AND
---         `P <= 2000.0` is False.  The envelope test therefore rejects NaN
---         without any dedicated NaN branch and without a `P = P` guard.
+--         `P <= P_Max_HPa` is False.  The envelope test therefore rejects
+--         NaN without any dedicated NaN branch and without a `P = P` guard.
 --    [A3] ISO 2533:1975 defines the ISA standard sea-level pressure
 --         P0 = 1013.25 hPa.  It is the only honest substitute for a missing
 --         reading: it is the documented standard mean, not an invented
 --         number, and it is the correct mean for a host that rests on a
 --         surface beneath one atmosphere.
---    [A4] The physical envelope is [0.0, 2000.0] hPa.  0.0 is VACUUM and
+--    [A4] The physical envelope is [0.0, 1100.0] hPa.  0.0 is VACUUM and
 --         MUST remain representable.  A hard lower clamp at Earth-surface
 --         values (e.g. 850 hPa) would silently rewrite a vacuum into
 --         atmosphere -- the same class of lie this unit eliminates, with the
---         sign reversed.  The upper bound 2000 hPa leaves generous headroom
---         over the deepest natural low (870 hPa) and the highest recorded
---         surface high (1085 hPa) so that neither is legitimate but both are
---         enveloped.
+--         sign reversed.  The upper bound 1100.0 hPa sits just above the
+--         highest recorded surface high (1085 hPa) and covers the Dead Sea
+--         shore (~-430 m => ~1064 hPa) plus margin, so the deepest natural
+--         low (870 hPa) and that surface high are both enveloped.
+--    [A9] THE UPPER BOUND IS SET BY THIS CHASSIS, NOT BY THE ATMOSPHERE.
+--         [A4] used to carry a 2000.0 hPa ceiling "for generous headroom",
+--         and that headroom was the defect.  Inverting it through A6 gives
+--         ISA_Altitude(2000.0) = -6123.4 m, so the envelope was willing to
+--         believe the platform was six kilometres underground.  The live
+--         host then produced exactly that class of value: EST_HPA:
+--         1.73169E+03 (1731.69 hPa) from the fan-RPM estimator, inverting to
+--         baro_altitude_m = -4758.85 on a laptop (see the P_Max_HPa rationale
+--         below for the full citation).  1100.0 hPa inverts to -698.0 m,
+--         which still admits every legitimate Earth-surface reading while
+--         rejecting the estimator fault.  [A10] is the mechanical reason no
+--         legitimate high reading can exist on this platform at all: the
+--         chassis is a vented consumer enclosure, not a pressure vessel, so
+--         interior pressure cannot exceed ambient -- there is no mechanism
+--         that could produce 1731 hPa inside it while the outside sits at
+--         ~924 hPa over Bandung.  An above-ceiling reading is therefore a
+--         sensor fault BY CONSTRUCTION, and the envelope is the correct
+--         single place to declare so.
 --    [A5] The caller supplies channel validity; this unit never reads the
 --         world.  Keeping I/O out of the garbledmath is what makes the proof
 --         total and the substitution policy auditable in one place.
@@ -36,12 +54,13 @@
 --         be corrected BY a believed altitude but could never PRODUCE an
 --         altitude of its own -- which is why the fan-estimator channel
 --         was not an independent altitude source.  [A6] closes that hole.
---    [A7] The inverse is total on the closed envelope [0.0, 2000.0] hPa.
+--    [A7] The inverse is total on the closed envelope [0.0, P_Max_HPa] hPa.
 --         P = 0.0 is vacuum and maps to 1/L = 44330.77 m, the top of the
---         ISA column; the upper endpoint maps to about -6123 m.  Both lie
---         inside the Post band [-7000.0, 50000.0], which is therefore
---         discharged by range analysis on the two endpoints plus the
---         monotonicity of the map in between.
+--         ISA column; the upper endpoint (1100.0 hPa) maps to about -698 m
+--         (see [A9] -- it used to be -6123 m under the old 2000.0 ceiling).
+--         Both lie inside the Post band [-7000.0, ISA_Column_M], which is
+--         therefore discharged by range analysis on the two endpoints plus
+--         the monotonicity of the map in between.
 --    [A8] The map is strictly DECREASING: more pressure means less
 --         altitude.  A barometric estimate is therefore an independent
 --         DISCRIMINATOR against a GPS altitude, because the two do not
@@ -60,10 +79,10 @@
 --         operand), no side effects, no `'Unchecked` inputs.  Every branch
 --         returns either a guarded copy of the input or a constant, so the
 --         Post is discharged by inspection on each branch independently.
---    [T3] The envelope is closed, so the result is inside [0.0, 2000.0] for
---         EVERY input domain -- including NaN, negatives, -0.0, and 1.0e30.
---         The substitute sits strictly inside the envelope, so `Is_Envelope`
---         and the Post never disagree about the substitute.
+--    [T3] The envelope is closed, so the result is inside [0.0, P_Max_HPa]
+--         for EVERY input domain -- including NaN, negatives, -0.0, and
+--         1.0e30.  The substitute sits strictly inside the envelope, so
+--         `Is_Envelope` and the Post never disagree about the substitute.
 --    [T4] Vacuum survives when and only when it is real.  `Sanitize(0.0,False)`
 --         yields 1013.25 (an absent sensor is not a vacuum), while
 --         `Sanitize(0.0,True)` yields 0.0 (a live vacuum channel is honoured).
@@ -114,7 +133,42 @@ package Earu.Pressure is
    --  P_Min_HPa = 0.0 is VACUUM.  Deliberately NOT raised to an Earth-surface
    --  floor: that would erase vacuum instead of detecting a broken sensor.
 
-   P_Max_HPa : constant Earu.Types.Real := 2000.0;
+   P_Max_HPa : constant Earu.Types.Real := 1100.0;
+   --  P_Max_HPa = 1100.0 hPa is the CEILING for a pressure this platform can
+   --  physically observe [A9].  The floor stays at 0.0 (VACUUM, see above);
+   --  the ceiling is the one that was wrong.
+   --
+   --  Derivation from the inverse ISA map h(P) = (1 - (P/P0)^(1/n)) / L with
+   --  P0 = 1013.25 hPa, n = 5.25588, L = 2.25577e-5 per metre [ISO 2533:1975]:
+   --      1100.0 hPa  ->   -698.0 m   (Dead Sea shore ~ -430 m, plus margin)
+   --      2000.0 hPa  ->  -6123.4 m   (the PREVIOUS ceiling -- physically absurd)
+   --
+   --  [Based on: EARUruntime.log -- live telemetry carried
+   --   "baro_altitude_m": -4758.8504662691685 on a laptop, which is the exact
+   --   inverse-ISA image of EST_HPA: 1.73169E+03 (1731.69 hPa) written by the
+   --   fan-RPM pressure estimator.  That estimator's own REF_1006_RPM input was
+   --   1.04054E+04, itself outside the 0..8000 RPM band the SMC bridge expects
+   --   ([SMT-RANGE-WARN] Step 11 rpm0= 1.09676000000000E+04 EXPECTED 0..8000,
+   --   2960 occurrences in one session).  With a 2000.0 ceiling the envelope
+   --   admitted the impossible reading, Sanitize adopted it, and the third
+   --   altitude source reported a position nearly five kilometres underground.]
+   --
+   --  A ceiling of 1100.0 rejects 1731.69 hPa, so Sanitize substitutes
+   --  Sea_Level_Std_HPa (1013.25) and ISA_Altitude yields 0.0 m rather than
+   --  -4758.85 m.  It remains consistent with the codebase altitude floor
+   --  Alt <= -430.0 (the Alt_Inop arming threshold), and it does not disturb
+   --  the T4 vacuum contract: Sanitize(0.0, True) is still 0.0.
+   --
+   --  MECHANICAL REASON [A10]: this laptop CHASSIS is not designed for high
+   --  pressure.  It is a vented consumer enclosure, not a pressure vessel --
+   --  it has no sealed reference volume, no compensating bellows, and no
+   --  housing rated for over-pressure.  Interior pressure tracks ambient
+   --  through the fan vents and keyboard gaps; there is no mechanism by which
+   --  the inside of this chassis could ever sit at 1731 hPa while the outside
+   --  does not.  A reading above the ambient band is therefore not a
+   --  "measurement of a high-pressure environment" -- it is a sensor or
+   --  estimator fault by construction, and the envelope is the right place to
+   --  say so.
 
    --  ISO 2533:1975 standard sea-level pressure (A3).
    Sea_Level_Std_HPa : constant Earu.Types.Real := 1013.25;
@@ -123,8 +177,9 @@ package Earu.Pressure is
    -- Is_Envelope                                                           --
    ---------------------------------------------------------------------------
    --  | Purpose: Test whether a pressure value lies inside the physical
-   --  |          envelope [0.0, 2000.0] hPa.  NaN, negatives and oversized
-   --  |          values are rejected by the same comparison (A2).
+   --  |          envelope [P_Min_HPa, P_Max_HPa] = [0.0, 1100.0] hPa.  NaN,
+   --  |          negatives and oversized values are rejected by the same
+   --  |          comparison (A2).
    --  | Parameters: P - pressure in hPa.
    --  | Returns: True when P is in envelope, False otherwise.
    --  | Exceptions: None (total, side-effect free).
@@ -188,7 +243,10 @@ package Earu.Pressure is
    --  | Returns: Barometric altitude in metres above ISA sea level.
    --  |          Strictly DECREASING in the argument [A8].  Vacuum maps to
    --  |          ISA_Column_M (the top of the column), and the upper
-   --  |          envelope endpoint maps to roughly -6123 m [A7].
+   --  |          envelope endpoint (P_Max_HPa = 1100.0) maps to about
+   --  |          -698 m [A7][A9][A10] -- NOT the -6123 m that the old
+   --  |          2000.0 hPa ceiling implied.  See P_Max_HPa for why that
+   --  |          ceiling was physically impossible on this chassis.
    --  | Exceptions: None.  The singular input P = 0.0 is intercepted by an
    --  |             explicit branch returning ISA_Column_M, so no
    --  |             division-by-zero and no fractional power of a

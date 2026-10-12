@@ -28,12 +28,6 @@ package body Earu.Network_Status is
          if Index <= 13 then
             Current_Statuses (Index) := Status;
          end if;
-      exception
-         when others =>
-            --  Safe_Fallback: out-of-range slots are ignored by design
-            --  (guard above); an unexpected fault propagates loudly so the
-            --  monitor task reports it — never a silent stale status.
-            raise;
       end Set;
 
       -- | Purpose: Get — read the current reachability status of one service.

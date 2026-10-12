@@ -187,7 +187,18 @@ package body Earu_Math_Elem_Funcs is
       if X = 0.0 and Y = 0.0 then
          return 0.0;  -- SMT_VERIFIED: origin guard enforces Pre => not (X = 0.0 and Y = 0.0)
       end if;
-      Result := Elem_Funcs.Arctan (X, Y);
+      --  [AXIOM A5] Named association, NOT positional.  Elem_Funcs.Arctan
+      --  declares its formals (Y, X) -- Y first, as the numerator.  The
+      --  wrapper's own formals are deliberately (X, Y) in numerator order,
+      --  so the forwarding below maps wrapper X -> Elem_Funcs Y and
+      --  wrapper Y -> Elem_Funcs X.  That is byte-for-byte the value the
+      --  positional call computed; naming it removes the -gnatw.p
+      --  "actuals may be in wrong order" false positive.  The spec
+      --  forbids swapping the order: every attitude angle and bearing
+      --  call site depends on it and would mirror about the 45 degree
+      --  diagonal.
+      --  [Citation: ISO/IEC 15309-1:2019 14.3 -- Arctan (Y, X) formals]
+      Result := Elem_Funcs.Arctan (Y => X, X => Y);
       -- [FUNCTION_INTERNAL_PARITY] Arctan(2): Result ∈ [-π, π] per spec
       return Result;
    exception

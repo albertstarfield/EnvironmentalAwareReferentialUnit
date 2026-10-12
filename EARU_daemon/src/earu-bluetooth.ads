@@ -9,7 +9,6 @@ with Interfaces;
 with Interfaces.C;
 
 package Earu.Bluetooth is
-   use type Interfaces.Unsigned_8;
 
    --  BLE Limits (must match bluetooth_scanner.h)
    BLE_SCAN_MAX        : constant := 64;
@@ -18,18 +17,24 @@ package Earu.Bluetooth is
 
    --  Unsigned_8 array types matching C char arrays
    --  AXIOM: C uses char[], Ada uses Unsigned_8 array (same memory layout)
+   --  [AXIOM A1] Convention => C is deliberately NOT carried on these
+   --  three array types.  An array of Unsigned_8 has alignment 1 and
+   --  size = length either way, so the C layout is unchanged; carrying
+   --  Convention => C into a record that also carries pragma Pack is
+   --  precisely what makes GNAT emit "pragma Pack affects convention
+   --  C component" and "component may not have C compatible
+   --  representation".  The record below keeps both Convention => C
+   --  and Pack, matching the header's #pragma pack(push, 1).
+   --  [Citation: GNAT User's Guide -- Convention aspect vs pragma Pack]
    type Byte_Array_64 is array (1 .. BLE_DEVICE_NAME_MAX)
-      of Interfaces.Unsigned_8
-      with Convention => C;
+      of Interfaces.Unsigned_8;
 
    type Byte_Array_48 is array (1 .. BLE_DEVICE_ID_MAX)
-      of Interfaces.Unsigned_8
-      with Convention => C;
+      of Interfaces.Unsigned_8;
 
    --  Pad array type for struct alignment
    type Pad_Array_3 is array (1 .. 3)
-      of Interfaces.Unsigned_8
-      with Convention => C;
+      of Interfaces.Unsigned_8;
 
    --  C-binding type matching BLE_Device_Entry (bluetooth_scanner.h)
    --  AXIOM: pragma Pack matches #pragma pack(push, 1) in C header

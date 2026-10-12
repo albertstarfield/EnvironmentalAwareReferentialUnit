@@ -542,7 +542,6 @@ package body Earu.Location_Bridge is
       User_Raw : constant String := Trim_WSP
         (Earu.IO.Execute_And_Read_String
            ("stat -f%Su /dev/console 2>/dev/null", 128, "", St1));
-      UID_Raw  : String (1 .. 64) := (others => ' ');
       User     : String (1 .. 128) := (others => ' ');
       U_Len    : Natural := 0;
    begin
@@ -1055,7 +1054,7 @@ package body Earu.Location_Bridge is
                   Status    : Integer;
                   Capture   : constant String :=
                     Earu.IO.Execute_And_Read_String (Cmd, 8192, "", Status);
-                  Exit_Code : Integer := Status;
+                  Exit_Code : constant Integer := Status;
                begin
                   Log_CL_Attempt (Attempt, Cmd, Exit_Code, Capture);
 

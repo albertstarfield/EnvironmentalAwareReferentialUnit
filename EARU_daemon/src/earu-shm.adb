@@ -124,6 +124,22 @@ package body Earu.Shm is
       function ftruncate (fd : int; length : size_t) return int
          with Pre => True, Post => True;
       pragma Import (C, ftruncate, "ftruncate");
+      -- | Purpose: Errno_Ptr / Strerror -- report WHY ftruncate failed.
+      -- |          A bare ret=-1 cannot distinguish ENOSPC from EINVAL
+      -- |          from EBADF, so the operator cannot act on it.
+      -- | Returns: Errno_Ptr - pointer to the thread's errno slot.
+      -- |          Strerror  - a static C string describing Err.
+      -- | CSI: DO-178C §6.4.4
+      -- | Citation: Darwin __error(2); POSIX strerror(3).
+      -- | AXIOM: strerror is NOT thread-safe (static buffer).  These
+      -- |        call sites are single-threaded diagnostic paths, so
+      -- |        the non-reentrant form is accepted and documented
+      -- |        rather than silently assumed safe.
+      type Int_Access is access all int;
+      function Errno_Ptr return Int_Access;
+      pragma Import (C, Errno_Ptr, "__error");
+      function Strerror (Err : int) return chars_ptr;
+      pragma Import (C, Strerror, "strerror");
 
       -- | Purpose: Close_C_FD — release a POSIX descriptor.
       -- | Parameters: FD — descriptor to close.
@@ -159,7 +175,9 @@ package body Earu.Shm is
       if Ret /= 0 then
          Ada.Text_IO.Put_Line
            ("[!] Warning: ftruncate on SHM " & Name & " failed (ret="
-            & int'Image (Ret) & ")");
+            & int'Image (Ret) & ", errno=" & int'Image (Errno_Ptr.all)
+            & ", " & Value (Strerror (Errno_Ptr.all)) & ", size="
+            & size_t'Image (Size) & ")");
       end if;
 
       -- [NO_SAFE_FALLBACK] Wrap mmap C import in exception handler

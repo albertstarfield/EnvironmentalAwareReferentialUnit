@@ -215,11 +215,6 @@ package body Earu.Secdec is
       end if;
       -- Safe_Fallback: verified data returned unchanged on clean recheck.
       return Sealed.Data;
-   exception
-      when Program_Error =>
-         -- Fallback policy: detection is fatal-by-design; propagate so no
-         -- caller can ever consume an unverified word (no swallow).
-         raise;
    end Secdec_Decode;
 
     -- | Purpose: SECDED TED gate — clean round-trip + injected-fault proof
@@ -292,10 +287,6 @@ package body Earu.Secdec is
                "SECDED TED: injected single-bit flip NOT detected - engine broken";
           end if;
        end;
-    exception
-       when others =>
-          -- Safe_Fallback: surface parity-engine failure to caller (fail-stop)
-          raise;
     end Atomic_Function_Wrapper;
 
 end Earu.Secdec;

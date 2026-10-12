@@ -35,7 +35,6 @@ with Ada.Exceptions;
 procedure Test_Tcc_Auth is
    -- Pre => True — standalone test main; no inputs
    -- Post => True — prints PASS/FAIL per assertion; raises only on harness exception
-   use type Interfaces.Integer_32;
    Passed : Natural := 0;
    Failed : Natural := 0;
 

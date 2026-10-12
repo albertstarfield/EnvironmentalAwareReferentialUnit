@@ -4,7 +4,6 @@ with Ada.Exceptions;
 with Interfaces.C;
 with Earu.IO;
 with Earu.Secdec;
-with Earu.Watchdog_A;
 
 -- AXIOMS: Secondary watchdog monitors Watchdog_A's health via cross-check.
 --   If Watchdog_A's ticks stop incrementing, A is frozen or dead.
@@ -325,7 +324,6 @@ package body Earu.Watchdog_B is
                F       : File_Type;
                Line    : String (1 .. 256);
                Last    : Natural;
-               Data_Age : Natural := 0;
             begin
                begin
                   Open (F, In_File, "/Volumes/EARU_dataIO/earu_timestamp.dat");

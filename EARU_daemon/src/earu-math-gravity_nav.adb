@@ -118,7 +118,7 @@ package body Earu.Math.Gravity_Nav with SPARK_Mode => Off is
       -- Timestamped as the last declaration so it runs after Anom/Key_*
       -- elaboration: the measured span below is the match scan itself
       -- (plus the Secdec gate), not the anomaly computation.
-      Scan_Start : Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Scan_Start : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
       Earu.Secdec.Atomic_Function_Wrapper;  -- [FUNCTION_INTERNAL_PARITY: SECDED TED gate, DO-178C §6.4.4]
       Loc.Gravity_Anomaly := Anom;

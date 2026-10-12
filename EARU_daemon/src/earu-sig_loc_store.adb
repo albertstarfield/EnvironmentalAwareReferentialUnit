@@ -104,55 +104,6 @@ package body Earu.Sig_Loc_Store is
          return Default;
    end Extract_Float;
 
-   -- | Purpose: Extract String — pull a quoted string field out of a JSON object slice.
-   -- | Parameters: JSON — object text; Key — field name; Default — miss value.
-   -- | Returns: raw string between quotes, or Default when absent.
-   -- | CSI: DO-178C §6.4.4
-   -- [Documentation: DO-178C §6.4.4 function documentation]
-   -- WCET: O(n) — two Index searches over the slice.
-   -- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(n)]
-   -- @test: Test_Sig_Loc_Store — Register_Routine ("Extract_String", Test_Sig_Loc_Store'Access);
-   function Extract_String
-     (JSON    : String;
-      Key     : String;
-      Default : String := "")
-      return String is
-      -- Pre => True — any slice accepted; misses degrade to Default.
-      -- Post => Extract_String'Result'Length <= JSON'Length.
-      -- WCET: O(n) — bounded Index scans. Estimated Processing Time: O(n); Space Complexity: O(1)
-      Start_Idx : Natural;
-      Colon_Idx : Natural;
-      Open_Idx  : Natural;
-      Close_Idx : Natural;
-   begin
-      Earu.Secdec.Atomic_Function_Wrapper;
-      Start_Idx := Index (JSON, """" & Key & """");
-      if Start_Idx = 0 then
-         return Default;
-      end if;
-
-      Colon_Idx := Index (JSON (Start_Idx .. JSON'Last), ":");
-      if Colon_Idx = 0 then
-         return Default;
-      end if;
-
-      Open_Idx := Index (JSON (Colon_Idx .. JSON'Last), """");
-      if Open_Idx = 0 then
-         return Default;
-      end if;
-
-      Close_Idx := Index (JSON (Open_Idx + 1 .. JSON'Last), """");
-      if Close_Idx = 0 then
-         return Default;
-      end if;
-
-      return JSON (Open_Idx + 1 .. Close_Idx - 1);
-   exception
-      when others =>
-         --  Safe_Fallback: malformed quote pairing degrades to Default.
-         return Default;
-   end Extract_String;
-
    --  ── Load ──────────────────────────────────────────────────────────────
 
    -- | Purpose: Load Sig Locs — read the JSON file into the state buffer at startup.
@@ -342,11 +293,6 @@ package body Earu.Sig_Loc_Store is
                end if;
          end;
       end;
-   exception
-      when others =>
-         --  Safe_Fallback: write errors already logged above with the exact
-         --  path; propagate so the ML cycle can retry next tick (no swallow).
-         raise;
    end Save_Sig_Locs;
 
 end Earu.Sig_Loc_Store;

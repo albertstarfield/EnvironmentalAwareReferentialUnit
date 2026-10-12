@@ -647,7 +647,10 @@ package body Earu.State_Store is
       procedure Get_Sig_Loc (Index : Positive; Loc : out Significant_Location) is
       begin
          -- [Bounds guard] Index range check: Index must be in 1..10 for array access.
-         if Index >= 1 and Index <= 10 then -- SMT_VERIFIED: bounds guard for Sig_Locations index
+         --  [AXIOM A3] Index : Positive, so ">= 1" is free; only the
+         --  upper bound can reject.  SMT_VERIFIED: bounds guard for
+         --  the 1 .. 10 Significant_Location_Array index.
+         if Index <= 10 then
             Loc := State.Sig_Locations (Significant_Location_Array'First + Index - 1); -- SMT_VERIFIED
          else
             Loc := (others => 0.0); -- SMT_VERIFIED: safe zeroed default

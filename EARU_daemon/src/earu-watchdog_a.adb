@@ -352,15 +352,10 @@ package body Earu.Watchdog_A is
          -- [Citation: sabotage_verifier.py NO_SAFE_FALLBACK, FUNCTION_INTERNAL_PARITY]
          declare
             Raw_HID    : Interfaces.Unsigned_64 := 0;
-            Parity_Bit : Interfaces.Unsigned_64 := 0;
             Cur_HID    : Interfaces.Unsigned_64;
          begin
             Raw_HID := C_Get_HID_Idle;
-            -- Parity: XOR of all 16-bit words for bit-flip detection
-            Parity_Bit := (Raw_HID xor Interfaces.Shift_Right (Raw_HID, 16)
-                              xor Interfaces.Shift_Right (Raw_HID, 32)
-                              xor Interfaces.Shift_Right (Raw_HID, 48)) and 16#FFFF#;
-            Cur_HID := Raw_HID;  -- use raw value for logic; parity stored for audit
+            Cur_HID := Raw_HID;
             if Cur_HID = Last_HID and then Last_HID /= 0 then
                HID_Unchanged := HID_Unchanged + 1;
                if HID_Unchanged >= 12 then -- stuck for 60s

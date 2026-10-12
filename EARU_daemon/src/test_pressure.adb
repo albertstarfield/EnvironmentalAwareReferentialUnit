@@ -145,8 +145,15 @@ begin
              Earu.Pressure.Sanitize (-0.0, True) = -0.0
              or else Earu.Pressure.Sanitize (-0.0, True) = 0.0);
 
-   Run_Test ("vacuum: Sanitize(2000.0, True) = 2000.0 (upper edge)",
-             Earu.Pressure.Sanitize (2000.0, True) = 2000.0);
+   Run_Test ("vacuum: Sanitize(1100.0, True) = 1100.0 (upper edge)",
+             Earu.Pressure.Sanitize (1100.0, True) = 1100.0);
+
+   --  [A9][A10] One past the new ceiling must be substituted, not adopted.
+   --  Before this test existed, Sanitize(2000.0, True) returned 2000.0 and
+   --  that is precisely how a laptop came to report -4758.85 m of altitude.
+   Run_Test ("vacuum: Sanitize(1731.69, True) substitutes, not adopts",
+             Near (Earu.Pressure.Sanitize (1731.69, True),
+                   Earu.Pressure.Sea_Level_Std_HPa, Epsilon));
 
    ---------------------------------------------------------------------------
    -- 4..6  AN ABSENT CHANNEL IS NOT A VACUUM (A2)                           --
@@ -202,15 +209,24 @@ begin
    ---------------------------------------------------------------------------
    -- 14..15  THE ENVELOPE ITSELF                                             --
    ---------------------------------------------------------------------------
-   Run_Test ("envelope: every Sanitize result is inside [0.0, 2000.0]",
+   Run_Test ("envelope: every Sanitize result is inside [0.0, 1100.0]",
              All_In_Envelope);
 
-   Run_Test ("envelope: Is_Envelope(0.0) True, (-0.5) False, (2000.0) True",
+   --  [A9][A10] Regression for the live defect: EST_HPA = 1731.69 hPa used
+   --  to be ADMITTED by a 2000.0 ceiling and inverts to -4758.85 m of
+   --  barometric altitude.  The ceiling is now 1100.0, so both that reading
+   --  and the old ceiling itself must be outside the envelope.
+   Run_Test ("envelope: Is_Envelope(0.0) True, (-0.5) False, (1100.0) True",
              Earu.Pressure.Is_Envelope (0.0)
-             and then Earu.Pressure.Is_Envelope (2000.0)
+             and then Earu.Pressure.Is_Envelope (1100.0)
              and then not Earu.Pressure.Is_Envelope (-0.5)
-             and then not Earu.Pressure.Is_Envelope (2000.5)
+             and then not Earu.Pressure.Is_Envelope (1100.5)
              and then not Earu.Pressure.Is_Envelope (NaN_Val));
+
+   Run_Test ("envelope: the OBSERVED 1731.69 hPa is now rejected",
+             not Earu.Pressure.Is_Envelope (1731.69)
+             and then Near (Earu.Pressure.Sanitize (1731.69, True),
+                            Earu.Pressure.Sea_Level_Std_HPa, Epsilon));
 
    ---------------------------------------------------------------------------
    -- 16..17  THE LIVE BUG IS CLOSED: THE SENTINEL CANNOT LEAK               --
@@ -268,10 +284,14 @@ begin
                 Near (Earu.Pressure.ISA_Altitude (0.0),
                       Earu.Pressure.ISA_Column_M, 1.0));
 
-      --  A7: the upper envelope endpoint stays inside the Post band.
-      Run_Test ("ISA_Altitude: 2000 hPa stays above -7000 m",
-                Earu.Pressure.ISA_Altitude (2000.0) > -7000.0
-                and then Earu.Pressure.ISA_Altitude (2000.0) < 0.0);
+      --  A7/A9: the upper envelope endpoint stays inside the Post band.
+      --  The endpoint is now P_Max_HPa = 1100.0, which inverts to about
+      --  -698 m.  (The old 2000.0 endpoint inverted to -6123 m; it is no
+      --  longer in envelope, so calling ISA_Altitude on it would violate
+      --  the Pre => Is_Envelope contract.)
+      Run_Test ("ISA_Altitude: 1100 hPa stays above -7000 m",
+                Earu.Pressure.ISA_Altitude (1100.0) > -7000.0
+                and then Earu.Pressure.ISA_Altitude (1100.0) < 0.0);
 
       --  T5: round-trip against the forward ISA map.  The two share
       --  ISA_Exponent / ISA_Lapse, so inverting a forward-mapped altitude

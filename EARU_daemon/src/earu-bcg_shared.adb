@@ -50,9 +50,6 @@ package body Earu.BCG_Shared is
             --  observe the fault, never a silent poison state.
             begin
                Earu.BCG_Detection.Reset (State);
-            exception
-               when others =>
-                  raise;
             end;
             raise;
       end Push;
@@ -100,9 +97,6 @@ package body Earu.BCG_Shared is
             begin
                Earu.BCG_Detection.Reset (State);
                Item := State;
-            exception
-               when others =>
-                  raise;
             end;
             raise;
       end Snapshot;
@@ -123,10 +117,6 @@ package body Earu.BCG_Shared is
          --  component — always inside BCG_State range (no index bound);
          --  Ready(State) is a total predicate over that in-range State.
           return Earu.BCG_Detection.Ready (State);  -- SMT_VERIFIED
-      exception
-         when others =>
-            --  Safe_Fallback: pure predicate; unexpected exception propagates.
-            raise;
       end Is_Ready;
 
       -- | Purpose: Buffered — current sample count in the detector ring.
@@ -145,10 +135,6 @@ package body Earu.BCG_Shared is
          --  component — always inside BCG_State range (no index bound);
          --  Samples_Buffered(State) is a total field read returning 0 .. 8000.
           return Earu.BCG_Detection.Samples_Buffered (State);  -- SMT_VERIFIED
-      exception
-         when others =>
-            --  Safe_Fallback: pure field read; unexpected exception propagates.
-            raise;
       end Buffered;
 
    end BCG_Buffer;

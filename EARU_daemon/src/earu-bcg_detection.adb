@@ -24,36 +24,6 @@ package body Earu.BCG_Detection is
     --  8000*2**80 ~ 9.67e27 << Float'Last.
      Prod_Bound : constant Float := 2.0 ** 80;
 
-   -- | Purpose: Clamp — bound a float to the ordered envelope [Lo, Hi].
-   -- | Parameters: V — input value; Lo — lower bound; Hi — upper bound.
-   -- | Returns: V when already inside the envelope, else the violated bound.
-   -- | CSI: DO-178C §6.4.4
-   -- | WCET: O(1) — two IEEE-754 compares, branch-free of allocation.
-   -- [Timing: DO-178C §6.4.4 WCET analysis: Estimated Processing Time O(1)]
-   -- @test: Test_BCG_Detection — Register_Routine ("Clamp", Test_BCG_Detection'Access);
-   function Clamp (V, Lo, Hi : Float) return Float
-     with
-       Pre  => Lo <= Hi,
-       Post => Clamp'Result in Lo .. Hi
-   is
-      -- Pre => Lo <= Hi — caller supplies an ordered envelope; mirrors .ads contract.
-      -- Post => Clamp'Result in Lo .. Hi — every return path yields a bound.
-   begin
-      Earu.Secdec.Atomic_Function_Wrapper;
-      if V < Lo then
-         return Lo;
-      elsif V > Hi then
-         return Hi;
-      else
-         return V;  --  NaN falls through and returns NaN; call sites pre-guarantee non-NaN.
-      end if;
-   exception
-      when others =>
-         --  Safe_Fallback: total order comparison over IEEE floats — no state to
-         --  repair; any unexpected exception propagates loudly (never swallowed).
-         raise;
-   end Clamp;
-
    -- | Purpose: Sanitize — sole entry door for raw sensor floats (Murphy rule).
    -- | Parameters: V — raw axis/accumulator value; Lo — lower bound; Hi — upper bound.
    -- | Returns: finite value in [Lo, Hi] for ANY input (NaN collapses to 0.0).
@@ -80,11 +50,6 @@ package body Earu.BCG_Detection is
       else
          return V;
       end if;
-   exception
-      when others =>
-         --  Safe_Fallback: MURPHY BOUNDARY RULE (audit V2 fix) — every path
-         --  returns a finite in-range value; unexpected exception propagates.
-         raise;
    end Sanitize;
 
    subtype Guard_Arg is Natural range 0 .. 65535;
@@ -107,11 +72,6 @@ package body Earu.BCG_Detection is
       Earu.Secdec.Atomic_Function_Wrapper;
       --  THEORY T4 guard word; max operand 65535*48 = 3145680 << Integer'Last.
       return ((WI * 31 + T * 17) mod 65536);
-   exception
-      when others =>
-         --  Safe_Fallback: operands bounded by Guard_Arg, mod is total —
-         --  nothing to recover; unexpected exception propagates loudly.
-         raise;
    end Guard_Word;
 
    -- | Purpose: Refresh Parity — recompute and store the T4 guard word.
@@ -157,11 +117,6 @@ package body Earu.BCG_Detection is
         and then (for all J in Sample_Buffer'Range =>
                      S.Ring (J) = S.Ring (J)
                         and then abs (S.Ring (J)) <= Ring_Max));
-   exception
-      when others =>
-         --  Safe_Fallback: field reads are total; NaN self-comparison is the
-         --  detection mechanism itself — unexpected exception propagates.
-         raise;
    end Bounded;
 
    -- | Purpose: Reset — clear filter state, ring buffer and guard word.
@@ -195,9 +150,6 @@ package body Earu.BCG_Detection is
             S.Write_Idx := 0;
             S.Total     := 0;
             Refresh_Parity (S);
-         exception
-            when others =>
-               raise;
          end;
          raise;
    end Reset;
@@ -287,9 +239,6 @@ package body Earu.BCG_Detection is
          --  downstream Compute detects (and structurally resets) the state.
          begin
             Refresh_Parity (S);
-         exception
-            when others =>
-               raise;
          end;
          raise;
    end Push_Sample;
@@ -307,10 +256,6 @@ package body Earu.BCG_Detection is
    begin
       Earu.Secdec.Atomic_Function_Wrapper;
       return S.Total;
-   exception
-      when others =>
-         --  Safe_Fallback: plain field load; unexpected exception propagates.
-         raise;
    end Samples_Buffered;
 
    -- | Purpose: Ready — True once the full 10 s window (8000 samples) is buffered.
@@ -325,11 +270,9 @@ package body Earu.BCG_Detection is
       -- post => True — Boolean by construction (contract in .ads).
    begin
       Earu.Secdec.Atomic_Function_Wrapper;
-      return (S.Total >= Buffer_Length);
-   exception
-      when others =>
-         --  Safe_Fallback: plain compare; unexpected exception propagates.
-         raise;
+      --  [AXIOM A2] S.Total : Sample_Count is 0 .. Buffer_Length, so ">="
+      --  cannot be distinguished from "=" on any reachable state.
+      return (S.Total = Buffer_Length);
    end Ready;
 
    -- | Purpose: Saturation Events — loud counter of dropped peak-table slots.
@@ -346,10 +289,6 @@ package body Earu.BCG_Detection is
    begin
       Earu.Secdec.Atomic_Function_Wrapper;
       return S.Saturation_Count;
-   exception
-      when others =>
-         --  Safe_Fallback: plain field load; unexpected exception propagates.
-         raise;
    end Saturation_Events;
 
    -- | Purpose: Integrity Ok — THEORY T4 guard-word verification over control state.
@@ -365,11 +304,6 @@ package body Earu.BCG_Detection is
    begin
       Earu.Secdec.Atomic_Function_Wrapper;
       return (S.Parity = Guard_Word (S.Write_Idx, S.Total));
-   exception
-      when others =>
-         --  Safe_Fallback: mismatch is the designed detection path (Reset
-         --  recovers); an exception here is unexpected and propagates.
-         raise;
    end Integrity_Ok;
 
    -- | Purpose: Compute — autocorrelation peak detection over the full window.
@@ -440,11 +374,6 @@ package body Earu.BCG_Detection is
             end;
          end loop;
          return Sum / Float (Lim);
-      exception
-         when others =>
-            --  Safe_Fallback: ring bounds + Loop_Invariant keep every index
-            --  in range; unexpected exception propagates (no silent NaN).
-            raise;
       end Autocorr_At;
 
        -- | Purpose: Sort Peaks — selection sort of captured peaks by descending R value.
@@ -491,11 +420,6 @@ package body Earu.BCG_Detection is
                Peaks (Best_Idx) := Tmp;
             end if;
          end loop;
-      exception
-         when others =>
-            --  Safe_Fallback: index invariants (Loop_Invariant above) keep
-            --  every access in 1 .. Peak_Count; unexpected exception raises.
-            raise;
       end Sort_Peaks;
 
    begin
@@ -632,9 +556,6 @@ package body Earu.BCG_Detection is
          --  Integrity_Ok stays truthful; propagate if even that fails.
          begin
             S.Parity := Guard_Word (S.Write_Idx, S.Total);
-         exception
-            when others =>
-               raise;
          end;
          raise;
    end Refresh_Parity;
