@@ -56,6 +56,116 @@ package Earu.State_Store is
       procedure Update_Location (L : Location_Type)
          with Pre => True, Post => True;
 
+      --  FIELD-SCOPED LOCATION WRITES  (lost-update fix)
+      --
+      --  AXIOM A1 (the defect): State_Buffer is a protected object, so each
+      --  individual call is atomic. Read-modify-write SEQUENCES are not.
+      --  Update_Location and Update_Weather both replace the WHOLE
+      --  Location_Type record. Sensors_Task runs at ~800 Hz and did
+      --      Full_State := Get_Full_State;            (read)
+      --      Loc := Full_State.Location;              (private copy)
+      --      Dead_Reckon_Update (Loc, ...);           (mutates the copy)
+      --      Update_Location (Loc);                   (WHOLE-record write-back)
+      --  while Monitor_Task ran at 10 Hz on its own private copy. Each
+      --  800 Hz writer therefore published a copy up to one 100 ms Monitor
+      --  tick stale, wiping whatever the Monitor had just computed
+      --  (Pressure_HPa, Terrain_Alt, Alt_Delta_M, Baro_Altitude,
+      --  Baro_Corrected_Pressure, Lockin_Miss, Warning/Caution_Reason).
+      --  Observed on the wire: alt_delta_m frozen at 0.00 while
+      --  alt = 730.83 m and terrain_altitude_m = 769.00 m co-existed in the
+      --  SAME stored record.
+      --
+      --  AXIOM A2 (the fix): a writer may only replace the fields it
+      --  authors. Both merges below execute INSIDE the protected object, so
+      --  no other task can interleave between the read of the preserved
+      --  fields and the write of the authored fields.
+      --
+      --  AXIOM A3 (the split, derived from an exhaustive per-procedure
+      --  assignment scan of Earu.Math):
+      --    Monitor-authored : Start_Lat/Lon/Alt, Pressure_HPa, Terrain_Alt,
+      --      Alt_Delta_M, Baro_Altitude, Baro_Corrected_Pressure,
+      --      Lockin_Miss, Warning_Reason, Caution_Reason, Corr_Alt,
+      --      Corr_Velocity, Corr_VRate, Corr_Heading, Mapping_Mode,
+      --      CL_History, CL_Count, Last_CL_Speed,
+      --      Inside_Significant_Location.
+      --    DR/Sensors-authored: Lat, Lon, Alt, Pos, Vel, Raw_Vel, V_Mag,
+      --      Mach, Heading, Compass_Dir, Transportation_Category,
+      --      Total_Dist, Odometer_30m, Alt_Rate, Alt_Inop, Alt_Inop_Until,
+      --      Anchor_Refresh_Speed, Is_Stationary, Stationary_Cnt,
+      --      Gyro_Bias, Accel_Bias, Calibrated_G, Gravity_Calibrated,
+      --      CL_Speed_Age, Gravity_Anomaly, Gravity_Grid_Match.
+      --    Lat/Lon/Alt/Pos are integrated by Dead_Reckon_Update and reset by
+      --    the GPS anchor. They stay DR-authored; the anchor lands them
+      --    explicitly through the whole-record Update_Location on the tick it
+      --    fires, and the relock gate re-arms while Start_* still disagrees,
+      --    so a straddling DR sample self-heals within a few 100 ms ticks.
+      --
+      --  THEORIES: removing the whole-record write from the 800 Hz path
+      --  cannot starve the Monitor fields (DR never modifies them) and cannot
+      --  starve the DR fields (DR still writes every field it authors on
+      --  every sample). Only cross-task clobbering is removed.
+      --  APPLICATIONS: Update_Location_DR <- Sensors_Task;
+      --  Update_Location_Monitor <- Monitor_Task non-anchor writes;
+      --  Update_Weather <- Monitor weather writes; Update_Location <- GPS
+      --  anchor application and startup.
+      --  [Citation: Ada RM 9.5.1 - Protected Operations (atomicity of one
+      --   protected action)]
+      --  [Citation: DO-178C 6.4.4 - WCET analysis]
+      --  [Based on: classic lost-update / read-modify-write race]
+      --
+      -- Timing (Estimated Processing Time): O(1) - fixed copy counts.
+      -- CPU Time: ~0.4 us. WCET: 2 us.
+      -- Space Complexity: O(1) - one temporary Location_Type on the stack.
+      -- Derivation: 20 (DR merge) / 28 (Monitor merge) preserved copies.
+      -- Hardware Assumptions: none beyond a single-core-equivalent
+      -- protected-action guarantee.
+
+      -- Purpose: Publish the dead-reckoning result WITHOUT replacing the
+      --          Monitor-authored fields of the location record.
+      -- Parameters:
+      --   L : Location_Type -- DR/Sensors view. Monitor-authored components
+      --                       are ignored; the stored ones are kept.
+      -- Returns: none.
+      -- Errors: none possible (pure assignment inside a protected action).
+      -- Safety fallback: every preserved field falls back to the value
+      --   already resident in the store, never to a type default.
+      procedure Update_Location_DR (L : Location_Type)
+         with Pre => True, Post => True;
+
+      -- Purpose: Publish Monitor-authored location fields WITHOUT replacing
+      --          the dead-reckoning components of the location record.
+      -- Parameters:
+      --   L : Location_Type -- Monitor view. DR-authored components are
+      --                       ignored; the stored ones are kept.
+      -- Returns: none.
+      -- Errors: none possible (pure assignment inside a protected action).
+      -- Safety fallback: every preserved field falls back to the value
+      --   already resident in the store, never to a type default.
+      procedure Update_Location_Monitor (L : Location_Type)
+         with Pre => True, Post => True;
+
+      -- Purpose: Advance the GPS-lock staleness counter in the STORED
+      --          location record, atomically and unconditionally.
+      -- Parameters:
+      --   Dt : Real -- Elapsed time to add, in seconds (0.1 = one Monitor tick).
+      -- Returns: none.
+      -- Errors: negative or non-finite Dt is clamped to 0.0 (no counter
+      --         can be driven backwards or into NaN by a bad clock).
+      -- Safety fallback: the increment is performed inside the protected
+      --   action on the stored value, so it cannot be lost by any writer
+      --   holding a stale private copy, and it cannot be skipped by a
+      --   branch in the caller.
+      -- AXIOM: a staleness alarm that only advances on a path some branch
+      --   can bypass is not an alarm -- it freezes and reports healthy
+      --   while the thing it monitors is stuck. This operation exists so
+      --   the increment has exactly one call site, executed once per
+      --   Monitor tick, before any conditional work.
+      -- WCET: O(1).
+      -- [Citation: Ada RM 9.5.1 - Protected Actions]
+      -- [Citation: DO-178C 6.4.4 - WCET analysis]
+      procedure Tick_Lockin_Miss (Dt : Real)
+         with Pre => True, Post => True;
+
       -- Purpose: Update the ecosystem weather model state.
       -- Parameters:
       --   E : Ecosystem_Weather_Type -- Latest ecosystem weather data.

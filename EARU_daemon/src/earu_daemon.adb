@@ -920,7 +920,7 @@ is
                                   Loc.Compass_Dir (1 .. 2) := "NW";
                                end if;
                             end;
-                            Earu.State_Store.State_Buffer.Update_Location (Loc);
+                            Earu.State_Store.State_Buffer.Update_Location_DR (Loc);
                         end;
 
                         Earu.Math.Update_Vibration_State (Vib, Sqrt(Local_Accel.X**2 + Local_Accel.Y**2 + Local_Accel.Z**2), 800.0, Triggered, Ratio);
@@ -1174,6 +1174,21 @@ is
              end if;
           end;
 
+          --  LOCKIN STALENESS TICK -- UNCONDITIONAL, BEFORE ANY BRANCH.
+          --  AXIOM A4: Lockin_Miss is the input to the ANCHOR_FAIL_30S
+          --  alarm (threshold 30.0 s). It used to be incremented only in
+          --  the `else` of the weather-SHM freshness gate below, so any
+          --  stall that prevented reaching that gate froze the counter at
+          --  a small value and the system reported HEALTHY while nothing
+          --  was updating. A staleness alarm that cannot advance when the
+          --  thing it monitors has stalled is not an alarm. The increment
+          --  now runs once per Monitor tick, before the gate, and inside
+          --  the protected object, so no writer holding a stale private
+          --  copy can roll it back and no branch can skip it.
+          --  [Citation: DO-178C 6.4.4 - a failure indication must not be
+          --   inhibited by an unrelated code path]
+          Earu.State_Store.State_Buffer.Tick_Lockin_Miss (0.1);
+
           if Weather_SHM.Header.Update_Count /= Last_W then
              declare
                 Full : constant Earu_State := Earu.State_Store.State_Buffer.Get_Full_State;
@@ -1356,6 +1371,17 @@ is
                     L.Start_Lon := Snap.Lon;
                     L.Start_Alt := Snap.Alt;
                     L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
+                    --  ANCHOR LANDING: Lat/Lon/Alt/Pos are DR-authored, so the
+                    --  field-scoped Monitor write below would preserve the OLD
+                    --  values and the relock would be discarded on the very tick
+                    --  that produced it. The whole-record Update_Location is the
+                    --  one authorised full write: it lands the new anchor and
+                    --  the zeroed Pos together. If an 800 Hz DR sample straddles
+                    --  this store, the gate re-arms next tick because Start_*
+                    --  (which the DR merge preserves) now disagrees with Snap,
+                    --  and because Abs (L.Pos.X) > 100.0 re-fires on a restored
+                    --  stale Pos -- so the anchor self-heals within a few ticks.
+                    Earu.State_Store.State_Buffer.Update_Location (L);
                  end if;
                  end;
                   -- Pressure mirrors the fan-RPM calibrated estimation (Category 3).
@@ -1447,7 +1473,11 @@ is
                 Net_Partial : Boolean := False;
                 Net_Full_Inop : Boolean := False;
              begin
-                L.Lockin_Miss := L.Lockin_Miss + 0.1;
+                --  LOCKIN STALENESS: the increment moved to the unconditional
+                --  Tick_Lockin_Miss call above (before the freshness gate), so
+                --  it can no longer be skipped by this branch. L already holds
+                --  the stored value from the Get_Full_State read, so the
+                --  ANCHOR_FAIL_30S check below sees the live counter.
                 
                 -- Analyze Network Status
                 for I in Net'Range loop
@@ -1541,7 +1571,7 @@ is
                    if Net_Partial then Add_C("NET_COMMS_PARTIAL [CHECK CONNECTIVITY]"); end if;
                 end;
 
-                 Earu.State_Store.State_Buffer.Update_Location (L);
+                 Earu.State_Store.State_Buffer.Update_Location_Monitor (L);
 
                  -- ── SMC-DERIVED WEATHER (no Python sidecar update) ────────────
                  -- When the bridge sidecar has not sent a new SHM update, we

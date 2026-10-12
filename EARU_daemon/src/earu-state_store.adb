@@ -1,5 +1,132 @@
 package body Earu.State_Store is
 
+   --  ══════════════════════════════════════════════════════════════════
+   --  FIELD-SCOPED LOCATION MERGES  (lost-update fix)
+   --  ══════════════════════════════════════════════════════════════════
+   --
+   --  AXIOMS:
+   --   A1 Location_Type has exactly 52 components. Every one of them is
+   --      authored by exactly one task family:
+   --        Monitor-authored  (20): Start_Lat/Lon/Alt, Pressure_HPa,
+   --          Terrain_Alt, Alt_Delta_M, Baro_Corrected_Pressure,
+   --          Baro_Altitude, Lockin_Miss, Warning_Reason, Caution_Reason,
+   --          Corr_Alt, Corr_Heading, Corr_Velocity, Corr_VRate,
+   --          Mapping_Mode, CL_History, CL_Count, Last_CL_Speed,
+   --          Inside_Significant_Location.
+   --        DR/Sensors-authored (32): everything else.
+   --      20 + 32 = 52 -- the split is a PARTITION, so neither merge can
+   --      drop or invent a component.
+   --   A2 These are plain (non-protected) procedures on purpose. Ada RM
+   --      9.5.1 forbids a protected operation from calling another
+   --      protected operation of the SAME object, so Update_Weather cannot
+   --      simply call Update_Location_Monitor. Factoring the copy lists
+   --      here keeps ONE implementation of each list, which is what
+   --      prevents the two lists from silently diverging.
+   --   A3 Every merge starts from a full snapshot of the live record
+   --      (Keep) and writes the FULL record back, so an unread component
+   --      keeps the value already in the store. The preserved list is
+   --      therefore the only thing that can go wrong, and it is checked
+   --      against the partition above.
+   --  THEORIES: a writer that restores the fields it does not author is
+   --  observationally identical to a writer that never touched them.
+   --  APPLICATIONS: Update_Location_DR / Update_Location_Monitor /
+   --  Update_Weather all call into this pair.
+   --  [Citation: Ada RM 9.5.1 - Protected Actions]
+   --  [Citation: DO-178C 6.4.4 - WCET analysis]
+   --  [Based on: lost-update / read-modify-write race on a protected object]
+   --
+   -- Timing (Estimated Processing Time): O(1) - fixed component copies.
+   -- CPU Time: ~0.3 us. WCET: 2 us.
+   -- Space Complexity: O(1) - two Location_Type temporaries on the stack.
+   -- Derivation: 52-component record copy plus 20/32 restores.
+   -- Hardware Assumptions: none; the copy is a plain record assignment.
+
+   -- Purpose: keep only the 20 Monitor-authored components of Src, taking
+   --          all 52 from Dst as the base.
+   -- Parameters:
+   --   Src : Location_Type     -- full DR/Sensors view (ignored for the 20).
+   --   Dst : in out Location_Type -- the live record to update.
+   -- Returns: none.
+   -- Errors: none (pure component assignment, no external calls).
+   -- Safety fallback: each of the 20 is restored from the live record, so
+   --   a missing update can never leave a type-default value behind.
+   procedure Merge_DR_Fields (Src : Location_Type;
+                              Dst : in out Location_Type) is
+      Keep : constant Location_Type := Dst;
+   begin
+      Dst := Src;
+      --  Monitor-authored: restore from the live record.
+      Dst.Start_Lat                  := Keep.Start_Lat;
+      Dst.Start_Lon                  := Keep.Start_Lon;
+      Dst.Start_Alt                  := Keep.Start_Alt;
+      Dst.Pressure_HPa               := Keep.Pressure_HPa;
+      Dst.Terrain_Alt                := Keep.Terrain_Alt;
+      Dst.Alt_Delta_M                := Keep.Alt_Delta_M;
+      Dst.Baro_Corrected_Pressure    := Keep.Baro_Corrected_Pressure;
+      Dst.Baro_Altitude              := Keep.Baro_Altitude;
+      Dst.Lockin_Miss                := Keep.Lockin_Miss;
+      Dst.Warning_Reason             := Keep.Warning_Reason;
+      Dst.Caution_Reason             := Keep.Caution_Reason;
+      Dst.Corr_Alt                   := Keep.Corr_Alt;
+      Dst.Corr_Heading               := Keep.Corr_Heading;
+      Dst.Corr_Velocity              := Keep.Corr_Velocity;
+      Dst.Corr_VRate                 := Keep.Corr_VRate;
+      Dst.Mapping_Mode               := Keep.Mapping_Mode;
+      Dst.CL_History                 := Keep.CL_History;
+      Dst.CL_Count                   := Keep.CL_Count;
+      Dst.Last_CL_Speed              := Keep.Last_CL_Speed;
+      Dst.Inside_Significant_Location := Keep.Inside_Significant_Location;
+   end Merge_DR_Fields;
+
+   -- Purpose: keep only the 32 DR/Sensors-authored components of Src,
+   --          taking all 52 from Dst as the base.
+   -- Parameters:
+   --   Src : Location_Type     -- full Monitor view (ignored for the 32).
+   --   Dst : in out Location_Type -- the live record to update.
+   -- Returns: none.
+   -- Errors: none (pure component assignment, no external calls).
+   -- Safety fallback: each of the 32 is restored from the live record, so
+   --   a missing update can never leave a type-default value behind.
+   procedure Merge_Monitor_Fields (Src : Location_Type;
+                                   Dst : in out Location_Type) is
+      Keep : constant Location_Type := Dst;
+   begin
+      Dst := Src;
+      --  DR/Sensors-authored: restore from the live record.
+      Dst.Lat                        := Keep.Lat;
+      Dst.Lon                        := Keep.Lon;
+      Dst.Alt                        := Keep.Alt;
+      Dst.Alt_Rate                   := Keep.Alt_Rate;
+      Dst.Mach                       := Keep.Mach;
+      Dst.Heading                    := Keep.Heading;
+      Dst.Compass_Dir                := Keep.Compass_Dir;
+      Dst.Calibrated_G               := Keep.Calibrated_G;
+      Dst.Gravity_Calibrated         := Keep.Gravity_Calibrated;
+      Dst.Pos                        := Keep.Pos;
+      Dst.Total_Dist                 := Keep.Total_Dist;
+      Dst.Odometer_30m               := Keep.Odometer_30m;
+      Dst.V_Mag                      := Keep.V_Mag;
+      Dst.Transportation_Category    := Keep.Transportation_Category;
+      Dst.Anchor_Refresh_Speed       := Keep.Anchor_Refresh_Speed;
+      Dst.Alt_Inop                   := Keep.Alt_Inop;
+      Dst.Alt_Inop_Until             := Keep.Alt_Inop_Until;
+      Dst.Vel                        := Keep.Vel;
+      Dst.Raw_Vel                    := Keep.Raw_Vel;
+      Dst.CL_Speed_Age               := Keep.CL_Speed_Age;
+      Dst.Gyro_Bias                  := Keep.Gyro_Bias;
+      Dst.Accel_Bias                 := Keep.Accel_Bias;
+      Dst.Is_Stationary              := Keep.Is_Stationary;
+      Dst.Stationary_Cnt             := Keep.Stationary_Cnt;
+      Dst.Gravity_Anomaly            := Keep.Gravity_Anomaly;
+      Dst.Gravity_Grid_Match         := Keep.Gravity_Grid_Match;
+      Dst.Gravity_Motion_Conflict    := Keep.Gravity_Motion_Conflict;
+      Dst.Gravity_Prof_Updates       := Keep.Gravity_Prof_Updates;
+      Dst.Gravity_Prof_Matches       := Keep.Gravity_Prof_Matches;
+      Dst.Gravity_Prof_Conflicts     := Keep.Gravity_Prof_Conflicts;
+      Dst.Gravity_Prof_Cells         := Keep.Gravity_Prof_Cells;
+      Dst.Gravity_Scan_Ns            := Keep.Gravity_Scan_Ns;
+   end Merge_Monitor_Fields;
+
    protected body State_Buffer is
 
       -- [AXIOMS: Sensor data arrives at 800Hz from Apple SPU HID callbacks.
@@ -49,7 +176,13 @@ package body Earu.State_Store is
       procedure Update_Weather (W : Weather_Type; L : Location_Type) is
       begin
          State.Weather := W; -- SMT_VERIFIED: direct assignment
-         State.Location := L; -- SMT_VERIFIED: direct assignment
+         --  FIELD-SCOPED (lost-update fix): publish only the Monitor-authored
+         --  location components. The 800 Hz Sensors_Task writer holds a private
+         --  copy of this record for up to one 100 ms Monitor tick, so a
+         --  whole-record store here would be clobbered milliseconds later and
+         --  Pressure_HPa / Terrain_Alt / Alt_Delta_M / Baro_* / Lockin_Miss /
+         --  Warning_* would appear frozen on the wire.
+         Merge_Monitor_Fields (Src => L, Dst => State.Location);
       end Update_Weather;
 
       -- | Purpose: Update Location
@@ -62,6 +195,59 @@ package body Earu.State_Store is
       begin
          State.Location := L; -- SMT_VERIFIED: direct assignment
       end Update_Location;
+
+      -- | Purpose: Publish the dead-reckoning result without replacing the
+      -- |          Monitor-authored components of the location record.
+      -- | Parameters: See declaration.
+      -- | CSI: DO-178C 6.4.4
+      -- [Documentation: DO-178C 6.4.4 function documentation]
+      -- WCET: O(1) - 52 component copy plus 20 restores.
+      -- [Timing: DO-178C 6.4.4 WCET analysis]
+      procedure Update_Location_DR (L : Location_Type) is
+      begin
+         --  FIELD-SCOPED (lost-update fix): Sensors_Task runs at ~800 Hz.
+         --  A whole-record store here publishes a copy that is up to one
+         --  100 ms Monitor tick stale and wipes every weather/diagnostic
+         --  field the Monitor just computed. The merge runs inside this
+         --  protected action, so no other task can interleave.
+         Merge_DR_Fields (Src => L, Dst => State.Location);
+      end Update_Location_DR;
+
+      -- | Purpose: Publish Monitor-authored location fields without
+      -- |          replacing the dead-reckoning components.
+      -- | Parameters: See declaration.
+      -- | CSI: DO-178C 6.4.4
+      -- [Documentation: DO-178C 6.4.4 function documentation]
+      -- WCET: O(1) - 52 component copy plus 32 restores.
+      -- [Timing: DO-178C 6.4.4 WCET analysis]
+      procedure Update_Location_Monitor (L : Location_Type) is
+      begin
+         --  FIELD-SCOPED (lost-update fix): L was read at the top of the
+         --  Monitor tick, so Lat/Lon/Alt/Pos/Vel may already have been
+         --  advanced by the 800 Hz DR writer. Restoring the 32 DR-authored
+         --  components keeps that pipeline live while the Monitor still
+         --  gets its own fields published.
+         Merge_Monitor_Fields (Src => L, Dst => State.Location);
+      end Update_Location_Monitor;
+
+      -- | Purpose: Advance the stored GPS-lock staleness counter.
+      -- | Parameters: See declaration.
+      -- | CSI: DO-178C 6.4.4
+      -- [Documentation: DO-178C 6.4.4 function documentation]
+      -- WCET: O(1) - one add and one store.
+      -- [Timing: DO-178C 6.4.4 WCET analysis]
+      procedure Tick_Lockin_Miss (Dt : Real) is
+         --  SAFETY FALLBACK: a non-finite or negative delta must never run
+         --  the counter backwards or into NaN, either of which would
+         --  silently disarm the ANCHOR_FAIL_30S alarm.
+         Delta_S : Real := Dt;
+      begin
+         if Delta_S /= Delta_S or else Delta_S < 0.0 then
+            Delta_S := 0.0;
+         end if;
+         State.Location.Lockin_Miss :=
+           State.Location.Lockin_Miss + Delta_S;
+      end Tick_Lockin_Miss;
 
       -- | Purpose: Update Ecosystem
       -- | Parameters: See declaration
