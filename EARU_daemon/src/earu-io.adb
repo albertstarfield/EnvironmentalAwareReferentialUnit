@@ -9,6 +9,7 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with GNAT.SHA256;
 
+with Earu.Pressure;
 with Earu.Weather_Fetcher;
 with System;
 
@@ -1663,9 +1664,20 @@ package body Earu.IO is
           return Cache_Turbo;
     end Read_Sensor_Integer;
 
-   Cache_Fan_Pressure : Real := 0.0;
+   --  AXIOM: the initial value is the ISO 2533 standard sea-level pressure,
+   --  NOT 0.0.  A fresh process that cannot read the estimator file must
+   --  stand on the documented standard, not on a value that is
+   --  indistinguishable from a vacuum and impossible at Earth's surface.
+   Cache_Fan_Pressure : Real := Earu.Pressure.Sea_Level_Std_HPa;
 
-   -- | Purpose: Read Fan Pressure Est
+   -- | Purpose: Read Fan Pressure Est.  Wraps the raw file read with
+   -- |          Earu.Pressure.Sanitize so that a failed read, a parse error,
+   -- |          an out-of-envelope value or NaN is converted into the ISA
+   -- |          standard sea-level pressure instead of being returned raw.
+   -- |          A LIVE vacuum reading (0.0 with the channel marked valid) is
+   -- |          still returned as 0.0: vacuum is a value, not an error.
+   -- | Returns: Earu.Types.Real, always inside
+   -- |          [Earu.Pressure.P_Min_HPa, Earu.Pressure.P_Max_HPa].
    -- | Parameters: See declaration
    -- | Returns: See declaration
    -- | CSI: DO-178C §6.4.4
@@ -1678,6 +1690,27 @@ package body Earu.IO is
       Line_Buf : String (1 .. 256);
       Last     : Natural;
       Path     : constant String := "/Volumes/EARU_dataIO/smcFanPressurehPaDetection";
+      --  AXIOM (earu-pressure.ads A1): validity is part of the reading.  The
+      --  channel alone can tell "I read nothing" from "I measured vacuum";
+      --  the numeric value cannot, because both are 0.0.
+      Read_Ok  : Boolean := False;
+      Value    : Real    := Cache_Fan_Pressure;
+
+      ------------------------------------------------------------------------
+      -- Report_Substitution                                               --
+      ------------------------------------------------------------------------
+      --  | Purpose: Make every degradation LOUD and specific, so a silent
+      --  |          standard-atmosphere substitution is never invisible.
+      --  | Parameters: Why - what actually happened.
+      --  | Exceptions: None (console Put_Line only).
+      ------------------------------------------------------------------------
+      procedure Report_Substitution (Why : String) is
+      begin
+         Ada.Text_IO.Put_Line
+           ("[!] WARNING: fan pressure channel unusable (" & Why & ") - using"
+            & Earu.Types.Real'Image (Earu.Pressure.Sea_Level_Std_HPa) & " hPa");
+      end Report_Substitution;
+
    begin
       begin
          Open (File, In_File, Path);
@@ -1687,7 +1720,9 @@ package body Earu.IO is
             begin
                Open (File, In_File, "smcFanPressurehPaDetection");
             exception
-               when others => return Cache_Fan_Pressure;
+               when others =>
+                  Report_Substitution ("cannot open " & Path & " or local copy");
+                  return Earu.Pressure.Sanitize (Value, Read_Ok);
             end;
       end;
 
@@ -1703,7 +1738,18 @@ package body Earu.IO is
                declare
                   Val_Str : constant String := Ada.Strings.Fixed.Trim (L (9 .. Last), Ada.Strings.Both);
                begin
-                  Cache_Fan_Pressure := Real'Value (Val_Str);
+                  --  AXIOM: a parse failure means the channel produced NO
+                  --  value.  Read_Ok stays False, which is what makes
+                  --  "absent" distinguishable from "vacuum" (earu-pressure A1).
+                  begin
+                     Cache_Fan_Pressure := Real'Value (Val_Str);
+                     Value   := Cache_Fan_Pressure;
+                     Read_Ok := True;
+                  exception
+                     when others =>
+                        Read_Ok := False;
+                        Report_Substitution ("unparsable EST_HPA");
+                  end;
                end;
                exit;
             end if;
@@ -1711,11 +1757,20 @@ package body Earu.IO is
       end loop;
 
       Close (File);
-      return Cache_Fan_Pressure;
+
+      if not Read_Ok then
+         Report_Substitution ("no EST_HPA field in " & Path);
+      elsif not Earu.Pressure.Is_Envelope (Value) then
+         Report_Substitution ("EST_HPA out of physical envelope");
+      end if;
+
+      return Earu.Pressure.Sanitize (Value, Read_Ok);
    exception
-      when others =>
+      when E : others =>
           if Is_Open (File) then Close (File); end if;  -- SMT_VERIFIED: Is_Open guards uninitialized/default File_Type
-          return Cache_Fan_Pressure;
+          Report_Substitution
+            ("I/O failure: " & Ada.Exceptions.Exception_Name (E));
+          return Earu.Pressure.Sanitize (Value, Read_Ok);
     end Read_Fan_Pressure_Est;
 
 end Earu.IO;
