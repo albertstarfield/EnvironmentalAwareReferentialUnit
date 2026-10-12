@@ -1223,9 +1223,48 @@ is
 
                  W.Weather_Code := Integer (Weather_SHM.Weather_Code);
                  W.Fetch_Time := Real (Weather_SHM.Fetch_Time);
+                  --  ── RELOCK GATE ─────────────────────────────────────────
+                  --  AXIOM R1: the first three disjuncts are CHANGE tests.
+                  --  Start_Lat/Start_Lon/Start_Alt are assigned FROM
+                  --  Weather_SHM one branch below (:1248-:1250), so on the
+                  --  next cycle the altitude difference is exactly 0.0 by
+                  --  construction whenever the source is deterministic —
+                  --  and OpenTopoData ASTER returns a bit-identical cell
+                  --  value for an unchanged lat/lon.  A stationary platform
+                  --  therefore never satisfied |ΔAlt| > 1.0E-3, the relock
+                  --  never fired, and Pos.Z absorbed accelerometer residual
+                  --  without bound.
+                  --
+                  --  AXIOM R2 (observed 2026-10-12): a 0.0041 m/s² gravity
+                  --  residual (accel.z 9.6468 m/s² vs calibrated_g 9.6509)
+                  --  integrates to Pos.Z = -312.224 m in ~390 s while
+                  --  v_mag = 0.029 m/s and odometer_30m = 0.0.  ZUPT kills
+                  --  Raw_Vel.Z (earu-math.adb:1988) but never Pos.Z
+                  --  (earu-math.adb:2324), and the INOP net only trips at
+                  --  Alt <= -430.0 (earu-math.adb:2392) — 150 m below the
+                  --  value actually reached, so it never armed.
+                  --
+                  --  THEORY R3: dead reckoning is a BRIDGE between fixes,
+                  --  never a source of truth.  A drift bound is therefore
+                  --  the correct independent discriminator: it fires on
+                  --  accumulated ERROR rather than on value CHANGE, and it
+                  --  needs no upstream freshness signal that the
+                  --  deterministic-DEM source cannot supply.
+                  --
+                  --  APPLICATION R4: 150.0 m bounds the excursion to what a
+                  --  laptop can legitimately gain/lose between two DEM
+                  --  refreshes (DEM cache TTL = 60.0 s at
+                  --  earu-location_bridge.adb:73; a lift or stairwell tops
+                  --  out near 2 m/s, i.e. 120 m per TTL window) while
+                  --  firing ~1.2x earlier than the observed -312 m failure
+                  --  and ~280 m before the -430.0 INOP threshold that was
+                  --  meant to be the safety net.
+                  --  [Citation: ISO 2533:1975 — International Standard
+                  --   Atmosphere; earu-location_bridge.ads AXIOM A4/A6]
                   if Abs (Real (Weather_SHM.Lat) - L.Start_Lat) > 1.0E-6 or
                      Abs (Real (Weather_SHM.Lon) - L.Start_Lon) > 1.0E-6 or
-                     Abs (Real (Weather_SHM.Alt) - L.Start_Alt) > 1.0E-3
+                     Abs (Real (Weather_SHM.Alt) - L.Start_Alt) > 1.0E-3 or
+                     Abs (L.Pos.Z) > 150.0
                   then
                      declare
                         GPS_Time : Real;

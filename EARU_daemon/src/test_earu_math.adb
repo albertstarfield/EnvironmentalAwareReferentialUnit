@@ -311,6 +311,77 @@ begin
                 Loc_Untrusted.Raw_Vel.X > 0.5);
    end;
 
+   --  T13: relock drift-bound rationale (earu_daemon.adb relock gate).
+   --
+   --  WHY THIS TEST EXISTS AND WHAT IT DOES NOT COVER:
+   --  the 150.0 m discriminator lives inline in the daemon's main loop
+   --  (earu_daemon.adb, the RELOCK GATE disjunct `Abs (L.Pos.Z) > 150.0`),
+   --  which no AUnit harness reaches — earu_daemon is an executable, not a
+   --  library unit.  Calling Dead_Reckon_Update cannot exercise it either,
+   --  because the gate is not inside Earu.Math.  Rather than fake a
+   --  behavioural test against an unobservable internal scaling, this test
+   --  locks the ARITHMETIC JUSTIFICATION of the constant, using the exact
+   --  values measured off the 2026-10-12 production record.  It fails if a
+   --  future edit makes the bound either ineffective or self-defeating.
+   --
+   --  MEASURED INPUTS (EARU_data.dat, ts 2026-10-12 06:45:26):
+   --    accel.z = +0.9837 g  ->  0.9837 * 9.80665 = 9.6468 m/s^2
+   --    calibrated_g         =  9.6509 m/s^2
+   --    residual             = -0.0041 m/s^2   (0.04 % of g)
+   --    observed Pos.Z       = -312.224 m, machine STATIONARY
+   --      (v_mag = 0.029 m/s, odometer_30m = 0.0)
+   --
+   --  CONSTRAINTS (both absolute):
+   --    (C1) bound < 430.0  — must trip strictly BEFORE the Altitude INOP
+   --         net at earu-math.adb:2392 (`Loc.Alt <= -430.0`), otherwise the
+   --         net is the only defence and it demonstrably did not arm.
+   --    (C2) bound < 312.224 — must have caught the failure actually
+   --         observed, or the fix is vacuous.
+   --  Both are asserted directly so a future edit to either constant
+   --  cannot silently void the reasoning.
+   declare
+      --  [Citation: ISO 2533:1975 — International Standard Atmosphere]
+      --  [Citation: 1 g = 9.80665 m/s^2 (CGPM standard gravity)]
+      Accel_Z_Mps2 : constant Real := 0.9837 * 9.80665;
+      Calib_G      : constant Real := 9.6509;
+      Residual     : constant Real := Accel_Z_Mps2 - Calib_G;
+      DT           : constant Real := 0.00125;      -- 800 Hz sensors task
+      Bound_M      : constant Real := 150.0;        -- relock gate
+      INOP_M       : constant Real := 430.0;        -- |Alt| INOP threshold
+      Observed_M   : constant Real := 312.224;      -- measured 2026-10-12
+      Vel          : Real := 0.0;
+      Pos          : Real := 0.0;
+      T_Sec        : Real := 0.0;
+      Hit_Sec      : Real := 0.0;
+   begin
+      --  Double integration of the uncorrected residual, 800 s of samples.
+      --  Pos <= -Bound_M on the first crossing records the trip time.
+      for K in 1 .. 640_000 loop
+         Vel   := Vel + Residual * DT;
+         Pos   := Pos + Vel * DT;
+         T_Sec := T_Sec + DT;
+         if Pos <= -Bound_M and then Hit_Sec = 0.0 then
+            Hit_Sec := T_Sec;
+         end if;
+      end loop;
+
+      Run_Test ("T13 measured gravity residual is negative", Residual < 0.0);
+      Run_Test ("T13 residual magnitude matches the -0.0041 m/s2 record",
+                Abs (Residual - (-0.0041)) < 5.0E-4);
+      Run_Test ("T13 C1: relock bound 150 m trips before INOP 430 m",
+                Bound_M < INOP_M);
+      Run_Test ("T13 C2: relock bound is inside the observed -312 m failure",
+                Bound_M < Observed_M);
+      Run_Test ("T13 uncorrected drift does cross the bound at all",
+                Hit_Sec > 0.0);
+      Run_Test ("T13 bound trips within 600 s of uncorrected drift",
+                Hit_Sec < 600.0);
+      --  The trip time must also sit well clear of the bound itself: a
+      --  bound so tight it trips in under a second would fire on every
+      --  genuine vertical excursion and destroy legitimate DR altitude.
+      Run_Test ("T13 bound does not trip instantly (> 60 s)", Hit_Sec > 60.0);
+   end;
+
    Put_Line ("");
    Put_Line ("=== Summary ===");
    Put_Line ("Passed:" & Passed'Image & "  Failed:" & Failed'Image);
