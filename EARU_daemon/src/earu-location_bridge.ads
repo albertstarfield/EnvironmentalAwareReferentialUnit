@@ -368,4 +368,28 @@ package Earu.Location_Bridge is
       entry Stop;
    end Location_Poll_Task;
 
+   --  | Purpose: Request_Terrain_Refresh -- force the next DEM lookup to
+   --  |          bypass the Terrain_Cache_S cache (AXIOM L2).
+   --  | Parameters: None.
+   --  | Returns: None.
+   --  | CSI: DO-178C 6.4.4
+   --
+   --  AXIOM L2 (user spec @63@): LOC_ANCHOR_REFRESH must update the
+   --  anchor LOCATION and the TERRAIN ALTITUDE TOGETHER.  The DEM
+   --  cache lives inside Location_Poll_Task (Terrain_Time / Terrain_Val)
+   --  and cannot be shared, so the Monitor task raises this one-shot
+   --  flag instead and the poll task honours it before the lookup.
+   --
+   --  THEOREM T3: a set lost to the read/clear race delays the DEM
+   --  refresh by at most one scan interval -- degraded, never silent,
+   --  and never a permanent stall.
+   --
+   --  TIMING: Estimated Processing Time O(1); CPU ~2 ns (one store);
+   --  WCET 20 us (flag store only -- no I/O, no network);
+   --  Space O(1); Derivation: single assignment;
+   --  Hardware Assumptions: a working pragma Volatile store.
+   -- [Timing: DO-178C 6.4.4 WCET analysis]
+   -- [Citation: Ada 2012 RM C.6 -- Shared variable annotations]
+   procedure Request_Terrain_Refresh;
+
 end Earu.Location_Bridge;

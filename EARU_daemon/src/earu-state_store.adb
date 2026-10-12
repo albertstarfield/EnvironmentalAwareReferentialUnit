@@ -249,6 +249,19 @@ package body Earu.State_Store is
            State.Location.Lockin_Miss + Delta_S;
       end Tick_Lockin_Miss;
 
+      -- | Purpose: Clear_Lockin_Miss -- reset the anchor overrun counter.
+      -- | Parameters: None.
+      -- | CSI: DO-178C 6.4.4
+      -- AXIOM L4: called only after a synchronized refresh completed, so
+      --   Lockin_Miss measures time since the last SUCCESS.
+      -- Safe_Fallback: none required -- assigning 0.0 cannot fault.
+      -- WCET: O(1) - one store.
+      -- [Timing: DO-178C 6.4.4 WCET analysis]
+      procedure Clear_Lockin_Miss is
+      begin
+         State.Location.Lockin_Miss := 0.0;
+      end Clear_Lockin_Miss;
+
       -- | Purpose: Update Ecosystem
       -- | Parameters: See declaration
       -- | CSI: DO-178C §6.4.4

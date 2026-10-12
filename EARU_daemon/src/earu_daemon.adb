@@ -13,6 +13,7 @@ with Ada.Calendar;
 with Ada.Calendar.Formatting;
 with Ada.Numerics.Generic_Elementary_Functions;
 with Ada.Real_Time;
+use type Ada.Real_Time.Time;
 with Ada.Command_Line;
 with GNAT.Sockets;
 with Earu.Network_Status;
@@ -1085,6 +1086,30 @@ is
       Last_HID_Idle_Read       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
       Last_Network_Update      : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
 
+      --  -- LOC_ANCHOR_REFRESH: THE PERIOD TIMER (AXIOM L1) --
+      --  User spec, verbatim: "That loc_anchor_refresh is when already it's
+      --  period it's fo all thing to have all syncronized have to update all
+      --  if network allowed and if not yet finished it will be LOCKIN MISS.
+      --  by all it's also meant theterrain alt and anchor loc".
+      --
+      --  Anchor_Refresh_Speed (Location_Type, 4..30 s, speed-adaptive,
+      --  computed in Earu.Math.Process_GPS_Update) IS this period.  Before
+      --  this declaration it gated nothing: it was telemetry printed on the
+      --  viewer and read by no code path at all.  This clock is what makes
+      --  the advertised period real.
+      --
+      --  Ada.Real_Time, not Ada.Calendar: the monotonic clock is immune to
+      --  NTP steps and to the operator changing the wall clock, so a clock
+      --  adjustment can neither stall nor spuriously fire the refresh.
+      --
+      --  pragma Volatile: written in the synchronized block below and read
+      --  every 0.1 s tick; the RM C.6 annotation stops the scheduler
+      --  assuming the value is loop-invariant.
+      -- [Citation: Ada 2012 RM 9.6.1 -- monotonic clock]
+      -- [Citation: Ada 2012 RM C.6 -- shared variable annotations]
+      Anchor_Refresh_Last : Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      pragma Volatile (Anchor_Refresh_Last);
+
       --  -- SHARED ALTITUDE TRIAD (freshness-gate IF and ELSE branches) --
       --  AXIOM T6: the barometric / terrain / altitude-delta triad is a
       --  function of the CURRENT L.Alt, so it must be recomputed on EVERY
@@ -1269,6 +1294,130 @@ is
           --  [Citation: DO-178C 6.4.4 - a failure indication must not be
           --   inhibited by an unrelated code path]
           Earu.State_Store.State_Buffer.Tick_Lockin_Miss (0.1);
+
+          --  ============================================================
+          --  LOC_ANCHOR_REFRESH -- PERIOD-DRIVEN SYNCHRONIZED REFRESH
+          --  ============================================================
+          --  AXIOM L1: Location.Anchor_Refresh_Speed IS the period (4..30 s,
+          --  speed-adaptive).  Every period the anchor LOCATION and the
+          --  TERRAIN ALTITUDE are refreshed TOGETHER, one all-or-nothing
+          --  update, and only when the network allows it (AXIOM L3).
+          --
+          --  AXIOM L5: the timer is re-armed FIRST, so a refused or failing
+          --  refresh cannot stall the cadence; Lockin_Miss then carries the
+          --  failure and the LOCKIN_MISS / ANCHOR_FAIL_30S alarms report it.
+          --
+          --  PLACEMENT: deliberately AFTER the unconditional
+          --  Tick_Lockin_Miss and OUTSIDE the weather-SHM freshness gate
+          --  below.  Nesting it inside that gate is what made the old gate
+          --  evaluate at the sidecar's 1 Hz cadence instead of its own
+          --  advertised period -- the fragmentation the user reported.
+          --
+          --  TIMING: Estimated Processing Time O(1) per tick; one protected
+          --  read of a 13-entry status array plus one comparison.  WCET
+          --  25 ms (the Process_GPS_Update call dominates, and it runs only
+          --  on the ticks where the period has expired -- at most once per
+          --  4 s).  Space O(1).  Derivation: no loops beyond the 13-entry
+          --  scan.  Hardware Assumptions: a working monotonic clock and a
+          --  populated Earu.Network_Status registry.
+          -- [Citation: DO-178C 6.4.4 -- WCET analysis]
+          declare
+             A_Full : constant Earu_State :=
+               Earu.State_Store.State_Buffer.Get_Full_State;
+             A_L : Location_Type := A_Full.Location;
+             --  AXIOM L1: the advertised period.  Anchor_Refresh_Speed is
+             --  0.0 until the first Process_GPS_Update and could in
+             --  principle carry a NaN, so both are guarded: a non-finite or
+             --  non-positive period degrades to the stationary worst case
+             --  of 30.0 s (the slowest legitimate cadence), never to 0.0,
+             --  which would spin the refresh on every tick.
+             A_Period : constant Real :=
+               (if A_L.Anchor_Refresh_Speed > 0.0
+                  and then A_L.Anchor_Refresh_Speed = A_L.Anchor_Refresh_Speed
+                then A_L.Anchor_Refresh_Speed
+                else 30.0);
+             --  To_Duration yields Standard.Duration (fixed point); the
+             --  period gate compares it against A_Period, a Real, so the
+             --  value is converted exactly (Ada 2012 RM 4.6(21)). This is
+             --  the unit's established idiom (see :2102).
+             A_Elapsed : constant Real := Real
+               (Ada.Real_Time.To_Duration
+                  (Ada.Real_Time.Clock - Anchor_Refresh_Last));
+             A_Net : constant Earu.Network_Status.Status_Array :=
+               Earu.Network_Status.Shared_Status.Get_All;
+             A_Fails : Natural := 0;
+             A_Snap : constant Earu.Location_Bridge.Location_Snapshot :=
+               Earu.Location_Bridge.Shared.Snapshot;
+             A_Done : Boolean := False;
+          begin
+             --  AXIOM L3: count the probed services that are down.  All 13
+             --  down means no network, so no DEM and no CoreLocation, so the
+             --  synchronized update cannot complete and must NOT be reported
+             --  as a success.
+             for I in A_Net'Range loop
+                pragma Loop_Invariant (True);
+                if A_Net (I) = Earu.Network_Status.Unavailable then
+                   A_Fails := A_Fails + 1;
+                end if;
+             end loop;
+
+             if A_Elapsed >= A_Period then
+                --  AXIOM L5: re-arm BEFORE attempting, so a failure cannot
+                --  stall the cadence forever.
+                Anchor_Refresh_Last := Ada.Real_Time.Clock;
+
+                --  AXIOM L3 + Has_Fix gate: no fix or no network means the
+                --  update cannot happen; Lockin_Miss keeps advancing and
+                --  the alarms below fire.
+                if A_Snap.Has_Fix and then A_Fails < 13 then
+                   --  AXIOM L2: ask the Location_Poll_Task to expire its DEM
+                   --  cache so the terrain altitude is fetched NOW and lands
+                   --  together with the anchor in the write below.
+                   Earu.Location_Bridge.Request_Terrain_Refresh;
+
+                   declare
+                      GPS_Time : Real;
+                   begin
+                      begin
+                         GPS_Time := Real (C_Time (null));
+                      exception
+                         when others => GPS_Time := 0.0;
+                      end;
+                      Earu.Math.Process_GPS_Update
+                        (Loc     => A_L,
+                         New_Lat => A_Snap.Lat,
+                         New_Lon => A_Snap.Lon,
+                         New_Alt => A_Snap.Alt,
+                         Now_T   => GPS_Time);
+                   end;
+
+                   A_L.Start_Lat := A_Snap.Lat;
+                   A_L.Start_Lon := A_Snap.Lon;
+                   A_L.Start_Alt := A_Snap.Alt;
+                   A_L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
+                   --  AXIOM L2: the TERRAIN altitude is written here, in the
+                   --  same update as the anchor, from the same snapshot.
+                   --  This is the 'all' of the user spec; before this the
+                   --  two arrived on different periods and could disagree.
+                   A_L.Terrain_Alt := A_Snap.Terrain_Alt;
+                   A_Done := True;
+
+                   --  ANCHOR LANDING: the whole-record write is the one
+                   --  authorised full store -- Lat/Lon/Alt/Pos/Terrain_Alt
+                   --  are DR- or bridge-authored, so a field-scoped Monitor
+                   --  merge would preserve the old values and discard the
+                   --  refresh on the very tick that produced it.
+                   Earu.State_Store.State_Buffer.Update_Location (A_L);
+                end if;
+
+                --  AXIOM L4: Lockin_Miss is reset ONLY by a COMPLETED
+                --  synchronized refresh, so it measures time since the last
+                --  success and is the overrun indicator of this period.
+                if A_Done then
+                   Earu.State_Store.State_Buffer.Clear_Lockin_Miss;
+                end if;
+             end if;
+          end;
 
           if Weather_SHM.Header.Update_Count /= Last_W then
              declare
@@ -1587,6 +1736,22 @@ is
                       end if;
                    end Add_C;
                 begin
+                   --  AXIOM L4: the PERIOD-RELATIVE miss.  Lockin_Miss is
+                   --  reset only by a completed synchronized refresh, so any
+                   --  value above the advertised period means the update
+                   --  did not finish inside its own window -- the user's
+                   --  "if not yet finished it will be LOCKIN MISS".
+                   declare
+                      P : constant Real :=
+                        (if L.Anchor_Refresh_Speed > 0.0
+                           and then L.Anchor_Refresh_Speed = L.Anchor_Refresh_Speed
+                         then L.Anchor_Refresh_Speed
+                         else 30.0);
+                   begin
+                      if L.Lockin_Miss > P and then L.Lockin_Miss <= 30.0 then
+                         Add_C("LOCKIN_MISS [ANCHOR REFRESH OVERDUE]");
+                      end if;
+                   end;
                    if L.Lockin_Miss > 30.0 then Add_C("ANCHOR_FAIL_30S [RE-ANCHOR GPS]"); end if;
                    if Full.System.Battery_Percent < 20 then Add_C("BATT_LOW_20 [LOW POWER MODE]"); end if;
                    if Net_Partial then Add_C("NET_COMMS_PARTIAL [CHECK CONNECTIVITY]"); end if;
@@ -1841,6 +2006,29 @@ is
                   for I in 1 .. Sig_Count loop
                      pragma Loop_Invariant (True);
                      -- [Assertion: DO-178C §6.4.4 loop invariant]
+                     -- ======================================================
+                     -- DO NOT TURN THESE FOUR ASSIGNMENTS INTO A BULK COPY.
+                     --
+                     -- The two record types are NOT layout-compatible:
+                     --   Ada Significant_Location    (earu-types.ads)
+                     --     4 x Real (f64) = 32 bytes, NO representation clause.
+                     --   SHM  Significant_Location_C (earu-shm.ads)
+                     --     Lat/Lon/Alt f32 + pad u32 + TS f64 = 24 bytes,
+                     --     WITH an explicit clause (Lat@0, Lon@4, Alt@8,
+                     --     Pad@12, TS@16).
+                     --
+                     -- This loop is the ONLY thing that makes the crossing safe:
+                     -- it copies field by field and widens f32 -> f64 explicitly
+                     -- with Real (...). There is deliberately no Unchecked_
+                     -- Conversion between the two types anywhere in the tree.
+                     --
+                     -- A record assignment or an Unchecked_Conversion would
+                     -- compile cleanly and then silently corrupt every
+                     -- significant location: the 24-byte source stride would be
+                     -- read with a 32-byte one, so every element after the first
+                     -- is taken from the wrong offset.
+                     -- [Laid down per operator request, 2026-10-12.]
+                     -- ======================================================
                      Sig_Locs(I).Lat := Real (ML_Results.Sig_Locations(I).Lat);
                      Sig_Locs(I).Lon := Real (ML_Results.Sig_Locations(I).Lon);
                      Sig_Locs(I).Alt := Real (ML_Results.Sig_Locations(I).Alt);

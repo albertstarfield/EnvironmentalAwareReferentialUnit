@@ -79,6 +79,16 @@ package body Earu.Location_Bridge is
    CL_Timeout_S    : constant Positive := 15;       -- Python timeout=15.0
    Topo_Timeout_S  : constant Positive := 5;        -- Python timeout=5.0
 
+   --  LOC_ANCHOR_REFRESH wiring (AXIOM L2 / L3, spec of
+   --  Request_Terrain_Refresh).  Package-level because the writer is the
+   --  Monitor task in Earu_Daemon and the reader is Location_Poll_Task
+   --  below; pragma Volatile is the Ada RM C.6 shared-variable
+   --  annotation that stops the compiler caching either side.
+   --  One-shot: the poll task clears it after honouring it, so a DEM is
+   --  requested at most once per set.
+   Terrain_Refresh_Requested : Boolean := False;
+   pragma Volatile (Terrain_Refresh_Requested);
+
    --  DEV D5: PATH resolution is primary; these are existence-check
    --  fallbacks only (data parity with Python line 96 + Intel Homebrew).
    --  platform: documented Homebrew install prefixes — no control flow
@@ -1210,6 +1220,19 @@ package body Earu.Location_Bridge is
                                     end;
 
                                     --  Terrain (AXIOM A6) + file (T3).
+                                    --  LOC_ANCHOR_REFRESH (AXIOM L2): if the
+                                    --  Monitor task requested a synchronized
+                                    --  refresh, expire the DEM cache so this
+                                    --  lookup hits the network NOW and the
+                                    --  terrain altitude lands with the anchor.
+                                    --  Terrain_Time is a NEGATIVE sentinel:
+                                    --  Now_Sec is epoch seconds (>> 60.0), so
+                                    --  Now - Cache_Time > Terrain_Cache_S holds
+                                    --  unconditionally inside Get_Terrain_Anchor.
+                                    if Terrain_Refresh_Requested then
+                                       Terrain_Time := -1.0;
+                                       Terrain_Refresh_Requested := False;
+                                    end if;
                                     Get_Terrain_Anchor
                                       (Snap.Lat, Snap.Lon, Terrain_Time,
                                        Terrain_Val, Snap.Terrain_Alt);
@@ -1421,4 +1444,17 @@ package body Earu.Location_Bridge is
 
    end Location_Store;
 
+
+   -- | Purpose: Request_Terrain_Refresh -- raise the one-shot DEM flag.
+   -- | Parameters: None.
+   -- | CSI: DO-178C 6.4.4
+   -- AXIOM L2: the Monitor task calls this on the LOC_ANCHOR_REFRESH
+   --   period so the DEM lookup and the anchor landing happen together.
+   -- Safe_Fallback: none required -- assigning a Boolean cannot fault.
+   -- WCET: O(1) - one store, no I/O.
+   -- [Timing: DO-178C 6.4.4 WCET analysis]
+   procedure Request_Terrain_Refresh is
+   begin
+      Terrain_Refresh_Requested := True;
+   end Request_Terrain_Refresh;
 end Earu.Location_Bridge;

@@ -166,6 +166,31 @@ package Earu.State_Store is
       procedure Tick_Lockin_Miss (Dt : Real)
          with Pre => True, Post => True;
 
+      --  | Purpose: Clear_Lockin_Miss -- record a COMPLETED synchronized
+      --  |          anchor refresh (LOC_ANCHOR_REFRESH, AXIOM L4).
+      --  | Parameters: None.
+      --  | Returns: None; stores 0.0 into State.Location.Lockin_Miss.
+      --  | CSI: DO-178C 6.4.4
+      --
+      --  AXIOM L4: Lockin_Miss is the elapsed time since the last
+      --  COMPLETED synchronized refresh, i.e. the overrun indicator of
+      --  the LOC_ANCHOR_REFRESH period.  Tick_Lockin_Miss advances it
+      --  every 0.1 s; this operation is its only reset.  A caller that
+      --  forgets to call it leaves the ANCHOR_FAIL_30S alarm armed
+      --  forever, which is the safe direction of failure.
+      --
+      --  THEOREM T2: Lockin_Miss is monotone between successes, so no
+      --  branch can freeze the counter and report healthy.
+      --
+      --  TIMING: Estimated Processing Time O(1); CPU ~2 ns (one store);
+      --  WCET 20 us (protected action entry/exit dominates);
+      --  Space O(1); Derivation: single assignment, no loops;
+      --  Hardware Assumptions: none beyond a working protected object.
+      -- [Timing: DO-178C 6.4.4 WCET analysis]
+      -- [Citation: Ada 2012 RM 9.5.1 -- Protected Actions]
+      procedure Clear_Lockin_Miss
+         with Pre => True, Post => True;
+
       -- Purpose: Update the ecosystem weather model state.
       -- Parameters:
       --   E : Ecosystem_Weather_Type -- Latest ecosystem weather data.
