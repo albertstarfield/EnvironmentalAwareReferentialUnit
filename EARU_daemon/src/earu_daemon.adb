@@ -1084,6 +1084,87 @@ is
       Last_Sidecar_Check       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 31.0);
       Last_HID_Idle_Read       : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
       Last_Network_Update      : Ada.Calendar.Time := Ada.Calendar."-" (Ada.Calendar.Clock, 0.0);
+
+      --  -- SHARED ALTITUDE TRIAD (freshness-gate IF and ELSE branches) --
+      --  AXIOM T6: the barometric / terrain / altitude-delta triad is a
+      --  function of the CURRENT L.Alt, so it must be recomputed on EVERY
+      --  Monitor tick, not only on the ticks where the sidecar publishes a
+      --  new SHM frame. L.Alt advances continuously under dead reckoning at
+      --  ~800 Hz, while the weather SHM frame arrives at open-meteo cadence
+      --  (tens of seconds). Computing the triad only inside the freshness
+      --  gate IF branch therefore froze Alt_Delta_M, Baro_Altitude,
+      --  Baro_Corrected_Pressure and Terrain_Alt at their last SHM value for
+      --  the entire inter-frame interval -- the observed telemetry showed
+      --  alt_delta_m = 0.00 sitting next to alt = 730.83 and
+      --  terrain_altitude_m = 769.00, a delta of -38.2 never recomputed.
+      --  AXIOM R9: the inverse ISA map is applied to the RAW fan pressure
+      --  only. L.Baro_Corrected_Pressure is unusable here precisely because
+      --  it is a function of (L.Alt - L.Terrain_Alt) and L.Terrain_Alt is the
+      --  NETWORK DEM value -- inverting it would return the DEM recycled,
+      --  not an independent barometric estimate.
+      --  THEORIES: the caller has already mirrored L.Pressure_HPa from the
+      --  fan-RPM estimator; this procedure never writes it.
+      --  APPLICATIONS: called from both freshness-gate branches, immediately
+      --  after the pressure mirror and before CATEGORY 4 wind grid and
+      --  thermodynamics, preserving the IF branch's original data ordering.
+      --  CITATIONS: [Citation: ISO 2533:1975 - Standard Atmosphere]
+      --             [Reference: DO-178C 6.4.4 - Timing analysis / WCET]
+      --  TIMING: Estimated Processing Time O(1); CPU ~12 us (one sensor file
+      --  read plus one Exp/Log pair); WCET 200 us (DEM sidecar file I/O
+      --  dominates); Space O(1); Derivation: three scalar stores plus one
+      --  declare block, no loops; Hardware Assumptions: sensor_terrain_alt.dat
+      --  is readable, and Earu.IO.Read_Sensor_Real returns 0.0 on failure.
+      procedure Refresh_Altitude_Triad (L : in out Location_Type) is
+      begin
+         --  THIRD ALTITUDE SOURCE: BAROMETRIC (inverse ISA of RAW pressure)
+         if Earu.Pressure.Is_Envelope (L.Pressure_HPa) then
+            L.Baro_Altitude := Earu.Pressure.ISA_Altitude (L.Pressure_HPa);
+         else
+            L.Baro_Altitude := 0.0;
+         end if;
+
+         -- Terrain elevation from OpenTopoData ASTER 30m DEM, written by the
+         -- Python sidecar (earu_location_bridge.py) via get_terrain_anchor()
+         -- -> sensor_terrain_alt.dat. Used for the altitude-delta check and
+         -- for BlueSolTerrainAltitude in EARU_data.dat.
+         L.Terrain_Alt := Earu.IO.Read_Sensor_Real ("sensor_terrain_alt.dat");
+
+         --  CATEGORY 3b: ALTITUDE DELTA CHECK
+         --  Compare GPS altitude against terrain altitude (OpenTopoData
+         --  ASTER 30m). When the laptop sits on a different floor than
+         --  ground, |Alt_Delta_M| > 30 m (~100 ft). The fan-RPM pressure
+         --  estimate was calibrated at ground level, so apply the ISA
+         --  barometric formula for the altitude difference:
+         --
+         --    P_corrected = P_fan * (1 - 2.25577e-5 * dH) ^ 5.25588
+         --
+         --  where dH = GPS_alt - terrain_alt (positive = above ground).
+         declare
+            Alt_Delta   : constant Real := L.Alt - L.Terrain_Alt;
+            Abs_Delta   : constant Real := Abs (Alt_Delta);
+            --  ISA lapse rate constant: 6.5 K/km -> 2.25577e-5 Pa/m
+            --  at sea-level standard conditions (T0 = 288.15 K).
+            Lapse_Const : constant Real := 2.25577e-5;
+            --  ISA exponent: g / (Lapse_Rate * R_dry) = 5.25588
+            ISA_Exponent : constant Real := 5.25588;
+         begin
+            L.Alt_Delta_M := Alt_Delta;
+            if Abs_Delta > 30.0 then
+               --  Apply ISA barometric correction: Base = (1 - Lapse*dH),
+               --  Factor = Base ** ISA_Exponent (Exp/Log for real exponent).
+               declare
+                  Base : constant Real := 1.0 - Lapse_Const * Alt_Delta;
+                  Factor : constant Real :=
+                     Real_Funcs.Exp (ISA_Exponent * Real_Funcs.Log (Base));
+               begin
+                  L.Baro_Corrected_Pressure := L.Pressure_HPa * Factor;
+               end;
+            else
+               --  Delta <= 30 m: no correction needed, pass through
+               L.Baro_Corrected_Pressure := L.Pressure_HPa;
+            end if;
+         end;
+      end Refresh_Altitude_Triad;
    begin
       --  Wait for Weather SHM to be ready, but with a hard timeout.
       --  The main block SHM wait (180s) is the primary defense; this is
@@ -1388,67 +1469,7 @@ is
                   -- See comment above at W.Pressure_MSL for derivation details.
                   L.Pressure_HPa := W.Pressure_MSL;
 
-                  --  ── THIRD ALTITUDE SOURCE: BAROMETRIC ───────────────────
-                  --  AXIOM R9: the inverse ISA map is applied to the RAW fan
-                  --  pressure only.  L.Baro_Corrected_Pressure is unusable
-                  --  here precisely because it is a function of
-                  --  (L.Alt - L.Terrain_Alt) and L.Terrain_Alt is the
-                  --  NETWORK DEM value -- inverting it would return the DEM
-                  --  recycled, not an independent barometric estimate.
-                  --  [Citation: ISO 2533:1975]
-                  --  ──────────────────────────────────────────────────────
-                  if Earu.Pressure.Is_Envelope (L.Pressure_HPa) then
-                     L.Baro_Altitude := Earu.Pressure.ISA_Altitude (L.Pressure_HPa);
-                  else
-                     L.Baro_Altitude := 0.0;
-                  end if;
-
-                  -- Terrain elevation from OpenTopoData ASTER 30m DEM, written
-                  -- by the Python sidecar (earu_location_bridge.py) via
-                  -- get_terrain_anchor() → sensor_terrain_alt.dat.
-                  -- Used downstream for altitude-delta checks and
-                  -- BlueSolTerrainAltitude in EARU_data.dat.
-                  L.Terrain_Alt := Earu.IO.Read_Sensor_Real ("sensor_terrain_alt.dat");
-
-                  --  ── CATEGORY 3b: ALTITUDE DELTA CHECK ─────────────────────────
-                  --  Compare GPS altitude (CoreLocationCLI) against terrain
-                  --  altitude (OpenTopoData ASTER 30m).  When the laptop sits on
-                  --  a different floor/level than ground, |Alt_Delta_M| > 30 m
-                  --  (≈100 ft).  The fan-RPM pressure estimate was calibrated at
-                  --  ground level, so we apply the ISA barometric formula to
-                  --  correct for the altitude difference:
-                  --
-                  --    P_corrected = P_fan × (1 − 2.25577e-5 × Δh)^5.25588
-                  --
-                  --  where Δh = GPS_alt − terrain_alt (positive = above ground).
-                  --  The correction factor is close to 1.0 for small deltas and
-                  --  becomes significant above ~30 m (≈3 hPa per 300 m).
-                  declare
-                     Alt_Delta : constant Real := L.Alt - L.Terrain_Alt;
-                     Abs_Delta : constant Real := Abs (Alt_Delta);
-                     --  ISA lapse rate constant: 6.5 K/km → 2.25577e-5 Pa/m
-                     --  at sea-level standard conditions (T0 = 288.15 K).
-                     Lapse_Const : constant Real := 2.25577e-5;
-                     --  ISA exponent: g / (Lapse_Rate × R_dry) = 5.25588
-                     ISA_Exponent : constant Real := 5.25588;
-                  begin
-                     L.Alt_Delta_M := Alt_Delta;
-                     if Abs_Delta > 30.0 then
-                        --  Apply ISA barometric correction:
-                        --  Base = (1 − Lapse_Const × Δh)
-                        --  Factor = Base ^ ISA_Exponent  (use Exp/Ln for real exponent)
-                        declare
-                           Base : constant Real := 1.0 - Lapse_Const * Alt_Delta;
-                           Factor : constant Real :=
-                              Real_Funcs.Exp (ISA_Exponent * Real_Funcs.Log (Base));
-                        begin
-                           L.Baro_Corrected_Pressure := L.Pressure_HPa * Factor;
-                        end;
-                     else
-                        --  Delta ≤ 30 m: no correction needed, pass through
-                        L.Baro_Corrected_Pressure := L.Pressure_HPa;
-                     end if;
-                  end;
+                  Refresh_Altitude_Triad (L);
 
                   --  CATEGORY 4: Wind grid from SMC pressure gradient.
                   --  Instead of copying the Python sidecar's (always-zero) SHM
@@ -1602,6 +1623,11 @@ is
                      -- Category 3: Pressure from fan-RPM calibrated estimation
                      W.Pressure_MSL := Earu.IO.Read_Fan_Pressure_Est;
                      L.Pressure_HPa := W.Pressure_MSL;
+                     --  T6: refresh the altitude triad on EVERY tick. L.Alt
+                     --  advances under dead reckoning, so leaving the triad to
+                     --  the freshness-gate IF branch froze it for the whole
+                     --  inter-frame interval.
+                     Refresh_Altitude_Triad (L);
 
                      --  CATEGORY 4: Wind grid from SMC pressure gradient
                      Earu.Math.Compute_Wind_Grid_From_SMC (SMC, Eco, L.Pressure_HPa);
