@@ -100,6 +100,17 @@ package Earu.Types is
       -- ISA barometric formula: P = P0 × (1 − 2.25577e-5 × h)^5.25588
       Alt_Delta_M          : aliased Real := 0.0;  -- GPS alt minus terrain alt (m)
       Baro_Corrected_Pressure : aliased Real := 0.0;  -- ISA-corrected pressure (hPa)
+      -- THIRD independent altitude source: the inverse ISA map of the RAW
+      -- fan pressure (Earu.Pressure.ISA_Altitude), i.e. h = (1-(P/P0)^(1/n))/L.
+      -- It is deliberately derived from Pressure_HPa and NEVER from
+      -- Baro_Corrected_Pressure: that quantity has already been ISA-adjusted
+      -- by (Alt - Terrain_Alt), and Terrain_Alt comes from the network DEM.
+      -- Inverting a terrain-contaminated pressure returns the terrain itself
+      -- under a second name, collapsing the "independent" source into the
+      -- DEM.  Barometric error is thermal/barometric, GPS error is
+      -- geometric, DEM error is sampling -- no two share a failure mode.
+      -- [Citation: ISO 2533:1975 - Standard Atmosphere]
+      Baro_Altitude         : aliased Real := 0.0;
       Calibrated_G  : aliased Real := 1.0;
       -- True once Calibrated_G has been initialized (WGS84 seed or first
       -- stationary snap). Replaces the fragile "= 1.0 sentinel" comparison.

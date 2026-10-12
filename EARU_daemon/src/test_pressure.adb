@@ -1,9 +1,9 @@
 ------------------------------------------------------------------------------
 --  Test_Pressure                                                     --
 ------------------------------------------------------------------------------
---  Unit test for Earu.Pressure.Sanitize / Is_Envelope, following the
---  `=== Results: N passed, M failed ===` output contract that this project's
---  test harnesses agree on.
+--  Unit test for Earu.Pressure.Sanitize / Is_Envelope / ISA_Altitude,
+--  following the `=== Results: N passed, M failed ===` output contract that
+--  this project's test harnesses agree on.
 --
 --  AXIOMS
 --    [A1] `Sanitize(0.0, True) = 0.0` -- a live vacuum channel is honoured
@@ -16,6 +16,17 @@
 --         (A2 of the spec) and is therefore rejected with no NaN branch.
 --    [A4] The substitute 1013.25 is strictly inside the envelope, so the
 --         "result always in envelope" property holds unconditionally.
+--    [A5] ISA_Altitude is the INVERSE of the forward ISA map.  Its
+--         monotonicity is the property under test: a lower pressure sits
+--         higher in the column, so the altitude ordering is the REVERSE of
+--         the pressure ordering.  Getting this backwards once (asserting
+--         `ISA_Altitude(1000) > ISA_Altitude(900)`) is recorded in the
+--         source because it is exactly the inversion a future reader is
+--         most likely to repeat.
+--    [A6] The round-trip check re-derives the forward map from the SHARED
+--         constants ISA_Exponent / ISA_Lapse.  If the two directions ever
+--         drift apart, this is the check that fails while each direction
+--         still looks individually plausible.
 --
 --  THEORIES
 --    [T1] The envelope check is exhaustive over the interesting domain:
@@ -29,12 +40,20 @@
 ------------------------------------------------------------------------------
 
 with Ada.Exceptions;
+with Ada.Numerics.Generic_Elementary_Functions;
 with Ada.Text_IO;
 with Earu.Pressure;
 with Earu.Types;
 use Earu.Types;
 
 procedure Test_Pressure is
+
+   --  Elementary functions for the forward ISA map used in the T5 round-trip
+   --  check.  Instantiated on Earu.Types.Real, the same base type the
+   --  production unit uses, so the two maps are evaluated with identical
+   --  precision and the round-trip is meaningful.
+   package Real_Funcs is new
+     Ada.Numerics.Generic_Elementary_Functions (Earu.Types.Real);
 
    Passed : Natural := 0;
    Failed : Natural := 0;
@@ -205,6 +224,69 @@ begin
 
    Run_Test ("bug: live read of a vacuum -> still 0.0 (not over-corrected)",
              Earu.Pressure.Sanitize (0.0, True) = 0.0);
+
+   ---------------------------------------------------------------------------
+   -- INVERSE ISA MAP: pressure -> altitude (spec A6..A8, T5..T6)           --
+   --  This is the THIRD independent altitude source.  Before it existed a  --
+   --  measured pressure could only be corrected BY a believed altitude;    --
+   --  it could never produce one of its own, so the fan estimator was not  --
+   --  an independent discriminator against GPS or DEM.                     --
+   ---------------------------------------------------------------------------
+   declare
+      P0 : constant Real := Earu.Pressure.Sea_Level_Std_HPa;   -- 1013.25
+   begin
+      --  A7/T5: the inverse of the forward map at sea level is exactly zero.
+      Run_Test ("ISA_Altitude: sea-level pressure maps to 0 m",
+                Near (Earu.Pressure.ISA_Altitude (P0), 0.0, 0.5));
+
+      --  A7: monotonicity -- more pressure, less altitude (A8).  Checked on
+      --  the recorded ISA table values rather than arbitrary samples.
+      Run_Test ("ISA_Altitude: 1000 m band (898.75 hPa) -> ~1000 m",
+                Near (Earu.Pressure.ISA_Altitude (898.75), 1000.0, 5.0));
+
+      Run_Test ("ISA_Altitude: the OBSERVED pressure band -> ~562 m",
+                --  947.501 hPa is the value actually recorded on this host
+                --  (EARU_data.dat pressure_hpa), and the ISA table maps it
+                --  to 562.3 m.  This is the number the -279 m defect was
+                --  hiding: the pressure always said ~562 m.
+                Near (Earu.Pressure.ISA_Altitude (947.501), 562.3, 10.0));
+
+      --  A8: strictly decreasing in pressure -- a lower pressure sits HIGHER
+      --  in the column, so the altitude ordering is the REVERSE of the
+      --  pressure ordering.  (First run of this check asserted the same
+      --  direction twice and failed on its own error: 1000 hPa -> ~111 m,
+      --  900 hPa -> ~972 m, 800 hPa -> ~1900 m.)
+      Run_Test ("ISA_Altitude: strictly decreasing in pressure",
+                Earu.Pressure.ISA_Altitude (1000.0)
+                  < Earu.Pressure.ISA_Altitude (900.0)
+                and then Earu.Pressure.ISA_Altitude (900.0)
+                  < Earu.Pressure.ISA_Altitude (800.0));
+
+      --  T6: the singular endpoint is intercepted and returns the analytic
+      --  limit of the ISA column, not a crash and not a sentinel.
+      Run_Test ("ISA_Altitude: vacuum (0.0) -> analytic column 1/L",
+                Near (Earu.Pressure.ISA_Altitude (0.0),
+                      Earu.Pressure.ISA_Column_M, 1.0));
+
+      --  A7: the upper envelope endpoint stays inside the Post band.
+      Run_Test ("ISA_Altitude: 2000 hPa stays above -7000 m",
+                Earu.Pressure.ISA_Altitude (2000.0) > -7000.0
+                and then Earu.Pressure.ISA_Altitude (2000.0) < 0.0);
+
+      --  T5: round-trip against the forward ISA map.  The two share
+      --  ISA_Exponent / ISA_Lapse, so inverting a forward-mapped altitude
+      --  must return the input.  A drift between the constants would break
+      --  this check while leaving each direction individually plausible.
+      declare
+         Alt0    : constant Real := 800.0;
+         P_at_A  : constant Real :=
+           1013.25 * Real_Funcs.Exp (5.25588 * Real_Funcs.Log
+             (1.0 - Earu.Pressure.ISA_Lapse * Alt0));
+      begin
+         Run_Test ("ISA_Altitude: round-trips the forward map at 800 m",
+                   Near (Earu.Pressure.ISA_Altitude (P_at_A), Alt0, 0.5));
+      end;
+   end;
 
    Ada.Text_IO.Put_Line ("=== Results:" & Natural'Image (Passed) & " passed, "
                          & Natural'Image (Failed) & " failed ===");

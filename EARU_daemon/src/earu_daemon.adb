@@ -21,6 +21,7 @@ with Earu.Weather_Fetcher;
 with Earu.Tcc_Auth;
 with Earu.Secdec;
 with Earu.Location_Bridge;
+with Earu.Pressure;
 with Earu.Weather_SHM_Task;
 with Earu.Watchdog_A;
 with Earu.Watchdog_B;
@@ -1304,11 +1305,31 @@ is
                   --  (Lat, Lon), so querying it against an unlocked
                   --  coordinate yields a different site's terrain.  The
                   --  150.0 m leg is the R2/R4 vertical discriminator.
-                  if Real (Weather_SHM.Lat) /= 0.0
-                    and then Real (Weather_SHM.Lon) /= 0.0
+                  --  ── SOURCE OF TRUTH (defect fix, 2026-10-12) ─────────
+                  --  AXIOM R8: this gate previously read Weather_SHM.Lat/Lon/
+                  --  Alt.  That frame is written by the WEATHER TASK
+                  --  (earu-weather_shm_task.adb:1034
+                  --   `Payload.Lat := Interfaces.IEEE_Float_32 (Inputs.Lat)`),
+                  --  NOT by the location pipeline.  The FFI fix is published
+                  --  into Earu.Location_Bridge.Shared
+                  --  (earu-location_bridge.adb:1327 New_Snap.Lat := R.Lat).
+                  --  The two pipelines therefore carried two coordinates
+                  --  ~96 km apart -- Bandung (-6.887/107.623, +770 m) from the
+                  --  FFI log vs -6.336/106.951 from the weather frame -- and
+                  --  the relock was wired to the store that never receives
+                  --  the fix.  Has_Fix replaces the 0.0/0.0 sentinel test
+                  --  because Location_Snapshot carries an explicit validity
+                  --  bit (earu-location_bridge.ads:72).
+                  --  [Citation: ISO 2533:1975]
+                  --  ─────────────────────────────────────────────────────
+                  declare
+                     Snap : constant Earu.Location_Bridge.Location_Snapshot :=
+                       Earu.Location_Bridge.Shared.Snapshot;
+                  begin
+                  if Snap.Has_Fix
                     and then
-                      (Abs (Real (Weather_SHM.Lat) - L.Start_Lat) > 1.0E-6
-                       or Abs (Real (Weather_SHM.Lon) - L.Start_Lon) > 1.0E-6
+                      (Abs (Snap.Lat - L.Start_Lat) > 1.0E-6
+                       or Abs (Snap.Lon - L.Start_Lon) > 1.0E-6
                        or Abs (L.Pos.X) > 100.0
                        or Abs (L.Pos.Y) > 100.0
                        or Abs (L.Pos.Z) > 150.0)
@@ -1325,20 +1346,36 @@ is
                         -- [DO-178C §6.4.4 FUNCTION_INTERNAL_PARITY]
                         Earu.Math.Process_GPS_Update (
                            Loc     => L,
-                           New_Lat => Real (Weather_SHM.Lat),
-                           New_Lon => Real (Weather_SHM.Lon),
-                           New_Alt => Real (Weather_SHM.Alt),
+                           New_Lat => Snap.Lat,
+                           New_Lon => Snap.Lon,
+                           New_Alt => Snap.Alt,
                            Now_T   => GPS_Time
                         );
                      end;
-                    L.Start_Lat := Real (Weather_SHM.Lat);
-                    L.Start_Lon := Real (Weather_SHM.Lon);
-                    L.Start_Alt := Real (Weather_SHM.Alt);
+                    L.Start_Lat := Snap.Lat;
+                    L.Start_Lon := Snap.Lon;
+                    L.Start_Alt := Snap.Alt;
                     L.Pos := (X => 0.0, Y => 0.0, Z => 0.0);
                  end if;
+                 end;
                   -- Pressure mirrors the fan-RPM calibrated estimation (Category 3).
                   -- See comment above at W.Pressure_MSL for derivation details.
                   L.Pressure_HPa := W.Pressure_MSL;
+
+                  --  ── THIRD ALTITUDE SOURCE: BAROMETRIC ───────────────────
+                  --  AXIOM R9: the inverse ISA map is applied to the RAW fan
+                  --  pressure only.  L.Baro_Corrected_Pressure is unusable
+                  --  here precisely because it is a function of
+                  --  (L.Alt - L.Terrain_Alt) and L.Terrain_Alt is the
+                  --  NETWORK DEM value -- inverting it would return the DEM
+                  --  recycled, not an independent barometric estimate.
+                  --  [Citation: ISO 2533:1975]
+                  --  ──────────────────────────────────────────────────────
+                  if Earu.Pressure.Is_Envelope (L.Pressure_HPa) then
+                     L.Baro_Altitude := Earu.Pressure.ISA_Altitude (L.Pressure_HPa);
+                  else
+                     L.Baro_Altitude := 0.0;
+                  end if;
 
                   -- Terrain elevation from OpenTopoData ASTER 30m DEM, written
                   -- by the Python sidecar (earu_location_bridge.py) via

@@ -1013,6 +1013,10 @@ package body Earu.IO is
       --  altitude difference.
       AP ("alt_delta_m",                F (State.Location.Alt_Delta_M));
       AP ("baro_corrected_pressure_hpa", F (State.Location.Baro_Corrected_Pressure));
+      --  Third independent altitude source: inverse ISA of the RAW fan
+      --  pressure.  Reported separately from the GPS altitude and the DEM
+      --  terrain so the three can be compared externally.  [ISO 2533:1975]
+      AP ("baro_altitude_m",             F (State.Location.Baro_Altitude));
       AP ("compass_dir",    S (Ada.Strings.Fixed.Trim (State.Location.Compass_Dir, Ada.Strings.Both)));
       Append (Buf, """pos"": [" &
          F (State.Location.Pos.X) & ", " &

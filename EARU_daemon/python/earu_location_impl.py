@@ -71,14 +71,20 @@ def _fail(msg: str) -> str:
 
 
 def _log(line: str) -> None:
-    """Append one line to CoreLocationCLI.log; never raise.
+    """Append one line to the fix-cycle log; never raise.
 
-    WHY: the original Python bridge wrote this log for field diagnosis.  The
-    daemon runs as root, so an unwritable path must degrade to silence rather
-    than abort a fix cycle (Murphy's law guard).
+    WHY ABSOLUTE: the daemon runs as root with an arbitrary working
+    directory, so a relative filename scattered the log wherever launchd
+    happened to start.  Observed consequence: the last write was Oct 11
+    09:33, BEFORE a restart -- every production altitude rejection after
+    that was invisible, which is how a gate admitting -279 m by 0.25 hPa
+    went unnoticed.  The log now lands in the project tree where it can be
+    read.
     """
     try:
-        with open("CoreLocationCLI.log", "a") as fh:
+        log_path = os.path.join(_project_root(), "EARU_daemon", "run",
+                                "CoreLocationCLI.log")
+        with open(log_path, "a") as fh:
             fh.write(f"--- {time.strftime('%Y-%m-%dT%H:%M:%S')} ---\n")
             fh.write(line + "\n")
     except OSError:
@@ -120,20 +126,49 @@ def _terrain_anchor(lat: float, lon: float) -> float:
     return _TERRAIN_CACHED
 
 
+def _project_root() -> str:
+    """EARU home, matching Earu.IO.Project_Root exactly (earu-io.adb).
+
+    AXIOM A13: the daemon reads sensor files from
+    `<root>/EARU_daemon/run/`, while earlier code wrote to the repo ROOT.
+    Those are disjoint directories, so the daemon was reading a stale file
+    (terrain 33.0 m) while the dylib had already computed the correct one
+    (770.0 m).  Deriving one root and appending the run directory is the
+    whole fix; the env override must be honoured first because that is the
+    contract Earu.IO.Project_Root implements.
+    """
+    return os.environ.get(
+        "EARU_HOME", "/usr/local/EnvironmentalAwareReferentialUnit"
+    )
+
+
 def _write_terrain_alt(terrain_alt: float) -> None:
     """Write terrain altitude for the Ada daemon (Read_Sensor_Real contract).
 
-    Single float + newline, RAM-disk path first, project root second.
+    Single float + newline.  Writes EVERY reachable location rather than
+    stopping at the first success: the daemon reads only the run directory,
+    but the repo-root path is a symlink into the RAM disk that other
+    consumers already watch, so returning early would starve them.  Each
+    candidate is attempted independently and failures are logged, never
+    raised (Murphy's law guard on a root daemon).
     [Citation: earu-io.adb Read_Sensor_Real; earu_location_bridge.py:232-248]
     """
     payload = f"{terrain_alt:.4f}\n"
-    for base in ("/Volumes/EARU_dataIO", "/usr/local/EnvironmentalAwareReferentialUnit"):
+    root = _project_root()
+    written = False
+    for base in (
+        os.path.join(root, "EARU_daemon", "run"),  # what the daemon reads
+        "/Volumes/EARU_dataIO",                    # RAM disk
+        root,                                      # repo root (symlink)
+    ):
         try:
             with open(os.path.join(base, "sensor_terrain_alt.dat"), "w") as fh:
                 fh.write(payload)
-            return
-        except OSError:
-            continue
+            written = True
+        except OSError as exc:
+            _log(f"terrain write failed for {base}: {exc}")
+    if not written:
+        _log(f"terrain {terrain_alt:.2f}m NOT written to any candidate path")
 
 
 def _build_command(cli_path: str, user: str, uid: str) -> list[str]:
@@ -187,25 +222,121 @@ def _parse_fix(stdout: str) -> tuple[float, float, float, float] | None:
     return new_lat, new_lon, raw_alt, v_acc
 
 
-def _resolve_altitude(raw_alt: float, v_acc: float) -> float:
-    """Apply the A3 sanity gate, returning the altitude to adopt.
+def _baro_altitude(pressure_hpa: float) -> float | None:
+    """INVERSE ISA map: barometric altitude of a measured pressure (A9).
 
-    AXIOM A3: reject a GPS altitude whose implied pressure is > 100 hPa from
-    the current measured pressure (or one with no vertical accuracy at all)
-    and substitute the DEM elevation when available.
+    h(P) = (1 - (P / P0)^(1/n)) / L   with P0=1013.25, n=5.25588, L=2.25577e-5
+
+    AXIOM A9: ISO 2533:1975 is an involutive pair; the forward map
+    P(h) = P0*(1 - L*h)^n used elsewhere in this module is invertible on its
+    physical domain, so a measured pressure can PRODUCE an altitude and not
+    merely be corrected BY one.
+
+    AXIOM A10 (INDEPENDENCE): this must be fed the RAW sensor pressure.  Any
+    pressure that has already been ISA-adjusted by a terrain-derived delta is
+    the DEM recycled under another name -- inverting it returns the terrain,
+    not a barometric estimate, and the "second source" collapses into the
+    first.  The caller is responsible for passing the unadjusted reading.
+    [Citation: ISO 2533:1975 - Standard Atmosphere]
+
+    Returns None when the input is non-positive or non-finite (vacuum and
+    NaN both map outside any physical altitude band), so the caller can fall
+    through to the next source rather than adopt a sentinel.
     """
+    if not math.isfinite(pressure_hpa) or pressure_hpa <= 0.0:
+        return None
+    base = pressure_hpa / 1013.25
+    try:
+        # base is in (0, 2.0) over the whole physical envelope, so the
+        # fractional power below is always taken of a strictly positive base
+        # -- the NaN/complex branch is unreachable by construction.
+        return (1.0 - math.pow(base, 1.0 / 5.25588)) / 0.0000225577
+    except (ValueError, OverflowError):
+        return None
+
+
+def _resolve_altitude(raw_alt: float, v_acc: float) -> float:
+    """Apply the A3 gate across THREE independent altitude sources (A9-A12).
+
+    SOURCES AND THEIR FAILURE MODES (A12) -- the reason three are kept:
+      * GPS  (CoreLocationCLI %altitude)   - geometric; fails on multipath,
+             cold start, and `v_acc = -1` when CoreLocation emits no
+             vertical accuracy at all.
+      * DEM  (OpenTopoData ASTER 30m)      - topographic; fails on 30 m
+             sampling in urban canyons, on water, and on API outage.
+      * BARO (inverse ISA of the pressure) - barometric; fails on thermal
+             drift of the estimator and on a stale calibration.
+    No two share a failure mode, so majority/consensus between them is a real
+    discriminator rather than a vote among echoes of the same measurement.
+
+    ORDER (A11): the DEM is consulted FIRST and becomes the ANCHOR, because it
+    is the only source that is a hard physical constant of the ground itself.
+    GPS is then ACCEPTED only if it agrees with the anchor; it is never used to
+    override it.  This is deliberate: a GPS altitude error is unbounded and
+    unobservable from inside the fix, whereas a DEM error is bounded by the
+    30 m cell sampling.
+
+    REJECTION CONDITIONS (all checked against the DEM anchor):
+      [R1] v_acc <= 0 or v_acc > 50.0  -- no, or absurd, vertical accuracy.
+      [R2] raw_alt < -400.0            -- below the Dead Sea; impossible here.
+      [R3] |raw_alt - dem_alt| > 150.0 -- disagrees with the ground itself.
+      [R4] ISA-implied pressure differs from the previous measured pressure
+           by more than max(30.0, 4% of it).  The previous bound was an
+           ABSOLUTE 100 hPa, which admitted -279 m against a 947.5 hPa
+           reading by 0.25 hPa -- a threshold the estimator's own 5.8 hPa
+           error budget could straddle at will.
+    [Citation: https://opentopodata.org/api/aster30m/]
+    """
+    dem_alt = _fetch_topo_altitude(_STATE["lat"], _STATE["lon"])
     meas_p = _STATE.get("pressure_hpa") or 1013.25
-    nonsensical = True
-    if v_acc > 0:
-        base_val = 1.0 - 0.0000225577 * raw_alt
-        p_exp = 1013.25 * math.pow(base_val, 5.25588) if base_val > 0 else 0.0
-        nonsensical = abs(p_exp - meas_p) > 100.0
-    if not nonsensical:
+
+    # ── R1: vertical accuracy is absent or absurd ──────────────────────
+    if v_acc <= 0.0 or v_acc > 50.0:
+        if dem_alt is not None:
+            _log(f"GPS Alt {raw_alt:.2f}m rejected [R1 v_acc={v_acc:.2f}]. "
+                 f"Using OpenTopoData: {dem_alt:.2f}m")
+            return dem_alt
+        return _STATE["alt"] if _STATE.get("alt") is not None else raw_alt
+
+    # ── R2: physically impossible altitude ─────────────────────────────
+    if raw_alt < -400.0:
+        if dem_alt is not None:
+            _log(f"GPS Alt {raw_alt:.2f}m rejected [R2 below Dead Sea]. "
+                 f"Using OpenTopoData: {dem_alt:.2f}m")
+            return dem_alt
+        return _STATE["alt"] if _STATE.get("alt") is not None else raw_alt
+
+    # ── R4: ISA forward map against the previous pressure ──────────────
+    #  Relative tolerance, not the old absolute 100 hPa.  max(30.0, 4%) is
+    #  ~6x the estimator's observed 5.8 hPa error budget, so a healthy
+    #  reading never trips it while a 300 m excursion (36 hPa) always does.
+    base_val = 1.0 - 0.0000225577 * raw_alt
+    p_exp = 1013.25 * math.pow(base_val, 5.25588) if base_val > 0 else 0.0
+    tol = max(30.0, 0.04 * meas_p)
+    isa_disagrees = abs(p_exp - meas_p) > tol
+
+    # ── R3: disagrees with the ground ──────────────────────────────────
+    dem_disagrees = dem_alt is not None and abs(raw_alt - dem_alt) > 150.0
+
+    if not isa_disagrees and not dem_disagrees:
         return raw_alt
-    topo_alt = _fetch_topo_altitude(_STATE["lat"], _STATE["lon"])
-    if topo_alt is not None:
-        _log(f"GPS Alt ({raw_alt}m) rejected. Using OpenTopoData: {topo_alt}m")
-        return topo_alt
+
+    # ── REJECTED: fall back to the DEM anchor, then to the last adopt ──
+    why = []
+    if dem_disagrees and dem_alt is not None:
+        #  dem_alt is re-tested here rather than trusted from dem_disagrees:
+        #  the flag is a precomputed bool, so the type checker cannot narrow
+        #  the Optional through it, and the None case would crash the log
+        #  path of a root daemon.
+        why.append(f"R3 |gps-dem|={abs(raw_alt - dem_alt):.1f}>150")
+    if isa_disagrees:
+        why.append(f"R4 |p_exp-meas|={abs(p_exp - meas_p):.2f}>{tol:.2f}")
+    if dem_alt is not None:
+        _log(f"GPS Alt {raw_alt:.2f}m rejected [{' '.join(why)}]. "
+             f"Using OpenTopoData: {dem_alt:.2f}m")
+        return dem_alt
+    _log(f"GPS Alt {raw_alt:.2f}m rejected [{' '.join(why)}] and no DEM. "
+         f"Keeping previous.")
     return _STATE["alt"] if _STATE.get("alt") is not None else raw_alt
 
 

@@ -104,3 +104,7 @@ EARU_Monitor.app/
 
 # cffi-generated Python conduit artifacts (libearu_location.dylib + its C/obj)
 EARU_daemon/lib/
+# The cffi builder emits this next to the builder script; start.sh step 4d
+# regenerates it on every build, so it is a build artifact, not source.
+EARU_daemon/python/earu_location_ffi.c
+EARU_daemon/python/libearu_location.dylib

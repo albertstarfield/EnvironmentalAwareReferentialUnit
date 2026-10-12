@@ -16,7 +16,17 @@
 
 pragma SPARK_Mode (On);
 
+with Ada.Numerics.Generic_Elementary_Functions;
+
 package body Earu.Pressure is
+
+--  Elementary functions for the inverse ISA map (A6).  The CHILD unit must
+--  be withed explicitly -- `with Ada.Numerics;` alone does not make
+--  Generic_Elementary_Functions visible (GNAT reported "not declared in
+--  Numerics" and then fell back to the integer-exponent "**").  The same
+--  pattern is used by Earu_Daemon as Real_Funcs.
+   package Math is new
+     Ada.Numerics.Generic_Elementary_Functions (Earu.Types.Real);
 
    ---------------------------------------------------------------------------
    -- Sanitize                                                              --
@@ -36,5 +46,32 @@ package body Earu.Pressure is
          return Sea_Level_Std_HPa;
       end if;
    end Sanitize;
+
+   ---------------------------------------------------------------------------
+   -- ISA_Altitude                                                          --
+   ---------------------------------------------------------------------------
+   function ISA_Altitude (Pressure_HPa : Earu.Types.Real) return Earu.Types.Real is
+      Base : Earu.Types.Real;
+   begin
+      --  T6: the closed envelope admits P = 0.0 (vacuum, A4), and the inverse
+      --  map would evaluate (0.0) ** (1/n) -- a fractional power of zero.
+      --  Rather than rely on the library's behaviour at the singularity, the
+      --  analytic limit of the ISA column is returned explicitly.  This is a
+      --  mathematical identity, not a sentinel: lim(P->0+) of h(P) is 1/L.
+      if Pressure_HPa <= 0.0 then
+         return ISA_Column_M;
+      end if;
+
+      --  T5: the same named constants ISA_Exponent / ISA_Lapse that the
+      --  forward map uses.  Base = P / P0 is in (0, 2.0) for the whole
+      --  physical envelope, so the fractional power below is always taken of
+      --  a strictly POSITIVE base -- the other branch that could produce a
+      --  NaN or a complex result cannot be reached.
+      Base := Pressure_HPa / Sea_Level_Std_HPa;
+      --  Math."**" (not the ambient "**"): the Standard operator is defined
+      --  only for a NATURAL exponent, which is exactly the error GNAT raised
+      --  before this qualification was added.
+      return (1.0 - Math."**"(Base, 1.0 / ISA_Exponent)) / ISA_Lapse;
+   end ISA_Altitude;
 
 end Earu.Pressure;
