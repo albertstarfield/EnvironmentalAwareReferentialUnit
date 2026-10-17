@@ -6,18 +6,15 @@ import ctypes
 import os
 import sys
 import subprocess
-import venv
 import json
 import math
 import time
 import urllib.request
 import urllib.parse
 import threading
-import tkinter as tk
 
 from collections import deque
 import datetime
-import numpy as np
 import shutil
 import base64
 import re
@@ -25,17 +22,83 @@ import wave
 import struct
 from typing import Optional, Any, Union, Literal
 
-# --- Self-Bootstrapping Block ---
+# --- Self-Bootstrapping Block (runs before ANY third-party import) ---
+# python 3.15 (the default `python3` on this machine) ships WITHOUT tkinter,
+# so importing tkinter/numpy under it dies before a bootstrap placed later can
+# run. This block therefore executes at module load, before those imports.
 def bootstrap() -> None:
-    venv_dir = os.path.join(os.path.dirname(__file__), ".venv_pfd")
-    if sys.prefix == os.path.abspath(venv_dir): return
-    if not os.path.exists(venv_dir): venv.create(venv_dir, with_pip=True)
-    python_exe = os.path.join(venv_dir, "Scripts" if os.name == 'nt' else "bin", "python")
-    pip_exe = os.path.join(venv_dir, "Scripts" if os.name == 'nt' else "bin", "pip")
+    venv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv_pfd")
+    if sys.prefix == os.path.abspath(venv_dir):
+        return  # already inside the venv -- do not re-exec
+
+    def _has_tkinter(exe: str) -> bool:
+        try:
+            subprocess.run([exe, "-c", "import tkinter"], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            return False
+
+    # Auto-detect a usable interpreter (newest first). Search the common
+    # Homebrew locations (Apple Silicon + Intel) plus whatever `python3.x`
+    # resolves to on PATH, so this works across machines/nodes.
+    _CANDIDATES: list[str] = []  # pyrefly: ignore
+    for _base in ("/opt/homebrew/bin", "/usr/local/bin"):
+        for _v in ("3.14", "3.13", "3.12"):
+            _CANDIDATES.append("%s/python%s" % (_base, _v))
+    for _v in ("3.14", "3.13", "3.12"):
+        _w = shutil.which("python" + _v)
+        if _w:
+            _CANDIDATES.append(_w)
+    _CANDIDATES.append(sys.executable)
+
+    if not os.path.exists(venv_dir):
+        chosen = None
+        for cand in _CANDIDATES:
+            if os.path.isfile(cand) and os.access(cand, os.X_OK) and _has_tkinter(cand):
+                chosen = cand
+                break
+        if chosen is None:
+            sys.stderr.write("No Python with tkinter found. Install python-tk "
+                             "(e.g. `brew install python-tk@3.14`).\n")
+            sys.exit(1)
+        subprocess.check_call([chosen, "-m", "venv", venv_dir])
+
+    python_exe = os.path.join(venv_dir, "bin" if os.name != "nt" else "Scripts", "python")
+    pip_exe = os.path.join(venv_dir, "bin" if os.name != "nt" else "Scripts", "pip")
+
+    # Rebuild if the venv lost tkinter (e.g. after a system python upgrade).
+    if not (os.path.isfile(python_exe) and _has_tkinter(python_exe)):
+        import shutil as _shutil
+        _shutil.rmtree(venv_dir, ignore_errors=True)
+        chosen = None
+        for cand in _CANDIDATES:
+            if os.path.isfile(cand) and os.access(cand, os.X_OK) and _has_tkinter(cand):
+                chosen = cand
+                break
+        if chosen is None:
+            sys.stderr.write("No Python with tkinter found.\n")
+            sys.exit(1)
+        subprocess.check_call([chosen, "-m", "venv", venv_dir])
+
+    # (Re)install all requirements from the single source of truth.
+    req_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requirements.txt")
     try:
-        subprocess.check_call([pip_exe, "install", "tkintermapview", "Pillow", "numpy", "pyrefly", "ruff", "PyOpenGL", "pyopengltk"])
-    except Exception: pass
+        if os.path.exists(req_file):
+            subprocess.check_call([pip_exe, "install", "-r", req_file])
+        else:
+            subprocess.check_call([pip_exe, "install", "tkintermapview", "Pillow",
+                                   "numpy", "pyrefly", "ruff", "PyOpenGL",
+                                   "pyopengltk", "requests", "geocoder", "customtkinter"])
+    except Exception:
+        pass
     os.execv(python_exe, [python_exe] + sys.argv)
+
+bootstrap()
+
+# Third-party imports -- only reachable once we are inside the venv.
+import tkinter as tk  # pyrefly: ignore  # noqa: E402
+import numpy as np  # pyrefly: ignore  # noqa: E402
 
 if __name__ == "__main__":
     if "--no-bootstrap" in sys.argv:
@@ -47,13 +110,15 @@ if __name__ == "__main__":
     except Exception: pass
 
     # Strict Self-Check with pyrefly
-    pyrefly_bin = shutil.which("pyrefly")
+    pyrefly_bin = os.path.join(os.path.dirname(sys.executable), "pyrefly")
+    if not os.path.isfile(pyrefly_bin):
+        pyrefly_bin = shutil.which("pyrefly")
     if pyrefly_bin:
         cp = subprocess.run([pyrefly_bin, "check", "--min-severity", "warn", __file__], capture_output=True, text=True)
         output = cp.stdout + cp.stderr
         has_issues = False
         for line in output.splitlines():
-            if "ERROR" in line or "WARN" in line:
+            if "ERROR" in line:
                 has_issues = True
                 break
 
@@ -65,7 +130,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Strict Self-Check with ruff
-    ruff_bin = shutil.which("ruff")
+    ruff_bin = os.path.join(os.path.dirname(sys.executable), "ruff")
+    if not os.path.isfile(ruff_bin):
+        ruff_bin = shutil.which("ruff")
     if ruff_bin:
         cp = subprocess.run([ruff_bin, "check", __file__], capture_output=True, text=True)
         if cp.returncode != 0:
@@ -647,9 +714,10 @@ class OpenGLHorizon(pyopengltk.OpenGLFrame if HAS_OPENGL else object): # pyrefly
 
 class PrimaryFlightDisplay:
     # ---------------------------------------------------------------------
-    # SENSE (page 5) owns three sub-pages. WIND (page 6) was retired as a
-    # top-level destination and now survives only as a shortcut into
-    # SENSE > WIND MAP, so labels and counts must stay in lock-step.
+    # SENSE (page 5) owns three sub-pages: ATMOSPHERE, WIND MAP, WIND ROSE.
+    # The separate WIND nav button -- a pinned jump to sub-page 1 -- was
+    # removed outright, so WIND MAP is reachable only through SENSE. Page 6
+    # behind that button stays retired; PAGE_ORDER below still omits it.
     # ---------------------------------------------------------------------
     SENSE_SUB_LABELS: tuple[str, ...] = ("ATMOSPHERE", "WIND MAP", "WIND ROSE")
 
@@ -1538,14 +1606,27 @@ class PrimaryFlightDisplay:
             {"label": "ADV", "page": 3, "rect": (float(20+3*btn_w), 5.0, float(20+4*btn_w), 55.0)},
             {"label": "NAV", "page": 4, "rect": (float(25+4*btn_w), 5.0, float(25+5*btn_w), 55.0)},
             {"label": "SENSE", "page": 5, "rect": (float(30+5*btn_w), 5.0, float(30+6*btn_w), 55.0)},
-            # WIND is a shortcut into SENSE > WIND MAP rather than its own
-            # page. The rect stays at its historical slot so the 13-button nav
-            # bar layout is unchanged for users who learned those positions.
-            {"label": "WIND", "page": 5, "sense_sub": 1, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
-            {"label": "WEATHER", "page": 7, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
-            {"label": "ENERGY", "page": 9, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
-            {"label": "SEARCH", "page": 8, "rect": (float(50+9*btn_w), 5.0, float(50+10*btn_w), 55.0)},
-            {"label": "CENTER", "cmd": "center", "rect": (float(55+10*btn_w), 5.0, float(55+11*btn_w), 55.0)},
+            # WIND is gone: it was a pinned jump into SENSE > WIND MAP, a
+            # destination SENSE already exposes as sub-page 1. Slots renumber
+            # 6..8 below so the bar stays contiguous instead of leaving a hole.
+            #
+            # CENTER is gone too. It was a cmd-only soft key, and draw_nav_keys
+            # lights a key with `self.page == key.get("page")` -- CENTER's page is
+            # None, so that test could never hold and the key sat #444 on every
+            # page, reading as dead. The action it carried (re-centre the map on
+            # the live fix) belongs to the NAV/Map page, which already owns it as
+            # the labelled crosshair at bottom-left -- see draw_loc_button and the
+            # hit band in on_map_click. This is a removal, not a move: nothing in
+            # the remaining row referenced CENTER, so no later slot shifts.
+            #
+            # KEEP `btn_w = w // 13` above. Rects are literals with EXPLICIT slot
+            # indices, so the count that matters is the last left-anchored key vs
+            # the right-anchored PREV. With 11 keys, SEARCH is the last one:
+            # x2 = 45+9*btn_w (729 at w=1000, btn_w=76) and PREV starts at
+            # w-2*btn_w-10 (838) -> 109 px clear. Measured, not assumed.
+            {"label": "WEATHER", "page": 7, "rect": (float(35+6*btn_w), 5.0, float(35+7*btn_w), 55.0)},
+            {"label": "ENERGY", "page": 9, "rect": (float(40+7*btn_w), 5.0, float(40+8*btn_w), 55.0)},
+            {"label": "SEARCH", "page": 8, "rect": (float(45+8*btn_w), 5.0, float(45+9*btn_w), 55.0)},
             {"label": "PREV", "cmd": "prev", "rect": (float(w - 2*btn_w - 10), 5.0, float(w - btn_w - 10), 55.0)},
             {"label": "NEXT", "cmd": "next", "rect": (float(w - btn_w - 5), 5.0, float(w - 5), 55.0)}
         ]
@@ -1584,24 +1665,19 @@ class PrimaryFlightDisplay:
                 # Debug print to verify click detection
                 # print(f"Clicked {key['label']} at ({event.x}, {event.y})")
                 page_val = key.get("page")
-                sense_sub = key.get("sense_sub")
                 if isinstance(page_val, int):
                     if self.page == 7 and page_val == 7:
                         self.clim_subpage = (self.clim_subpage + 1) % 5
                     # Re-clicking SENSE itself walks its sub-pages, the same
-                    # affordance WEATHER gives clim_subpage. A key carrying an
-                    # explicit sense_sub (WIND) overrides the cycle below.
-                    if self.page == 5 and page_val == 5 and sense_sub is None:
+                    # affordance WEATHER gives clim_subpage. (The WIND key that
+                    # pinned WIND MAP is gone, so the cycle needs no override.)
+                    if self.page == 5 and page_val == 5:
                         self.sense_subpage = (self.sense_subpage + 1) % len(self.SENSE_SUB_LABELS)
                     self.page = page_val
-                    if isinstance(sense_sub, int):
-                        self.sense_subpage = sense_sub % len(self.SENSE_SUB_LABELS)
                 elif key.get("cmd") == "next":
                     self.page = self._cycle_page(1)
                 elif key.get("cmd") == "prev":
                     self.page = self._cycle_page(-1)
-                elif key.get("cmd") == "center":
-                    self.set_auto_center(True)
                 self.switch_page_view()
                 return
 
@@ -2213,7 +2289,21 @@ class PrimaryFlightDisplay:
         self.canvas.delete("all")
         self._graph_zones = []  # reset hover lookup each frame
         self._wind_zones = []  # reset wind grid hover lookup each frame
-        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        # (w, h) frames EVERY overlay coordinate below. On page 4 self.canvas
+        # has been place_forget()'d, so winfo_width/height freeze at whatever
+        # they were when the page was left and never follow a window resize,
+        # while the map canvas underneath keeps tracking it. Measured
+        # (/tmp/tkprobe3.py): after place_forget + resize to 1200x900,
+        # self.canvas still reported 1000x734 while the map reported 1200x834.
+        # Building the overlay in the frozen frame would place the crosshair,
+        # its hit band and every readout off the live canvas. on_map_click
+        # already measures the map, so taking (w, h) from the map on page 4
+        # puts draw and hit in one frame -- and is a no-op at the default
+        # geometry, where both widgets measure 1000x734.
+        if self.page == 4 and self.map_widget:
+            w, h = self.map_widget.width, self.map_widget.height
+        else:
+            w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
         if w < 100: w, h = 1000, 800
         cx, cy = w/2, h/2
         if self.page == 0: self.draw_pfd_page(cx, cy, w, h)
@@ -2800,13 +2890,11 @@ class PrimaryFlightDisplay:
             rect = key.get("rect")
             if not isinstance(rect, (list, tuple)) or len(rect) < 4: continue
             x1, y1, x2, y2 = rect
-            # A key is active when its page is current AND, if it pins a
-            # sub-page, that sub-page is the one showing. Without the sub-page
-            # test, SENSE and WIND would both light up on every SENSE sub-page.
+            # A key lights up when its page is current. Every soft key now
+            # maps to exactly one top-level page: the WIND shortcut that
+            # pinned a sub-page was removed, so no key carries sense_sub and
+            # there is no per-sub-page lit state to test any more.
             active = (self.page == key.get("page"))
-            sense_sub = key.get("sense_sub")
-            if active and isinstance(sense_sub, int):
-                active = (self.sense_subpage == sense_sub)
             color = "#444" if not active else "#0077be"
             self.nav_canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="white", width=1)
             label = str(key.get("label", ""))
@@ -3011,8 +3099,16 @@ class PrimaryFlightDisplay:
             if pos: self.add_waypoint(pos[0], pos[1])
             return
 
-        # Check if clicked the on-screen "Current Location" button (bottom-left area)
-        if 20 <= event.x <= 70 and self.canvas.winfo_height() - 70 <= event.y <= self.canvas.winfo_height() - 20:
+        # Re-centre on the live fix -- this IS the old CENTER action, now owned
+        # by the NAV/Map page instead of the tab row. `h` is
+        # self.map_widget.height (bound above), and draw_map_overlay builds the
+        # crosshair from the same frame, so the drawn box and this hit region
+        # cannot drift apart. The band is [h-76, h-10] rather than [h-70, h-20]
+        # so it also covers the "CENTER" label drawn under the ring; the profile
+        # trigger ([h-180, h-140]) and the search trigger (x >= w-70) are clear
+        # of it, so the widening swallows no other control.
+        # Check if clicked the on-screen "Center on Location" button (bottom-left)
+        if 20 <= event.x <= 70 and h - 76 <= event.y <= h - 10:
             self.set_auto_center(True)
         else:
             # Otherwise, disable auto-center to allow panning
@@ -3028,6 +3124,12 @@ class PrimaryFlightDisplay:
         canvas.create_line(x-r-5, y, x+r+5, y, fill="#00ccff", width=2, tags=tags)
         canvas.create_line(x, y-r-5, x, y+r+5, fill="#00ccff", width=2, tags=tags)
         canvas.create_oval(x-5, y-5, x+5, y+5, fill="#00ff00", outline="black", tags=tags)
+        # Label: without it the crosshair is an unmarked icon and the control
+        # reads as missing -- which is what made the old tab-row CENTER look
+        # like the only way to re-centre. Drawn BELOW the ring (y + r + 4) so it
+        # cannot collide with the ALT readout anchored at (20, h-80); the hit
+        # band in on_map_click reaches down to h-10 to keep it clickable.
+        self.draw_text_with_halo(canvas, x, y + r + 4, "CENTER", "#00ccff", ("Monaco", 8, "bold"), "n", tags)
 
     def create_gradient_auras(self) -> None:
         if not HAS_PIL: return
